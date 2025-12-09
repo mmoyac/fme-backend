@@ -78,10 +78,11 @@ async def login_for_access_token(
     return {"access_token": access_token, "token_type": "bearer"}
 
 @router.post("/setup/create_admin", response_model=UserSchema, status_code=status.HTTP_201_CREATED)
-def create_initial_admin(user: UserCreate, db: Session = Depends(get_db)):
+def create_initial_admin(db: Session = Depends(get_db)):
     """
     Endpoint temporal para crear el primer usuario admin.
-    Debería deshabilitarse o protegerse en producción.
+    Credenciales por defecto: admin@fme.cl / admin
+    Solo funciona si NO existen usuarios en la base de datos.
     """
     # Verificar si ya existen usuarios
     if db.query(User).count() > 0:
@@ -96,11 +97,11 @@ def create_initial_admin(user: UserCreate, db: Session = Depends(get_db)):
         db.refresh(admin_role)
     
     # Crear Usuario
-    hashed_password = get_password_hash(user.password)
+    hashed_password = get_password_hash("admin")
     db_user = User(
-        email=user.email,
+        email="admin@fme.cl",
         hashed_password=hashed_password,
-        nombre_completo=user.nombre_completo,
+        nombre_completo="Admin Inicial",
         role_id=admin_role.id
     )
     db.add(db_user)
