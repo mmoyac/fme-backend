@@ -1,0 +1,141 @@
+# =====================================
+# Docker Compose - Producción con Nginx + SSL
+# Para VPS con red general-net
+# =====================================
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:14
+    container_name: masas_estacion_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - general-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API
+  backend:
+    image: mmoyac/masas-estacion-backend:latest
+    container_name: masas_estacion_backend
+    restart: always
+    ports:
+      - "8001:8000"
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    volumes:
+      - backend_static:/app/static
+    networks:
+      - general-net
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/docs')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Frontend Landing
+  landing:
+    image: mmoyac/masas-estacion-frontend:latest
+    container_name: masas_estacion_frontend
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: https://api.masasestacion.cl
+      NODE_ENV: production
+    networks:
+      - general-net
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Backoffice Admin Panel
+  backoffice:
+    image: mmoyac/masas-estacion-backoffice:latest
+    container_name: masas_estacion_backoffice
+    restart: always
+    ports:
+      - "3001:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: https://api.masasestacion.cl
+      NODE_ENV: production
+    networks:
+      - general-net
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ============================================
+  # Nginx - Reverse Proxy con SSL
+  # ============================================
+  nginx:
+    image: nginx:alpine
+    container_name: masas_estacion_nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d/prod.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/certbot/conf:/etc/letsencrypt:ro
+      - ./nginx/certbot/www:/var/www/certbot:ro
+    networks:
+      - general-net
+    depends_on:
+      - backend
+      - landing
+      - backoffice
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ============================================
+  # Certbot - Renovación automática SSL
+  # ============================================
+  certbot:
+    image: certbot/certbot
+    container_name: masas_estacion_certbot
+    restart: unless-stopped
+    volumes:
+      - ./nginx/certbot/conf:/etc/letsencrypt
+      - ./nginx/certbot/www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+
+# Volúmenes nombrados para persistencia
+volumes:
+  postgres_data:
+    name: masas_estacion_postgres_data
+  backend_static:
+    name: masas_estacion_backend_static
+
+# Red externa (debe existir en el VPS)
+networks:
+  general-net:
+    external: true

@@ -1,0 +1,123 @@
+// Database Markup Language (DBML) para fme-backend E-Commerce MVP Final - EN ESPAÑOL
+
+Project fme_ecommerce_mvp_es {
+  database_type: 'PostgreSQL'
+  Note: 'Modelo de datos expandido en español para soportar Inventario, Precios, Venta y Clientes.'
+}
+
+// --------------------------------------------------
+// 1. Catálogos Base
+// --------------------------------------------------
+
+Table productos {
+  id int [pk, increment]
+  nombre varchar [not null]
+  descripcion varchar
+  sku varchar [unique, not null, note: 'SKU - Código de unidad de stock global']
+  
+  indexes {
+    (nombre)
+  }
+}
+
+Table locales {
+  id int [pk, increment]
+  nombre varchar [unique, not null]
+  direccion varchar
+  
+  indexes {
+    (nombre)
+  }
+}
+
+Table clientes {
+  id int [pk, increment]
+  nombre varchar [not null]
+  apellido varchar
+  email varchar [unique]
+  telefono varchar
+}
+
+
+// --------------------------------------------------
+// 2. Tablas de Inventario y Precios (Base Operacional)
+// --------------------------------------------------
+
+// Almacena la cantidad de stock por Producto en cada Local.
+Table inventario {
+  id int [pk, increment]
+  producto_id int [not null]
+  local_id int [not null]
+  cantidad_stock int [not null, default: 0]
+  
+  // Restricción: Un producto solo puede tener una entrada de stock por local.
+  indexes {
+    (producto_id, local_id) [unique]
+  }
+}
+
+// Almacena el precio de venta por Producto en cada Local.
+Table precios {
+  id int [pk, increment]
+  producto_id int [not null]
+  local_id int [not null]
+  monto_precio float [not null]
+  fecha_vigencia timestamp [default: 'now()', note: 'Fecha de vigencia del precio']
+  
+  // Restricción: Un producto solo puede tener un precio activo por local.
+  indexes {
+    (producto_id, local_id) [unique]
+  }
+}
+
+// --------------------------------------------------
+// 3. Tablas de Venta (Transaccionales)
+// --------------------------------------------------
+
+// Encabezado de la Venta/Pedido
+Table pedidos {
+  id int [pk, increment]
+  cliente_id int [not null]
+  local_id int [not null, note: 'Local que generó la venta']
+  fecha_pedido timestamp [not null, default: 'now()']
+  monto_total float [default: 0.00]
+  estado varchar [not null, default: 'PENDIENTE', note: 'PENDIENTE, PAGADO, EN_ENVIO, ENTREGADO, CANCELADO']
+  es_pagado boolean [default: false]
+  
+  indexes {
+    (fecha_pedido)
+  }
+}
+
+// Detalle del Pedido (Qué se compró, a qué precio)
+Table items_pedido {
+  id int [pk, increment]
+  pedido_id int [not null]
+  producto_id int [not null]
+  cantidad int [not null]
+  precio_unitario_venta float [not null, note: 'Precio congelado al momento de la venta']
+  
+  // Restricción: Un producto no puede repetirse en el mismo pedido.
+  indexes {
+    (pedido_id, producto_id) [unique]
+  }
+}
+
+// --------------------------------------------------
+// 4. Definición de Relaciones (Foreign Keys)
+// --------------------------------------------------
+
+// Relaciones de Inventario y Precios
+Ref: inventario.producto_id - productos.id [delete: cascade]
+Ref: inventario.local_id - locales.id [delete: cascade]
+
+Ref: precios.producto_id - productos.id [delete: cascade]
+Ref: precios.local_id - locales.id [delete: cascade]
+
+// Relaciones de Ventas (Pedidos)
+Ref: pedidos.cliente_id - clientes.id [delete: restrict]
+Ref: pedidos.local_id - locales.id [delete: restrict]
+
+// Relaciones de Detalle del Pedido
+Ref: items_pedido.pedido_id - pedidos.id [delete: cascade] 
+Ref: items_pedido.producto_id - productos.id [delete: restrict]

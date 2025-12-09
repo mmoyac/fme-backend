@@ -1,0 +1,122 @@
+name: Build and Push to Docker Hub
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  DOCKER_IMAGE: mmoyac/masas-estacion-backend
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKER_IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.prod  # IMPORTANT: Using prod Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.DOCKER_IMAGE }}:buildcache,mode=max
+
+      - name: Image digest
+        run: echo ${{ steps.meta.outputs.digest }}
+
+  deploy-to-vps:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Copy files to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: "docker-compose.prod.yml" # NOTE: Nginx folder is NOT copied as it is not in this repo
+          target: "/root/docker/masas-estacion/"
+          strip_components: 0
+
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            echo "🚀 Iniciando despliegue de Backend..."
+            
+            # Crear directorios necesarios (Ensure structure exists)
+            mkdir -p /root/docker/masas-estacion
+            mkdir -p /root/docker/masas-estacion/nginx/conf.d
+            mkdir -p /root/docker/masas-estacion/nginx/certbot/conf
+            mkdir -p /root/docker/masas-estacion/nginx/certbot/www
+            cd /root/docker/masas-estacion
+            
+            # Renombrar para uso estándar
+            mv docker-compose.prod.yml docker-compose.yml 2>/dev/null || true
+            
+            # Pull solo de la imagen backend
+            echo "📦 Actualizando imagen backend..."
+            docker-compose pull backend
+            
+            # Reiniciar solo el servicio backend
+            echo "▶️ Reiniciando servicio backend..."
+            docker-compose up -d --force-recreate backend
+            
+            # Esperar arranque
+            echo "⏳ Esperando inicio..."
+            sleep 10
+            
+            # Verificar
+            if docker ps | grep -q masas_estacion_backend; then
+              echo "✅ Contenedor iniciado correctamente"
+              docker ps | grep masas_estacion_backend
+            else
+              echo "❌ Error: El contenedor no está corriendo"
+              docker-compose logs backend
+              exit 1
+            fi
+            
+            # NOTA: Se omite Health Check por curl a localhost:8001
+            # ya que los puertos están comentados en docker-compose.prod.yml por defecto.
+            # Se confía en que Nginx (si corre) servirá el contenido.
+            
+            echo "🧹 Limpiando imágenes antiguas..."
+            docker image prune -f
+            
+            echo "🎉 Despliegue de Backend completado!"
