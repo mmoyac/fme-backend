@@ -90,8 +90,10 @@ jobs:
             # Renombrar para uso estándar
             mv docker-compose.prod.yml docker-compose.yml 2>/dev/null || true
             
-            # Pull solo de la imagen backend
+            # Pull forzado de la imagen backend
             echo "📦 Actualizando imagen backend..."
+            # Intentar borrar imagen vieja para forzar descarga limpia (opcional pero recomendado)
+            docker rmi mmoyac/masas-estacion-backend:latest || true
             docker-compose pull backend
             
             # Reiniciar solo el servicio backend
