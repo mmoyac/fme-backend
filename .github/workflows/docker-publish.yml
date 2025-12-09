@@ -92,13 +92,13 @@ jobs:
             
             # Pull forzado de la imagen backend
             echo "📦 Actualizando imagen backend..."
-            # Intentar borrar imagen vieja para forzar descarga limpia (opcional pero recomendado)
+            # Intentar borrar imagen vieja para forzar descarga limpia
             docker rmi mmoyac/masas-estacion-backend:latest || true
-            docker-compose pull backend
+            docker compose pull backend
             
             # Reiniciar solo el servicio backend
             echo "▶️ Reiniciando servicio backend..."
-            docker-compose up -d --force-recreate backend
+            docker compose up -d --force-recreate backend
             
             # Esperar arranque
             echo "⏳ Esperando inicio..."
@@ -110,7 +110,7 @@ jobs:
               docker ps | grep masas_estacion_backend
             else
               echo "❌ Error: El contenedor no está corriendo"
-              docker-compose logs backend
+              docker compose logs backend
               exit 1
             fi
             
