@@ -9,7 +9,7 @@ from routers.auth import get_current_active_user
 
 # Importar routers
 # Importar routers
-from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, payments
+from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, payments, test_payments
 
 app = FastAPI(
     title="FME Backend API",
@@ -42,6 +42,7 @@ app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"]
 app.include_router(admin_users.router, prefix="/api/admin", tags=["Administración Usuarios"])
 app.include_router(auth.router, prefix="/api/auth", tags=["Autenticación"])
 app.include_router(payments.router, prefix="/api/payments", tags=["Pagos"])
+app.include_router(test_payments.router, prefix="/api/test", tags=["⚠️ TEST ONLY - ELIMINAR EN PRODUCCIÓN"])
 
 @app.get("/")
 async def root():
