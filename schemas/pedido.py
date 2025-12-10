@@ -35,7 +35,7 @@ class PedidoCreateFrontend(BaseModel):
     cliente_telefono: str = Field(..., min_length=9, max_length=20)
     
     # Dirección de entrega
-    direccion_entrega: str = Field(..., min_length=10, max_length=200)
+    direccion_entrega: str = Field(..., min_length=5, max_length=200)
     comuna: Optional[str] = Field(None, max_length=100)
     
     # Notas adicionales
