@@ -18,13 +18,23 @@ app = FastAPI(
 )
 
 # Configuración de CORS
+origins = [
+    "https://masasestacion.cl",
+    "https://www.masasestacion.cl",
+    "https://backoffice.masasestacion.cl",
+    "http://localhost:3000",  # Landing en desarrollo
+    "http://localhost:3001",  # Backoffice en desarrollo
+    "http://localhost:8080",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configurar según necesidades de producción
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # Servir archivos estáticos (imágenes de productos)
 app.mount("/static", StaticFiles(directory="static"), name="static")
