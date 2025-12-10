@@ -1,7 +1,7 @@
 """
 Modelos de la base de datos con SQLAlchemy ORM.
 """
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, UniqueConstraint, Index
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, UniqueConstraint, Index, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
