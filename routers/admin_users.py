@@ -16,6 +16,7 @@ router = APIRouter()
 
 # ... (Dependencies and User CRUD remain the same) ...
 # Dependencia para verificar que el usuario es admin
+def get_current_admin_user(current_user: User = Depends(get_current_active_user)):
     allowed_roles = ["admin", "owner", "administrador"]
     if current_user.role.nombre not in allowed_roles:
         raise HTTPException(
