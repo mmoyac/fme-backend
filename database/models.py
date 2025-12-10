@@ -140,9 +140,15 @@ class Pedido(Base):
     estado = Column(String, nullable=False, default="PENDIENTE")  # PENDIENTE, CONFIRMADO, EN_PREPARACION, ENTREGADO, CANCELADO
     es_pagado = Column(Boolean, default=False)
     inventario_descontado = Column(Boolean, default=False)  # Flag para evitar doble descuento
-    notas = Column(String)  # Notas del cliente
-    notas_admin = Column(String)  # Notas internas del admin
+    notas = Column(Text, nullable=True)
+    notas_admin = Column(Text, nullable=True)
     
+    # Mercado Pago Fields
+    mp_preference_id = Column(String, nullable=True)  # ID de la preferencia de pago
+    mp_payment_id = Column(String, nullable=True)     # ID único del pago en MP
+    mp_status = Column(String, nullable=True)         # Estado del pago (approved, pending, etc)
+    mp_external_reference = Column(String, nullable=True) # Referencia externa (nuestro ID de pedido)
+
     # Relaciones
     cliente = relationship("Cliente", back_populates="pedidos")
     local = relationship("Local", back_populates="pedidos", foreign_keys=[local_id])

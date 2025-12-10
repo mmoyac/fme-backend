@@ -55,6 +55,9 @@ DB_NAME=fme_database
 
 # La URL de conexión utiliza 'db' como host (el nombre del servicio Docker)
 DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+
+# Mercado Pago (Sandbox / Producción)
+MP_ACCESS_TOKEN=TEST-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
 
 ### 2.2. Comandos Docker
@@ -537,7 +540,7 @@ backend:
 - [x] Implementar Roles en todos los Endpoints ✅
 
 **Integración:**
-- [ ] CI/CD con GitHub Actions
+- [x] CI/CD con GitHub Actions ✅ (Despliegue automático a VPS)
 - [ ] Cobertura de código badge
 - [ ] Documentación automática (OpenAPI)
 
@@ -545,15 +548,14 @@ backend:
 
 **Última Actualización:** 2025-12-09
 **Cambios Recientes:**
-- ✅ Sistema de Autenticación con JWT (User, Role) implementado
-- ✅ Hash de contraseñas con Argon2
-- ✅ Migraciones automáticas implementadas (entrypoint.sh)
-- ✅ Despliegue en Docker Hub (mmoyac/masas-estacion-backend:latest)
-- ✅ Configuración de producción con puertos mapeados
-- ✅ Healthcheck configurado y funcional
-- ✅ Campo `codigo` agregado a tabla `locales`
-- ✅ Local "Tienda Online" configurado con codigo='WEB'
+- ✅ Workflow de CI/CD implementado (`docker-publish.yml`) para despliegue automático en VPS.
+- ✅ Autenticación JWT y RBAC 100% funcional.
+- ✅ Endpoint de Setup de Admin simplificado y protegido.
+- ✅ Hash de contraseñas con Argon2.
+- ✅ Despliegue en Docker Hub (mmoyac/masas-estacion-backend:latest).
+- ✅ Configuración de producción optimizada.
 
 **Repositorio:** `https://github.com/mmoyac/fme-backend.git`  
 **Docker Hub:** `https://hub.docker.com/r/mmoyac/masas-estacion-backend`  
-**Estado MVP:** ✅ **Desplegado y operativo en producción (168.231.96.205:8001)**
+**API Producción:** `https://api.masasestacion.cl/docs`  
+**Estado MVP:** ✅ **Desplegado y operativo en producción**
