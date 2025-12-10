@@ -15,15 +15,23 @@ from utils.security import get_password_hash
 router = APIRouter()
 
 # ... (Dependencies and User CRUD remain the same) ...
-# Dependencia para verificar que el usuario es admin
+# Dependencia para verificar permisos administrativos dinámicamente
 def get_current_admin_user(current_user: User = Depends(get_current_active_user)):
-    allowed_roles = ["admin", "owner", "administrador"]
-    if current_user.role.nombre not in allowed_roles:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Se requieren privilegios de administrador"
-        )
-    return current_user
+    # Verificar si el rol del usuario tiene asignados menús administrativos
+    # Esto permite controlar el acceso desde la BD (asignando el menú al rol)
+    
+    # Menús que otorgan acceso a la gestión de usuarios/roles
+    admin_menus = {"Usuarios", "Mantenedores"}
+    user_menus = {m.nombre for m in current_user.role.menus}
+    
+    # Permitir si es 'admin' (root) o tiene alguno de los menús administrativos
+    if current_user.role.nombre == "admin" or not user_menus.isdisjoint(admin_menus):
+        return current_user
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="No tiene permisos para acceder a este recurso"
+    )
 
 # --------------------------------------------------
 # Gestión de Roles y Permisos (Menú)
