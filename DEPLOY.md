@@ -109,6 +109,15 @@ docker exec masas_estacion_backend python -c "import requests; print(requests.ge
 # Resultado esperado: {'status': 'ok'}
 ```
 
+### 5. Migraciones de Base de Datos (¡CRÍTICO!)
+Si el despliegue incluye cambios en el modelo de datos (nuevas tablas o columnas), DEBES ejecutar las migraciones manualmente en el VPS:
+
+```bash
+# Ejecutar migraciones en el contenedor de producción
+docker exec masas_estacion_backend alembic upgrade head
+```
+Si no haces esto, la aplicación fallará al intentar acceder a los nuevos campos.
+
 ## 🔄 Actualizar Aplicación
 
 Para futuras actualizaciones:

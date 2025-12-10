@@ -36,3 +36,18 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     email: Optional[str] = None
+
+class MenuItemBase(BaseModel):
+    nombre: str
+    href: str
+    icon: Optional[str] = None
+    orden: int = 0
+
+class MenuItemCreate(MenuItemBase):
+    pass
+
+class MenuItem(MenuItemBase):
+    id: int
+
+    class Config:
+        from_attributes = True

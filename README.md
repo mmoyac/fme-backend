@@ -158,6 +158,14 @@ docker-compose up --build
 ```
 
 ### Base de Datos
+
+> ⚠️ **IMPORTANTE: Sincronización de Base de Datos**
+> Si modificas los modelos en `models.py` (agregas tablas o columnas), DEBES:
+> 1. Crear una nueva migración: `alembic revision --autogenerate -m "descripcion"`
+> 2. Aplicar la migración localmente: `alembic upgrade head`
+> 3. **Aplicar la migración en PRODUCCIÓN** después del despliegue: `docker exec masas_estacion_backend alembic upgrade head`
+>
+> Si olvidas esto, la aplicación fallará con errores como `UndefinedColumn` o `RelationUndefined`.
 ```bash
 # Acceder a PostgreSQL
 docker exec -it fme-postgres psql -U fme -d fme_database

@@ -1,14 +1,67 @@
 """
 Modelos de la base de datos con SQLAlchemy ORM.
 """
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, UniqueConstraint, Index, Text
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, UniqueConstraint, Index, Text, Table, Numeric
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
 
 
 # --------------------------------------------------
-# 1. Catálogos Base
+# 1. TABLAS MAESTRAS
+# --------------------------------------------------
+
+class CategoriaProducto(Base):
+    """Categorías de productos para clasificación y puntos de fidelidad."""
+    __tablename__ = "categorias_producto"
+
+    id = Column(Integer, primary_key=True, index=True)
+    codigo = Column(String, unique=True, nullable=False, index=True)
+    nombre = Column(String, nullable=False, index=True)
+    descripcion = Column(String)
+    puntos_fidelidad = Column(Integer, default=0)
+    activo = Column(Boolean, default=True)
+
+    # Relaciones
+    productos = relationship("Producto", back_populates="categoria")
+
+
+class TipoProducto(Base):
+    """Tipos de producto: Materia Prima, Producto Elaborado, Insumo, etc."""
+    __tablename__ = "tipos_producto"
+
+    id = Column(Integer, primary_key=True, index=True)
+    codigo = Column(String, unique=True, nullable=False, index=True)
+    nombre = Column(String, nullable=False)
+    descripcion = Column(String)
+    activo = Column(Boolean, default=True)
+
+    # Relaciones
+    productos = relationship("Producto", back_populates="tipo_producto")
+
+
+class UnidadMedida(Base):
+    """Unidades de medida con soporte para conversiones."""
+    __tablename__ = "unidades_medida"
+
+    id = Column(Integer, primary_key=True, index=True)
+    codigo = Column(String, unique=True, nullable=False, index=True)
+    nombre = Column(String, nullable=False)
+    simbolo = Column(String, nullable=False)
+    tipo = Column(String)  # CANTIDAD, PESO, VOLUMEN
+    factor_conversion = Column(Numeric(10, 4))
+    unidad_base_id = Column(Integer, ForeignKey("unidades_medida.id", ondelete="SET NULL"), nullable=True)
+    activo = Column(Boolean, default=True)
+
+    # Relaciones
+    unidad_base = relationship("UnidadMedida", remote_side=[id])
+    productos = relationship("Producto", back_populates="unidad_medida")
+    recetas_rendimiento = relationship("Receta", back_populates="unidad_rendimiento", foreign_keys="Receta.unidad_rendimiento_id")
+    ingredientes = relationship("IngredienteReceta", back_populates="unidad_medida")
+
+
+# --------------------------------------------------
+# 2. Catálogos Base
 # --------------------------------------------------
 
 class Producto(Base):
@@ -17,14 +70,39 @@ class Producto(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     nombre = Column(String, nullable=False, index=True)
-    descripcion = Column(String)
-    sku = Column(String, unique=True, nullable=False)
-    imagen_url = Column(String, nullable=True)  # URL o path de la imagen del producto
+    descripcion = Column(Text)
+    sku = Column(String, unique=True, nullable=False, index=True)
+    imagen_url = Column(String, nullable=True)
+    
+    # Referencias a tablas maestras
+    categoria_id = Column(Integer, ForeignKey("categorias_producto.id", ondelete="RESTRICT"), nullable=False)
+    tipo_producto_id = Column(Integer, ForeignKey("tipos_producto.id", ondelete="RESTRICT"), nullable=False)
+    unidad_medida_id = Column(Integer, ForeignKey("unidades_medida.id", ondelete="RESTRICT"), nullable=False)
+    
+    # Costos y precios
+    precio_compra = Column(Numeric(10, 2), nullable=True)  # Para materias primas
+    costo_fabricacion = Column(Numeric(10, 2), nullable=True)  # Calculado automáticamente
+    
+    # Flags de comportamiento
+    es_vendible = Column(Boolean, default=True)
+    es_vendible_web = Column(Boolean, default=False)
+    es_ingrediente = Column(Boolean, default=False)
+    tiene_receta = Column(Boolean, default=False)
+    
+    activo = Column(Boolean, default=True)
     
     # Relaciones
+    categoria = relationship("CategoriaProducto", back_populates="productos")
+    tipo_producto = relationship("TipoProducto", back_populates="productos")
+    unidad_medida = relationship("UnidadMedida", back_populates="productos")
+    
     inventarios = relationship("Inventario", back_populates="producto", cascade="all, delete-orphan")
     precios = relationship("Precio", back_populates="producto", cascade="all, delete-orphan")
     items_pedido = relationship("ItemPedido", back_populates="producto")
+    
+    # Relaciones de producción
+    recetas = relationship("Receta", back_populates="producto", cascade="all, delete-orphan")
+    usado_en_recetas = relationship("IngredienteReceta", back_populates="producto_ingrediente")
 
 
 class Local(Base):
@@ -35,8 +113,8 @@ class Local(Base):
     codigo = Column(String, unique=True, nullable=False, index=True)
     nombre = Column(String, unique=True, nullable=False, index=True)
     direccion = Column(String)
+    activo = Column(Boolean, default=True)
     
-    # Relaciones
     # Relaciones
     inventarios = relationship("Inventario", back_populates="local", cascade="all, delete-orphan")
     precios = relationship("Precio", back_populates="local", cascade="all, delete-orphan")
@@ -190,6 +268,30 @@ class Role(Base):
 
     # Relaciones
     users = relationship("User", back_populates="role")
+    menus = relationship("MenuItem", secondary="role_menu_permissions", back_populates="roles")
+
+
+# Tabla Intermedia para RBAC de Menús
+role_menu_permissions = Table(
+    "role_menu_permissions",
+    Base.metadata,
+    Column("role_id", Integer, ForeignKey("roles.id", ondelete="CASCADE"), primary_key=True),
+    Column("menu_item_id", Integer, ForeignKey("menu_items.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
+class MenuItem(Base):
+    """Items del menú lateral configurables por rol."""
+    __tablename__ = "menu_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    nombre = Column(String, nullable=False)
+    href = Column(String, nullable=False)
+    icon = Column(String)  # Emoji o identificador de icono
+    orden = Column(Integer, default=0)
+    
+    # Relaciones
+    roles = relationship("Role", secondary=role_menu_permissions, back_populates="menus")
 
 
 class User(Base):
@@ -205,3 +307,61 @@ class User(Base):
 
     # Relaciones
     role = relationship("Role", back_populates="users")
+
+
+# --------------------------------------------------
+# 5. Sistema de Producción y Recetas
+# --------------------------------------------------
+
+class Receta(Base):
+    """Recetas de producción para productos elaborados."""
+    __tablename__ = "recetas"
+
+    id = Column(Integer, primary_key=True, index=True)
+    producto_id = Column(Integer, ForeignKey("productos.id", ondelete="CASCADE"), nullable=False)
+    nombre = Column(String, nullable=False)
+    version = Column(Integer, default=1)
+    
+    # Rendimiento
+    rendimiento = Column(Numeric(10, 3), nullable=False)
+    unidad_rendimiento_id = Column(Integer, ForeignKey("unidades_medida.id", ondelete="RESTRICT"), nullable=False)
+    
+    # Costos calculados automáticamente
+    costo_total_calculado = Column(Numeric(10, 2))
+    costo_unitario_calculado = Column(Numeric(10, 2))
+    
+    # Metadata
+    fecha_creacion = Column(DateTime(timezone=True), server_default=func.now())
+    fecha_actualizacion = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    activa = Column(Boolean, default=True)
+    notas = Column(Text)
+    
+    # Relaciones
+    producto = relationship("Producto", back_populates="recetas")
+    unidad_rendimiento = relationship("UnidadMedida", back_populates="recetas_rendimiento", foreign_keys=[unidad_rendimiento_id])
+    ingredientes = relationship("IngredienteReceta", back_populates="receta", cascade="all, delete-orphan")
+
+
+class IngredienteReceta(Base):
+    """Ingredientes que componen una receta."""
+    __tablename__ = "ingredientes_receta"
+
+    id = Column(Integer, primary_key=True, index=True)
+    receta_id = Column(Integer, ForeignKey("recetas.id", ondelete="CASCADE"), nullable=False)
+    producto_ingrediente_id = Column(Integer, ForeignKey("productos.id", ondelete="RESTRICT"), nullable=False)
+    
+    # Cantidad del ingrediente
+    cantidad = Column(Numeric(10, 3), nullable=False)
+    unidad_medida_id = Column(Integer, ForeignKey("unidades_medida.id", ondelete="RESTRICT"), nullable=False)
+    
+    # Costos
+    costo_unitario_referencia = Column(Numeric(10, 2))
+    costo_total_calculado = Column(Numeric(10, 2))
+    
+    orden = Column(Integer, default=0)
+    notas = Column(String)
+    
+    # Relaciones
+    receta = relationship("Receta", back_populates="ingredientes")
+    producto_ingrediente = relationship("Producto", back_populates="usado_en_recetas")
+    unidad_medida = relationship("UnidadMedida", back_populates="ingredientes")

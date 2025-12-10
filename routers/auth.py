@@ -1,13 +1,13 @@
 from datetime import timedelta
-from typing import Annotated
+from typing import Annotated, List
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm, HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from jose import JWTError, jwt
 
 from database.database import get_db
-from database.models import User, Role
-from schemas.auth import Token, UserCreate, User as UserSchema
+from database.models import User, Role, MenuItem as MenuItemModel
+from schemas.auth import Token, UserCreate, User as UserSchema, MenuItem
 from utils.security import verify_password, create_access_token, get_password_hash, SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
 router = APIRouter()
@@ -112,3 +112,15 @@ def create_initial_admin(db: Session = Depends(get_db)):
 @router.get("/users/me", response_model=UserSchema)
 async def read_users_me(current_user: Annotated[User, Depends(get_current_active_user)]):
     return current_user
+
+@router.get("/menu", response_model=List[MenuItem])
+def get_user_menu(current_user: User = Depends(get_current_active_user)):
+    """
+    Obtiene los items de menú permitidos para el rol del usuario actual.
+    """
+    role = current_user.role
+    if not role:
+        return []
+    
+    # Ordenar por campo 'orden'
+    return sorted(role.menus, key=lambda x: x.orden)

@@ -1,0 +1,397 @@
+// Database Markup Language (DBML) para fme-backend - VERSIÓN 2 CON PRODUCCIÓN
+// Incluye: Sistema de Producción, Recetas, Costos, Categorías y Tablas Maestras
+
+Project fme_ecommerce_produccion {
+  database_type: 'PostgreSQL'
+  Note: '''
+    Modelo de datos expandido con:
+    - Sistema de producción y recetas
+    - Cálculo automático de costos de fabricación
+    - Categorías de productos (para puntos de fidelidad)
+    - Tablas maestras (tipos, unidades de medida)
+    - Productos multiuso (vendibles Y usados como ingredientes)
+  '''
+}
+
+// ==================================================
+// 1. TABLAS MAESTRAS
+// ==================================================
+
+Table categorias_producto {
+  id int [pk, increment]
+  codigo varchar [unique, not null, note: 'Código único de categoría']
+  nombre varchar [not null, note: 'Nombre de la categoría']
+  descripcion varchar
+  puntos_fidelidad int [default: 0, note: 'Puntos que otorga por venta (futuro)']
+  activo boolean [default: true]
+  
+  indexes {
+    (codigo)
+    (nombre)
+  }
+  
+  Note: 'Categorías de productos para clasificación y puntos de fidelidad'
+}
+
+Table tipos_producto {
+  id int [pk, increment]
+  codigo varchar [unique, not null, note: 'Ej: MATERIA_PRIMA, PRODUCTO_ELABORADO']
+  nombre varchar [not null, note: 'Nombre descriptivo del tipo']
+  descripcion varchar
+  activo boolean [default: true]
+  
+  indexes {
+    (codigo)
+  }
+  
+  Note: 'Tipos de producto: Materia Prima, Producto Elaborado, Insumo, etc.'
+}
+
+Table unidades_medida {
+  id int [pk, increment]
+  codigo varchar [unique, not null, note: 'Ej: UNIDAD, KG, LITRO']
+  nombre varchar [not null, note: 'Nombre completo']
+  simbolo varchar [not null, note: 'Símbolo: un, kg, L, ml']
+  tipo varchar [note: 'CANTIDAD, PESO, VOLUMEN']
+  factor_conversion decimal [note: 'Factor para convertir a unidad base']
+  unidad_base_id int [note: 'FK a unidad base para conversiones']
+  activo boolean [default: true]
+  
+  indexes {
+    (codigo)
+  }
+  
+  Note: 'Unidades de medida con soporte para conversiones'
+}
+
+// ==================================================
+// 2. CATÁLOGOS BASE (MODIFICADOS)
+// ==================================================
+
+Table productos {
+  id int [pk, increment]
+  nombre varchar [not null]
+  sku varchar [unique, not null, note: 'SKU - Código único del producto']
+  descripcion text
+  imagen_url varchar
+  
+  // Referencias a tablas maestras
+  categoria_id int [not null, note: 'FK → categorias_producto']
+  tipo_producto_id int [not null, note: 'FK → tipos_producto']
+  unidad_medida_id int [not null, note: 'FK → unidades_medida (cómo se vende)']
+  
+  // Costos y precios
+  precio_compra decimal [note: 'Precio de compra (si es materia prima)']
+  costo_fabricacion decimal [note: 'Costo calculado automáticamente (si tiene receta)']
+  
+  // Flags de comportamiento
+  es_vendible boolean [default: true, note: 'Si se puede vender']
+  es_vendible_web boolean [default: false, note: 'Si se vende en tienda online']
+  es_ingrediente boolean [default: false, note: 'Si se usa en recetas']
+  tiene_receta boolean [default: false, note: 'Si se fabrica con receta']
+  
+  activo boolean [default: true]
+  
+  indexes {
+    (nombre)
+    (sku)
+    (categoria_id)
+    (tipo_producto_id)
+  }
+  
+  Note: '''
+    Producto multiuso:
+    - Puede ser vendible Y usado como ingrediente (ej: queso)
+    - unidad_medida_id define cómo se vende (unidad, kg, litro, etc)
+    - precio_compra para materias primas
+    - costo_fabricacion calculado automáticamente para productos con receta
+  '''
+}
+
+Table locales {
+  id int [pk, increment]
+  codigo varchar [unique, not null, note: 'Código único del local']
+  nombre varchar [unique, not null]
+  direccion varchar
+  activo boolean [default: true]
+  
+  indexes {
+    (codigo)
+    (nombre)
+  }
+  
+  Note: 'Locales físicos y tienda WEB virtual'
+}
+
+Table clientes {
+  id int [pk, increment]
+  nombre varchar [not null]
+  apellido varchar
+  email varchar [unique]
+  telefono varchar
+  direccion varchar
+  comuna varchar
+  
+  indexes {
+    (email)
+  }
+}
+
+// ==================================================
+// 3. INVENTARIO Y PRECIOS
+// ==================================================
+
+Table inventario {
+  id int [pk, increment]
+  producto_id int [not null]
+  local_id int [not null]
+  cantidad_stock int [not null, default: 0]
+  
+  indexes {
+    (producto_id, local_id) [unique]
+  }
+  
+  Note: 'Stock por producto en cada local'
+}
+
+Table precios {
+  id int [pk, increment]
+  producto_id int [not null]
+  local_id int [not null]
+  monto_precio decimal [not null, note: 'Precio en la unidad de medida del producto']
+  fecha_vigencia timestamp [default: 'now()']
+  
+  indexes {
+    (producto_id, local_id) [unique]
+  }
+  
+  Note: '''
+    Precios por local:
+    - Permite precios diferentes por local
+    - El precio se expresa en la unidad_medida del producto
+    - Ej: Si producto es en KG, precio es $/kg
+  '''
+}
+
+// ==================================================
+// 4. SISTEMA DE PRODUCCIÓN Y RECETAS
+// ==================================================
+
+Table recetas {
+  id int [pk, increment]
+  producto_id int [not null, note: 'FK → productos (producto que se fabrica)']
+  nombre varchar [not null, note: 'Nombre descriptivo de la receta']
+  version int [default: 1, note: 'Versión de la receta']
+  
+  // Rendimiento
+  rendimiento decimal [not null, note: 'Cantidad que produce esta receta']
+  unidad_rendimiento_id int [not null, note: 'FK → unidades_medida']
+  
+  // Costos calculados automáticamente
+  costo_total_calculado decimal [note: 'Suma de costos de ingredientes']
+  costo_unitario_calculado decimal [note: 'costo_total / rendimiento']
+  
+  // Metadata
+  fecha_creacion timestamp [default: 'now()']
+  fecha_actualizacion timestamp [default: 'now()']
+  activa boolean [default: true]
+  notas text
+  
+  indexes {
+    (producto_id)
+    (activa)
+  }
+  
+  Note: '''
+    Recetas de producción:
+    - Define cómo fabricar un producto
+    - Calcula automáticamente el costo de fabricación
+    - Soporta versionado para historial
+  '''
+}
+
+Table ingredientes_receta {
+  id int [pk, increment]
+  receta_id int [not null, note: 'FK → recetas']
+  producto_ingrediente_id int [not null, note: 'FK → productos (ingrediente usado)']
+  
+  // Cantidad del ingrediente
+  cantidad decimal [not null, note: 'Cantidad necesaria del ingrediente']
+  unidad_medida_id int [not null, note: 'FK → unidades_medida']
+  
+  // Costos
+  costo_unitario_referencia decimal [note: 'Precio al momento de crear/actualizar']
+  costo_total_calculado decimal [note: 'cantidad × costo_unitario_actual']
+  
+  orden int [default: 0, note: 'Orden de visualización']
+  notas varchar
+  
+  indexes {
+    (receta_id)
+    (producto_ingrediente_id)
+  }
+  
+  Note: '''
+    Ingredientes de cada receta:
+    - producto_ingrediente_id puede ser materia prima O producto elaborado
+    - costo_total_calculado se actualiza automáticamente al cambiar precios
+  '''
+}
+
+// ==================================================
+// 5. MOVIMIENTOS DE INVENTARIO
+// ==================================================
+
+Table movimientos_inventario {
+  id int [pk, increment]
+  producto_id int [not null]
+  local_origen_id int [note: 'NULL = entrada inicial']
+  local_destino_id int [note: 'NULL = salida/ajuste']
+  cantidad int [not null]
+  tipo_movimiento varchar [not null, note: 'TRANSFERENCIA, AJUSTE, PEDIDO, ENTRADA_INICIAL, PRODUCCION']
+  referencia_id int [note: 'ID del pedido/orden de producción si aplica']
+  notas varchar
+  usuario varchar [default: 'admin']
+  fecha_movimiento timestamp [default: 'now()']
+  
+  indexes {
+    (fecha_movimiento)
+    (tipo_movimiento)
+    (producto_id)
+  }
+  
+  Note: 'Historial de todos los movimientos de inventario'
+}
+
+// ==================================================
+// 6. VENTAS Y PEDIDOS
+// ==================================================
+
+Table pedidos {
+  id int [pk, increment]
+  cliente_id int [not null]
+  local_id int [not null, note: 'Local que generó la venta']
+  local_despacho_id int [note: 'Local desde donde se despacha']
+  fecha_pedido timestamp [not null, default: 'now()']
+  monto_total decimal [default: 0.00]
+  estado varchar [not null, default: 'PENDIENTE', note: 'PENDIENTE, CONFIRMADO, EN_PREPARACION, ENTREGADO, CANCELADO']
+  es_pagado boolean [default: false]
+  inventario_descontado boolean [default: false]
+  notas text
+  notas_admin text
+  
+  // Mercado Pago
+  mp_preference_id varchar
+  mp_payment_id varchar
+  mp_status varchar
+  mp_external_reference varchar
+  
+  indexes {
+    (fecha_pedido)
+    (estado)
+    (cliente_id)
+  }
+}
+
+Table items_pedido {
+  id int [pk, increment]
+  pedido_id int [not null]
+  producto_id int [not null]
+  cantidad decimal [not null, note: 'Puede ser decimal para productos por peso']
+  precio_unitario_venta decimal [not null, note: 'Precio congelado al momento de la venta']
+  
+  indexes {
+    (pedido_id, producto_id) [unique]
+  }
+  
+  Note: 'Detalle de items en cada pedido'
+}
+
+// ==================================================
+// 7. AUTENTICACIÓN Y USUARIOS (RBAC)
+// ==================================================
+
+Table roles {
+  id int [pk, increment]
+  nombre varchar [unique, not null]
+  descripcion varchar
+  
+  indexes {
+    (nombre)
+  }
+}
+
+Table menu_items {
+  id int [pk, increment]
+  nombre varchar [not null]
+  href varchar [not null]
+  icon varchar
+  orden int [default: 0]
+}
+
+Table role_menu_permissions {
+  role_id int [pk]
+  menu_item_id int [pk]
+  
+  Note: 'Tabla intermedia para RBAC de menús'
+}
+
+Table users {
+  id int [pk, increment]
+  email varchar [unique, not null]
+  hashed_password varchar [not null]
+  nombre_completo varchar
+  is_active boolean [default: true]
+  role_id int [not null]
+  
+  indexes {
+    (email)
+  }
+}
+
+// ==================================================
+// 8. RELACIONES (FOREIGN KEYS) - CORREGIDAS
+// ==================================================
+
+// Productos → Tablas Maestras
+Ref: productos.categoria_id > categorias_producto.id [delete: restrict]
+Ref: productos.tipo_producto_id > tipos_producto.id [delete: restrict]
+Ref: productos.unidad_medida_id > unidades_medida.id [delete: restrict]
+
+// Unidades de Medida (auto-referencia para conversiones)
+Ref: unidades_medida.unidad_base_id > unidades_medida.id [delete: set null]
+
+// Inventario y Precios
+Ref: inventario.producto_id > productos.id [delete: cascade]
+Ref: inventario.local_id > locales.id [delete: cascade]
+Ref: precios.producto_id > productos.id [delete: cascade]
+Ref: precios.local_id > locales.id [delete: cascade]
+
+// Recetas
+Ref: recetas.producto_id > productos.id [delete: cascade]
+Ref: recetas.unidad_rendimiento_id > unidades_medida.id [delete: restrict]
+
+// Ingredientes de Receta
+Ref: ingredientes_receta.receta_id > recetas.id [delete: cascade]
+Ref: ingredientes_receta.producto_ingrediente_id > productos.id [delete: restrict]
+Ref: ingredientes_receta.unidad_medida_id > unidades_medida.id [delete: restrict]
+
+// Movimientos de Inventario
+Ref: movimientos_inventario.producto_id > productos.id [delete: restrict]
+Ref: movimientos_inventario.local_origen_id > locales.id [delete: restrict]
+Ref: movimientos_inventario.local_destino_id > locales.id [delete: restrict]
+
+// Pedidos
+Ref: pedidos.cliente_id > clientes.id [delete: restrict]
+Ref: pedidos.local_id > locales.id [delete: restrict]
+Ref: pedidos.local_despacho_id > locales.id [delete: restrict]
+
+// Items de Pedido
+Ref: items_pedido.pedido_id > pedidos.id [delete: cascade]
+Ref: items_pedido.producto_id > productos.id [delete: restrict]
+
+// Autenticación (Relación Muchos a Muchos CORREGIDA)
+Ref: users.role_id > roles.id [delete: restrict]
+// **Corrección:** Ahora las referencias van desde la tabla intermedia hacia las tablas principales
+Ref: role_menu_permissions.role_id > roles.id [delete: cascade]
+Ref: role_menu_permissions.menu_item_id > menu_items.id [delete: cascade]

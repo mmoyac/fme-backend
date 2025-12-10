@@ -37,6 +37,72 @@ El código fuente del backend (`fme-backend`) utiliza una arquitectura modular. 
 * **Gestión de Dependencias:** Se usa **`pip`** y el entorno virtual (`.venv`). El archivo **`requirements.txt`** es la única fuente de verdad para dependencias.
 * **Seguridad (CRÍTICO):** Todo nuevo endpoint de gestión (Backoffice) DEBE estar protegido con `Depends(get_current_active_user)` o, si es un router completo, agregarlo como dependencia global en `main.py`. Solo endpoints públicos explicítos (e.g. Landing Page) pueden quedar abiertos.
 
+### 1.4. 🔴 ENTORNO VIRTUAL (OBLIGATORIO)
+
+**⚠️ REGLA CRÍTICA:** Este proyecto **SIEMPRE** debe usar el entorno virtual de Python ubicado en `venv/`.
+
+**NUNCA uses comandos Python globales** como `python`, `pip`, o `uvicorn` directamente. Esto causará errores de dependencias faltantes.
+
+#### ✅ Comandos CORRECTOS (Usar SIEMPRE):
+
+```bash
+# Ejecutar el servidor de desarrollo
+.\venv\Scripts\uvicorn.exe main:app --reload
+
+# Ejecutar scripts Python
+.\venv\Scripts\python.exe scripts/seed_api.py
+.\venv\Scripts\python.exe scripts/seed_menu_rbac.py
+
+# Instalar nuevas dependencias
+.\venv\Scripts\python.exe -m pip install nombre-paquete
+
+# Actualizar requirements.txt después de instalar
+.\venv\Scripts\python.exe -m pip freeze > requirements.txt
+
+# Ejecutar tests
+.\venv\Scripts\pytest.exe tests/ -v
+
+# Ejecutar migraciones de Alembic
+.\venv\Scripts\alembic.exe upgrade head
+.\venv\Scripts\alembic.exe revision --autogenerate -m "descripción"
+```
+
+#### ❌ Comandos INCORRECTOS (NO usar):
+
+```bash
+# ❌ NO usar Python global
+python scripts/seed_api.py
+uvicorn main:app --reload
+pip install mercadopago
+pytest tests/
+
+# Estos comandos usarían el Python global y fallarían por dependencias faltantes
+```
+
+#### Crear el entorno virtual (solo primera vez):
+
+```bash
+# Crear entorno virtual
+python -m venv venv
+
+# Instalar todas las dependencias
+.\venv\Scripts\python.exe -m pip install --upgrade pip
+.\venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+#### Activar entorno (opcional, para trabajar en terminal):
+
+```bash
+# Windows PowerShell
+.\venv\Scripts\activate
+
+# Después de activar, puedes usar comandos sin el prefijo:
+python scripts/seed_api.py
+uvicorn main:app --reload
+```
+
+**Nota:** Aunque activar el entorno es opcional, se recomienda usar siempre las rutas completas (`.\venv\Scripts\python.exe`) para evitar confusiones y garantizar que se use el entorno correcto.
+
 ---
 
 ## 2. 🐳 Configuración del Entorno de Desarrollo
