@@ -77,4 +77,19 @@ class PaymentService:
             
         return payment_info["response"]
 
+    def process_payment(self, payment_data: dict):
+        """
+        Procesa un pago con los datos recibidos del Frontend (Brick).
+        """
+        # Asegurar un identificador único si no viene
+        # payment_data debería contener 'token', 'issuer_id', 'payment_method_id', etc.
+        
+        # Realizar el pago
+        request_options = mercadopago.config.RequestOptions()
+        # Se puede añadir custom headers si es necesario
+
+        payment_response = self.sdk.payment().create(payment_data, request_options)
+        
+        return payment_response["response"]
+
 payment_service = PaymentService()

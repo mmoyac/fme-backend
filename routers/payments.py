@@ -39,6 +39,35 @@ async def create_payment_preference(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/process_payment")
+async def process_payment(request: Request, db: Session = Depends(get_db)):
+    """
+    Procesa el pago enviado por el Payment Brick.
+    """
+    try:
+        body = await request.json()
+        
+        # Opcional: Validar que el monto coincida con el pedido si se envía 'external_reference'
+        # Pero MP ya valida algunas cosas.
+        
+        payment_result = payment_service.process_payment(body)
+        
+        # Si el pago es aprobado, actualizamos el pedido inmediatamente
+        if payment_result.get("status") == "approved":
+            external_ref = payment_result.get("external_reference")
+            if external_ref:
+                pedido = db.query(Pedido).filter(Pedido.id == int(external_ref)).first()
+                if pedido and not pedido.es_pagado:
+                    pedido.es_pagado = True
+                    pedido.estado = "CONFIRMADO"
+                    pedido.mp_payment_id = str(payment_result.get("id"))
+                    pedido.mp_status = "approved"
+                    db.commit()
+        
+        return payment_result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/webhook")
 async def mercado_pago_webhook(request: Request, db: Session = Depends(get_db)):
     """
