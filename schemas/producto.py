@@ -22,6 +22,8 @@ class ProductoBase(BaseModel):
     es_ingrediente: bool = False
     tiene_receta: bool = False
     activo: bool = True
+    stock_minimo: Optional[int] = 0
+    stock_critico: Optional[int] = 0
 
 
 class ProductoCreate(ProductoBase):
@@ -45,11 +47,14 @@ class ProductoUpdate(BaseModel):
     es_ingrediente: Optional[bool] = None
     tiene_receta: Optional[bool] = None
     activo: Optional[bool] = None
+    stock_minimo: Optional[int] = None
+    stock_critico: Optional[int] = None
 
 
 class ProductoResponse(ProductoBase):
     """Schema de respuesta de Producto."""
     id: int
+    stock_actual: int = 0  # Campo calculado para visualización
 
     class Config:
         from_attributes = True

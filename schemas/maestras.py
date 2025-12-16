@@ -38,6 +38,33 @@ class CategoriaProducto(CategoriaProductoBase):
 
 
 # ============================================
+# TIPOS DE DOCUMENTO
+# ============================================
+
+class TipoDocumentoBase(BaseModel):
+    codigo: str = Field(..., description="Código único del tipo de documento")
+    nombre: str = Field(..., description="Nombre del tipo de documento")
+    activo: bool = True
+
+
+class TipoDocumentoCreate(TipoDocumentoBase):
+    pass
+
+
+class TipoDocumentoUpdate(BaseModel):
+    codigo: Optional[str] = None
+    nombre: Optional[str] = None
+    activo: Optional[bool] = None
+
+
+class TipoDocumento(TipoDocumentoBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================
 # TIPOS DE PRODUCTO
 # ============================================
 

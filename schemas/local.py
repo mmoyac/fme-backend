@@ -10,6 +10,7 @@ class LocalBase(BaseModel):
     nombre: str = Field(..., min_length=1, max_length=255)
     codigo: Optional[str] = Field(None, max_length=50)
     direccion: Optional[str] = None
+    activo: bool = True
 
 
 class LocalCreate(LocalBase):
@@ -22,6 +23,7 @@ class LocalUpdate(BaseModel):
     nombre: Optional[str] = Field(None, min_length=1, max_length=255)
     codigo: Optional[str] = Field(None, max_length=50)
     direccion: Optional[str] = None
+    activo: Optional[bool] = None
 
 
 class LocalResponse(LocalBase):

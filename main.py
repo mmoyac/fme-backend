@@ -9,7 +9,7 @@ from routers.auth import get_current_active_user
 
 # Importar routers
 # Importar routers
-from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, payments, test_payments, maestras, recetas
+from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, payments, test_payments, maestras, recetas, produccion, compras
 
 app = FastAPI(
     title="FME Backend API",
@@ -36,17 +36,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 # Servir archivos estáticos (imágenes de productos)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Registrar routers
-# Registrar routers (Secured globally where applicable)
 app.include_router(inventario.router, prefix="/api/inventario", tags=["Inventario"], dependencies=[Depends(get_current_active_user)])
-app.include_router(productos.router, prefix="/api/productos", tags=["Productos"]) # Mixed content, auth handled inside
+app.include_router(productos.router, prefix="/api/productos", tags=["Productos"])
 app.include_router(locales.router, prefix="/api/locales", tags=["Locales"], dependencies=[Depends(get_current_active_user)])
 app.include_router(precios.router, prefix="/api/precios", tags=["Precios"], dependencies=[Depends(get_current_active_user)])
-app.include_router(pedidos.router, prefix="/api/pedidos", tags=["Pedidos"]) # Mixed content, auth handled inside
+app.include_router(pedidos.router, prefix="/api/pedidos", tags=["Pedidos"])
 app.include_router(movimientos_inventario.router, prefix="/api/movimientos", tags=["Movimientos"], dependencies=[Depends(get_current_active_user)])
 app.include_router(clientes.router, prefix="/api/clientes", tags=["Clientes"], dependencies=[Depends(get_current_active_user)])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"], dependencies=[Depends(get_current_active_user)])
@@ -56,6 +54,8 @@ app.include_router(payments.router, prefix="/api/payments", tags=["Pagos"])
 app.include_router(test_payments.router, prefix="/api/test", tags=["⚠️ TEST ONLY - ELIMINAR EN PRODUCCIÓN"])
 app.include_router(maestras.router, prefix="/api/maestras", tags=["Tablas Maestras"], dependencies=[Depends(get_current_active_user)])
 app.include_router(recetas.router, prefix="/api/recetas", tags=["Recetas"], dependencies=[Depends(get_current_active_user)])
+app.include_router(produccion.router, prefix="/api", tags=["Producción"])
+app.include_router(compras.router, prefix="/api", tags=["Compras"], dependencies=[Depends(get_current_active_user)])
 
 @app.get("/")
 async def root():

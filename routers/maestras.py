@@ -8,11 +8,13 @@ from sqlalchemy.orm import Session
 from database.database import get_db
 from database.models import CategoriaProducto as CategoriaProductoModel
 from database.models import TipoProducto as TipoProductoModel
+from database.models import TipoDocumento as TipoDocumentoModel
 from database.models import UnidadMedida as UnidadMedidaModel
 from database.models import User
 from schemas.maestras import (
     CategoriaProducto, CategoriaProductoCreate, CategoriaProductoUpdate,
     TipoProducto, TipoProductoCreate, TipoProductoUpdate,
+    TipoDocumento, TipoDocumentoCreate, TipoDocumentoUpdate,
     UnidadMedida, UnidadMedidaCreate, UnidadMedidaUpdate, UnidadMedidaConBase
 )
 from routers.auth import get_current_active_user
@@ -229,6 +231,108 @@ def eliminar_tipo(
         raise HTTPException(
             status_code=400,
             detail=f"No se puede eliminar el tipo porque tiene {len(db_tipo.productos)} productos asociados"
+        )
+    
+    db.delete(db_tipo)
+    db.commit()
+    return None
+
+# ============================================
+# TIPOS DE DOCUMENTO
+# ============================================
+
+@router.get("/tipos-documento", response_model=List[TipoDocumento])
+def listar_tipos_documento(
+    skip: int = 0,
+    limit: int = 100,
+    activo: bool = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Listar tipos de documento tributario."""
+    query = db.query(TipoDocumentoModel)
+    
+    if activo is not None:
+        query = query.filter(TipoDocumentoModel.activo == activo)
+    
+    return query.offset(skip).limit(limit).all()
+
+
+@router.get("/tipos-documento/{tipo_id}", response_model=TipoDocumento)
+def obtener_tipo_documento(
+    tipo_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Obtener un tipo de documento por ID."""
+    tipo = db.query(TipoDocumentoModel).filter(TipoDocumentoModel.id == tipo_id).first()
+    if not tipo:
+        raise HTTPException(status_code=404, detail="Tipo de documento no encontrado")
+    return tipo
+
+
+@router.post("/tipos-documento", response_model=TipoDocumento, status_code=status.HTTP_201_CREATED)
+def crear_tipo_documento(
+    tipo: TipoDocumentoCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Crear un nuevo tipo de documento."""
+    # Verificar código único
+    existing = db.query(TipoDocumentoModel).filter(TipoDocumentoModel.codigo == tipo.codigo).first()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"El código '{tipo.codigo}' ya existe")
+    
+    db_tipo = TipoDocumentoModel(**tipo.model_dump())
+    db.add(db_tipo)
+    db.commit()
+    db.refresh(db_tipo)
+    return db_tipo
+
+
+@router.put("/tipos-documento/{tipo_id}", response_model=TipoDocumento)
+def actualizar_tipo_documento(
+    tipo_id: int,
+    tipo: TipoDocumentoUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Actualizar un tipo de documento existente."""
+    db_tipo = db.query(TipoDocumentoModel).filter(TipoDocumentoModel.id == tipo_id).first()
+    if not db_tipo:
+        raise HTTPException(status_code=404, detail="Tipo de documento no encontrado")
+    
+    # Verificar código único si se está actualizando
+    if tipo.codigo and tipo.codigo != db_tipo.codigo:
+        existing = db.query(TipoDocumentoModel).filter(TipoDocumentoModel.codigo == tipo.codigo).first()
+        if existing:
+            raise HTTPException(status_code=400, detail=f"El código '{tipo.codigo}' ya existe")
+    
+    update_data = tipo.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(db_tipo, field, value)
+    
+    db.commit()
+    db.refresh(db_tipo)
+    return db_tipo
+
+
+@router.delete("/tipos-documento/{tipo_id}", status_code=status.HTTP_204_NO_CONTENT)
+def eliminar_tipo_documento(
+    tipo_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Eliminar un tipo de documento (solo si no tiene compras asociadas)."""
+    db_tipo = db.query(TipoDocumentoModel).filter(TipoDocumentoModel.id == tipo_id).first()
+    if not db_tipo:
+        raise HTTPException(status_code=404, detail="Tipo de documento no encontrado")
+    
+    # Verificar si tiene compras asociadas
+    if db_tipo.compras:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se puede eliminar el tipo porque tiene {len(db_tipo.compras)} compras asociadas"
         )
     
     db.delete(db_tipo)

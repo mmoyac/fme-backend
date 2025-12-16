@@ -40,6 +40,20 @@ class TipoProducto(Base):
     productos = relationship("Producto", back_populates="tipo_producto")
 
 
+
+class TipoDocumento(Base):
+    """Tipos de documento tributario (Factura, Boleta, Guía, etc)."""
+    __tablename__ = "tipos_documento_tributario"
+
+    id = Column(Integer, primary_key=True, index=True)
+    codigo = Column(String, unique=True, nullable=False, index=True)
+    nombre = Column(String, nullable=False)
+    activo = Column(Boolean, default=True)
+
+    # Relaciones
+    compras = relationship("Compra", back_populates="tipo_documento_rel")
+
+
 class UnidadMedida(Base):
     """Unidades de medida con soporte para conversiones."""
     __tablename__ = "unidades_medida"
@@ -83,6 +97,10 @@ class Producto(Base):
     precio_compra = Column(Numeric(10, 2), nullable=True)  # Para materias primas
     costo_fabricacion = Column(Numeric(10, 2), nullable=True)  # Calculado automáticamente
     
+    # Stock
+    stock_minimo = Column(Integer, default=0)
+    stock_critico = Column(Integer, default=0)
+    
     # Flags de comportamiento
     es_vendible = Column(Boolean, default=True)
     es_vendible_web = Column(Boolean, default=False)
@@ -103,6 +121,9 @@ class Producto(Base):
     # Relaciones de producción
     recetas = relationship("Receta", back_populates="producto", cascade="all, delete-orphan")
     usado_en_recetas = relationship("IngredienteReceta", back_populates="producto_ingrediente")
+    
+    # Relaciones de compras
+    detalles_compra = relationship("DetalleCompra", back_populates="producto")
 
 
 class Local(Base):
@@ -119,6 +140,7 @@ class Local(Base):
     inventarios = relationship("Inventario", back_populates="local", cascade="all, delete-orphan")
     precios = relationship("Precio", back_populates="local", cascade="all, delete-orphan")
     pedidos = relationship("Pedido", back_populates="local", foreign_keys="Pedido.local_id")
+    compras = relationship("Compra", back_populates="local")
 
 
 class Cliente(Base):
@@ -365,3 +387,105 @@ class IngredienteReceta(Base):
     receta = relationship("Receta", back_populates="ingredientes")
     producto_ingrediente = relationship("Producto", back_populates="usado_en_recetas")
     unidad_medida = relationship("UnidadMedida", back_populates="ingredientes")
+
+
+# --------------------------------------------------
+# 6. Ordenes de Producción
+# --------------------------------------------------
+
+class OrdenProduccion(Base):
+    """Orden de producción de productos elaborados."""
+    __tablename__ = "ordenes_produccion"
+
+    id = Column(Integer, primary_key=True, index=True)
+    local_id = Column(Integer, ForeignKey("locales.id", ondelete="RESTRICT"), nullable=False)
+    fecha_programada = Column(DateTime(timezone=True), nullable=False)
+    fecha_creacion = Column(DateTime(timezone=True), server_default=func.now())
+    fecha_finalizacion = Column(DateTime(timezone=True), nullable=True)
+    estado = Column(String, default="PLANIFICADA") # PLANIFICADA, FINALIZADA, CANCELADA
+    notas = Column(Text)
+    
+    # Relaciones
+    local = relationship("Local")
+    detalles = relationship("DetalleOrdenProduccion", back_populates="orden", cascade="all, delete-orphan")
+
+
+class DetalleOrdenProduccion(Base):
+    """Detalle de productos a producir."""
+    __tablename__ = "detalles_orden_produccion"
+
+    id = Column(Integer, primary_key=True, index=True)
+    orden_id = Column(Integer, ForeignKey("ordenes_produccion.id", ondelete="CASCADE"), nullable=False)
+    producto_id = Column(Integer, ForeignKey("productos.id", ondelete="RESTRICT"), nullable=False)
+    unidad_medida_id = Column(Integer, ForeignKey("unidades_medida.id", ondelete="RESTRICT"), nullable=False)
+    
+    cantidad_programada = Column(Numeric(10, 3), nullable=False)
+    cantidad_producida = Column(Numeric(10, 3), nullable=True) # Se llena al finalizar
+    
+    # Relaciones
+    orden = relationship("OrdenProduccion", back_populates="detalles")
+    producto = relationship("Producto")
+    unidad_medida = relationship("UnidadMedida")
+
+    @property
+    def producto_nombre(self):
+        return self.producto.nombre if self.producto else None
+
+# --------------------------------------------------
+# 7. Compras y Proveedores (Nuevo)
+# --------------------------------------------------
+
+class Proveedor(Base):
+    """Proveedores para compras de insumos."""
+    __tablename__ = "proveedores"
+
+    id = Column(Integer, primary_key=True, index=True)
+    nombre = Column(String, nullable=False, index=True)
+    rut = Column(String, unique=True, index=True)
+    contacto = Column(String)
+    email = Column(String)
+    telefono = Column(String)
+    direccion = Column(String)
+    activo = Column(Boolean, default=True)
+
+    # Relaciones
+    compras = relationship("Compra", back_populates="proveedor")
+
+
+class Compra(Base):
+    """Cabecera de compras de mercadería."""
+    __tablename__ = "compras"
+
+    id = Column(Integer, primary_key=True, index=True)
+    proveedor_id = Column(Integer, ForeignKey("proveedores.id", ondelete="RESTRICT"), nullable=False)
+    local_id = Column(Integer, ForeignKey("locales.id", ondelete="RESTRICT"), nullable=False)
+    
+    # Cambiado de String a FK
+    tipo_documento_id = Column(Integer, ForeignKey("tipos_documento_tributario.id", ondelete="RESTRICT"), nullable=False)
+    
+    fecha_compra = Column(DateTime(timezone=True), server_default=func.now())
+    numero_documento = Column(String)  # Fac/Bol/Guia
+    monto_total = Column(Numeric(10, 2), default=0)
+    notas = Column(Text)
+    estado = Column(String, default="RECIBIDA") # RECIBIDA, ANULADA
+    
+    # Relaciones
+    proveedor = relationship("Proveedor", back_populates="compras")
+    local = relationship("Local", back_populates="compras")
+    tipo_documento_rel = relationship("TipoDocumento", back_populates="compras")
+    detalles = relationship("DetalleCompra", back_populates="compra", cascade="all, delete-orphan")
+
+
+class DetalleCompra(Base):
+    """Detalle de productos comprados."""
+    __tablename__ = "detalles_compra"
+
+    id = Column(Integer, primary_key=True, index=True)
+    compra_id = Column(Integer, ForeignKey("compras.id", ondelete="CASCADE"), nullable=False)
+    producto_id = Column(Integer, ForeignKey("productos.id", ondelete="RESTRICT"), nullable=False)
+    cantidad = Column(Numeric(10, 3), nullable=False)
+    precio_unitario = Column(Numeric(10, 2), nullable=False) # Precio Costo Unitario
+    
+    # Relaciones
+    compra = relationship("Compra", back_populates="detalles")
+    producto = relationship("Producto", back_populates="detalles_compra")

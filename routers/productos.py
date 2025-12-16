@@ -57,6 +57,12 @@ def listar_productos(
     **Uso:** Backoffice - Tabla de productos
     """
     productos = db.query(Producto).offset(skip).limit(limit).all()
+    
+    # Calcular stock actual dinámicamente
+    for p in productos:
+        total_stock = sum(inv.cantidad_stock for inv in p.inventarios)
+        setattr(p, "stock_actual", total_stock)
+        
     return productos
 
 
@@ -73,6 +79,11 @@ def obtener_producto(producto_id: int, db: Session = Depends(get_db), current_us
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Producto con ID {producto_id} no encontrado"
         )
+    
+    # Calcular stock actual
+    total_stock = sum(inv.cantidad_stock for inv in producto.inventarios)
+    setattr(producto, "stock_actual", total_stock)
+        
     return producto
 
 
@@ -99,6 +110,10 @@ def crear_producto(producto: ProductoCreate, db: Session = Depends(get_db), curr
     db.add(db_producto)
     db.commit()
     db.refresh(db_producto)
+    
+    # Stock inicial 0
+    setattr(db_producto, "stock_actual", 0)
+    
     return db_producto
 
 
@@ -140,6 +155,11 @@ def actualizar_producto(
     
     db.commit()
     db.refresh(db_producto)
+    
+    # Recalcular stock
+    total_stock = sum(inv.cantidad_stock for inv in db_producto.inventarios)
+    setattr(db_producto, "stock_actual", total_stock)
+    
     return db_producto
 
 
