@@ -67,7 +67,7 @@ El webhook está implementado pero requiere un pago real o de prueba completado 
 # Backend
 DATABASE_URL=postgresql://...
 SECRET_KEY=...
-MP_ACCESS_TOKEN=TEST-... # ⚠️ Cambiar a producción cuando estés listo
+MP_ACCESS_TOKEN=APP_USR-2020000981107633-120917-4f5d46496989e099e95a044d3285ab41-3052967873... # ⚠️ Cambiar a producción cuando estés listo
 
 # Frontend (build-time)
 NEXT_PUBLIC_API_URL=https://api.masasestacion.cl

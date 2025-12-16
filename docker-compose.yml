@@ -27,11 +27,13 @@ services:
       - db
     environment:
       DATABASE_URL: ${DATABASE_URL}
+      MP_ACCESS_TOKEN: APP_USR-2020000981107633-120917-4f5d46496989e099e95a044d3285ab41-3052967873
     networks:
       - fme-network
 
 volumes:
   postgres_data:
+
 
 networks:
   fme-network:
