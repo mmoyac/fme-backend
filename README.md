@@ -292,6 +292,26 @@ docker-compose up -d
 # Volver a ejecutar scripts de carga
 ```
 
+## 💾 Gestión de Datos en Producción (Best Practices)
+
+Para actualizar datos de configuración (como Items de Menú, Roles, Parámetros) en producción, se recomienda encarecidamente:
+
+1.  **NO usar SQL directo**: Esto evita inconsistencias de ids, bloqueos de tabla y errores humanos.
+2.  **Usar Scripts Python via API**: Garantiza que se ejecuten las validaciones de negocio y permite operar remotamente sin túneles VPN.
+3.  **Autenticación Segura**: Los scripts se autentican como Admin (`admin@fme.cl`).
+
+### Scripts de Mantenimiento (`/scripts`)
+
+*   `seed_produccion_menu.py`: Sincroniza el menú de producción creando opciones faltantes (ej: Compras, Producción).
+*   `fix_icons_produccion.py`: Normaliza los iconos del menú usando Emojis para compatibilidad total.
+*   `fix_menu_produccion.py`: Elimina asignaciones de menú obsoletas (ej: items antiguos eliminados).
+
+**Ejemplo de Ejecución:**
+```bash
+# Desde local, apuntando a Producción
+python scripts/seed_produccion_menu.py
+```
+
 ## 📝 Licencia
 
 [Especificar licencia]
