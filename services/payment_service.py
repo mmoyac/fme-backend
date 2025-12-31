@@ -90,6 +90,11 @@ class PaymentService:
 
         payment_response = self.sdk.payment().create(payment_data, request_options)
         
+        print("----> DEBUG MP RESPONSE:", payment_response) # LOG TEMPORAL
+        
+        if payment_response["status"] not in [200, 201]:
+             print("----> ERROR MP:", payment_response.get("response"))
+
         return payment_response["response"]
 
 payment_service = PaymentService()

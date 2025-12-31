@@ -55,6 +55,9 @@ class ProductoResponse(ProductoBase):
     """Schema de respuesta de Producto."""
     id: int
     stock_actual: int = 0  # Campo calculado para visualización
+    # Información de categoría
+    categoria_nombre: Optional[str] = None
+    categoria_puntos_fidelidad: Optional[int] = None
 
     class Config:
         from_attributes = True

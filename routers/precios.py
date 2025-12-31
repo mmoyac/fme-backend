@@ -159,6 +159,35 @@ def actualizar_precio_por_producto_local(
     return db_precio
 
 
+@router.get("/producto/{producto_id}/local/{local_id}", response_model=dict)
+def obtener_precio_producto_local(
+    producto_id: int,
+    local_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene el precio de un producto específico en un local específico.
+    
+    **Uso:** Frontend - Para auto-completar precios al crear pedidos
+    """
+    precio = db.query(Precio).filter(
+        Precio.producto_id == producto_id,
+        Precio.local_id == local_id
+    ).first()
+    
+    if not precio:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No existe precio para producto {producto_id} en local {local_id}"
+        )
+    
+    return {
+        "producto_id": precio.producto_id,
+        "local_id": precio.local_id,
+        "monto_precio": precio.monto_precio
+    }
+
+
 @router.delete("/{precio_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_precio(precio_id: int, db: Session = Depends(get_db)):
     """

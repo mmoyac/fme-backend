@@ -3,12 +3,16 @@ Router para endpoints de Pedidos.
 """
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+import io
+from decimal import Decimal
 
 from database.database import get_db
 from database.models import Pedido, ItemPedido, Cliente, Producto, Local, Inventario, MovimientoInventario
 from schemas.pedido import (
     PedidoCreateFrontend,
+    PedidoCreateBackoffice,
     PedidoConfirmacion,
     PedidoResponse,
     PedidoConRelaciones,
@@ -17,6 +21,9 @@ from schemas.pedido import (
 )
 
 from routers.auth import get_current_active_user
+from services.boleta_service import generar_boleta_pedido
+from services.credito_service import CreditoService
+from services.puntos_service import PuntosService
 
 router = APIRouter()
 
@@ -143,6 +150,17 @@ def crear_pedido_frontend(pedido_data: PedidoCreateFrontend, db: Session = Depen
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Local WEB no configurado en el sistema"
         )
+
+    # 1.5. Buscar medio de pago por código
+    from database.models import MedioPago
+    medio_pago = None
+    if pedido_data.medio_pago_codigo:
+        medio_pago = db.query(MedioPago).filter(MedioPago.codigo == pedido_data.medio_pago_codigo).first()
+        if not medio_pago:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Medio de pago '{pedido_data.medio_pago_codigo}' no encontrado"
+            )
     
     # 2. Buscar o crear cliente
     cliente = db.query(Cliente).filter(Cliente.email == pedido_data.cliente_email).first()
@@ -202,25 +220,72 @@ def crear_pedido_frontend(pedido_data: PedidoCreateFrontend, db: Session = Depen
         
         monto_total += precio.monto_precio * item_data.cantidad
     
+    # 3.5. Procesar uso de puntos si se especificó
+    descuento_puntos = 0.0
+    puntos_usar = pedido_data.puntos_usar or 0
+    
+    if puntos_usar > 0:
+        # Validar que el cliente tenga suficientes puntos
+        puntos_cliente = PuntosService.obtener_puntos_cliente(db, cliente.id)
+        
+        valido, mensaje, descuento = PuntosService.validar_uso_puntos_en_total(
+            puntos_cliente.puntos_disponibles,
+            puntos_usar,
+            Decimal(str(monto_total))
+        )
+        
+        if not valido:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=mensaje
+            )
+        
+        descuento_puntos = float(descuento)
+        monto_total -= descuento_puntos  # Aplicar descuento al total
+        
+        if monto_total < 0:
+            monto_total = 0
+    
     # 4. Crear pedido
     db_pedido = Pedido(
         cliente_id=cliente.id,
         local_id=local_web.id,
+        medio_pago_id=medio_pago.id if medio_pago else None,
         monto_total=monto_total,
         estado="PENDIENTE",
         es_pagado=False,
-        notas=pedido_data.notas
+        notas=pedido_data.notas,
+        puntos_usados=puntos_usar,
+        descuento_puntos=descuento_puntos
     )
     db.add(db_pedido)
     db.flush()  # Para obtener el ID
     
-    # 5. Crear items del pedido
+    # 5. Crear items del pedido PRIMERO
     for item_info in items_a_crear:
         item = ItemPedido(
             pedido_id=db_pedido.id,
             **item_info
         )
         db.add(item)
+    
+    # 5.5. DESPUÉS calcular puntos que se ganarían (ahora que los items existen)
+    puntos_ganados = PuntosService.calcular_puntos_por_pedido(db, db_pedido.id)
+    db_pedido.puntos_ganados = puntos_ganados
+    
+    # 6. Usar puntos si se especificó
+    if puntos_usar > 0:
+        exito, mensaje_puntos, movimiento = PuntosService.usar_puntos_en_pedido(
+            db, cliente.id, db_pedido.id, puntos_usar, Decimal(str(descuento_puntos))
+        )
+        
+        if not exito:
+            # Rollback y error
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Error al usar puntos: {mensaje_puntos}"
+            )
     
     db.commit()
     db.refresh(db_pedido)
@@ -231,8 +296,171 @@ def crear_pedido_frontend(pedido_data: PedidoCreateFrontend, db: Session = Depen
         numero_pedido=f"PED-{db_pedido.id:05d}",
         monto_total=monto_total,
         estado=db_pedido.estado,
-        mensaje="¡Pedido recibido! Te contactaremos pronto para coordinar el pago y entrega."
+        mensaje="¡Pedido recibido! Te contactaremos pronto para coordinar el pago y entrega.",
+        puntos_ganados=puntos_ganados,
+        puntos_usados=puntos_usar,
+        descuento_puntos=descuento_puntos
     )
+
+
+@router.post("/backoffice", response_model=dict, status_code=status.HTTP_201_CREATED)
+def crear_pedido_backoffice(
+    pedido_data: PedidoCreateBackoffice, 
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    """
+    Crea un nuevo pedido desde el backoffice.
+    
+    **Flujo:**
+    1. Valida que el cliente, local y medio de pago existan
+    2. Valida que todos los productos existan
+    3. Crea el pedido con estado PENDIENTE
+    4. Crea los items del pedido con los precios especificados
+    5. Calcula el monto total
+    
+    **Uso:** Backoffice - Crear pedido manual
+    """
+    # 1. Validar que el cliente exista
+    cliente = db.query(Cliente).filter(Cliente.id == pedido_data.cliente_id).first()
+    if not cliente:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Cliente con ID {pedido_data.cliente_id} no encontrado"
+        )
+    
+    # 2. Validar que el local exista
+    local = db.query(Local).filter(Local.id == pedido_data.local_id).first()
+    if not local:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Local con ID {pedido_data.local_id} no encontrado"
+        )
+    
+    # 3. Validar que el medio de pago exista
+    from database.models import MedioPago
+    medio_pago = db.query(MedioPago).filter(MedioPago.id == pedido_data.medio_pago_id).first()
+    if not medio_pago:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Medio de pago con ID {pedido_data.medio_pago_id} no encontrado"
+        )
+    
+    # 4. Validar productos y calcular total
+    items_a_crear = []
+    monto_total = 0.0
+    
+    for item_data in pedido_data.items:
+        # Buscar producto por ID
+        producto = db.query(Producto).filter(Producto.id == item_data.producto_id).first()
+        if not producto:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Producto con ID {item_data.producto_id} no encontrado"
+            )
+        
+        # Verificar que el SKU coincida
+        if producto.sku != item_data.sku:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"SKU no coincide para el producto {item_data.producto_id}"
+            )
+        
+        # Preparar item
+        items_a_crear.append({
+            'producto_id': producto.id,
+            'cantidad': item_data.cantidad,
+            'precio_unitario_venta': item_data.precio_unitario_venta
+        })
+        
+        monto_total += item_data.precio_unitario_venta * item_data.cantidad
+    
+    # 4.3. Procesar uso de puntos si se especificó
+    descuento_puntos = 0.0
+    puntos_usar = pedido_data.puntos_usar or 0
+    
+    if puntos_usar > 0:
+        # Validar que el cliente tenga suficientes puntos
+        puntos_cliente = PuntosService.obtener_puntos_cliente(db, cliente.id)
+        
+        valido, mensaje, descuento = PuntosService.validar_uso_puntos_en_total(
+            puntos_cliente.puntos_disponibles,
+            puntos_usar,
+            Decimal(str(monto_total))
+        )
+        
+        if not valido:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=mensaje
+            )
+        
+        descuento_puntos = float(descuento)
+        monto_total -= descuento_puntos  # Aplicar descuento al total
+        
+        if monto_total < 0:
+            monto_total = 0
+    
+    # 4.5. Validar crédito si el medio de pago permite cheques
+    if medio_pago.permite_cheque:
+        es_valido, mensaje = CreditoService.validar_credito_disponible(
+            cliente.id, monto_total, db
+        )
+        if not es_valido:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=mensaje
+            )
+    
+    # 5. Crear pedido
+    db_pedido = Pedido(
+        cliente_id=cliente.id,
+        local_id=local.id,
+        medio_pago_id=medio_pago.id,
+        monto_total=monto_total,
+        estado="PENDIENTE",
+        es_pagado=False,
+        notas=pedido_data.notas,
+        puntos_usados=puntos_usar,
+        descuento_puntos=descuento_puntos
+    )
+    db.add(db_pedido)
+    db.flush()  # Para obtener el ID
+    
+    # 6. Crear items del pedido PRIMERO
+    for item_info in items_a_crear:
+        item = ItemPedido(
+            pedido_id=db_pedido.id,
+            **item_info
+        )
+        db.add(item)
+    
+    # 6.5. DESPUÉS calcular puntos que se ganarían (ahora que los items existen)
+    puntos_ganados = PuntosService.calcular_puntos_por_pedido(db, db_pedido.id)
+    db_pedido.puntos_ganados = puntos_ganados
+    
+    # NOTA: Los puntos NO se usan aquí, solo cuando se confirma el pedido
+    # Esto garantiza que los pedidos PENDIENTE no descuenten puntos del cliente
+    # Los puntos se usarán en el endpoint de actualizar_estado_pedido cuando estado = 'CONFIRMADO'
+    
+    db.commit()
+    db.refresh(db_pedido)
+    
+    # 6.5. Ocupar crédito si el medio de pago permite cheques
+    if medio_pago.permite_cheque:
+        CreditoService.ocupar_credito(cliente.id, monto_total, db)
+    
+    # 7. Retornar respuesta
+    return {
+        "pedido_id": db_pedido.id,
+        "numero_pedido": f"PED-{db_pedido.id:05d}",
+        "monto_total": monto_total,
+        "estado": db_pedido.estado,
+        "mensaje": f"Pedido creado exitosamente con medio de pago: {medio_pago.nombre}",
+        "puntos_ganados": puntos_ganados,
+        "puntos_usados": puntos_usar,
+        "descuento_puntos": descuento_puntos
+    }
 
 
 @router.get("/", response_model=List[PedidoConRelaciones])
@@ -248,7 +476,13 @@ def listar_pedidos(
     
     **Uso:** Backoffice - Tabla de pedidos
     """
-    query = db.query(Pedido)
+    from sqlalchemy.orm import joinedload
+    
+    query = db.query(Pedido).options(
+        joinedload(Pedido.cliente),
+        joinedload(Pedido.items),
+        joinedload(Pedido.medio_pago)
+    )
     
     if estado:
         query = query.filter(Pedido.estado == estado)
@@ -271,6 +505,11 @@ def listar_pedidos(
             'inventario_descontado': pedido.inventario_descontado,
             'notas': pedido.notas,
             'notas_admin': pedido.notas_admin,
+            # Información del medio de pago
+            'medio_pago_id': pedido.medio_pago_id,
+            'medio_pago_codigo': pedido.medio_pago.codigo if pedido.medio_pago else None,
+            'medio_pago_nombre': pedido.medio_pago.nombre if pedido.medio_pago else None,
+            'permite_cheque': pedido.medio_pago.permite_cheque if pedido.medio_pago else None,
             'cliente': pedido.cliente,
             'items': pedido.items
         }
@@ -298,13 +537,24 @@ def obtener_pedido(pedido_id: int, db: Session = Depends(get_db), current_user =
         'id': pedido.id,
         'cliente_id': pedido.cliente_id,
         'local_id': pedido.local_id,
+        'local_despacho_id': pedido.local_despacho_id,
         'numero_pedido': f"PED-{pedido.id:05d}",
         'fecha_pedido': pedido.fecha_pedido,
         'total': pedido.monto_total,
         'estado': pedido.estado,
         'pagado': pedido.es_pagado,
+        'inventario_descontado': pedido.inventario_descontado,
         'notas': pedido.notas,
         'notas_admin': pedido.notas_admin,
+        # Información del medio de pago
+        'medio_pago_id': pedido.medio_pago_id,
+        'medio_pago_codigo': pedido.medio_pago.codigo if pedido.medio_pago else None,
+        'medio_pago_nombre': pedido.medio_pago.nombre if pedido.medio_pago else None,
+        'permite_cheque': pedido.medio_pago.permite_cheque if pedido.medio_pago else False,
+        # Información de puntos
+        'puntos_ganados': pedido.puntos_ganados,
+        'puntos_usados': pedido.puntos_usados,
+        'descuento_puntos': float(pedido.descuento_puntos) if pedido.descuento_puntos else None,
         'cliente': pedido.cliente,
         'items': pedido.items
     }
@@ -355,11 +605,97 @@ def actualizar_pedido(
             
             # Descontar inventario
             descontar_inventario(pedido, pedido_update.local_despacho_id, db)
+            
+            # Usar puntos si el pedido tenía puntos_usados configurados
+            if pedido.puntos_usados and pedido.puntos_usados > 0:
+                from decimal import Decimal
+                exito, mensaje_puntos, movimiento = PuntosService.usar_puntos_en_pedido(
+                    db, 
+                    pedido.cliente_id, 
+                    pedido.id, 
+                    pedido.puntos_usados, 
+                    Decimal(str(pedido.descuento_puntos))
+                )
+                
+                if not exito:
+                    # Revertir descuento de inventario
+                    devolver_inventario(pedido, db)
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Error al usar puntos: {mensaje_puntos}"
+                    )
+            
+            # Otorgar puntos ganados al cliente si los hay
+            if pedido.puntos_ganados and pedido.puntos_ganados > 0:
+                PuntosService.otorgar_puntos_por_pedido(
+                    db, 
+                    pedido.cliente_id, 
+                    pedido.id, 
+                    pedido.puntos_ganados,
+                    f"Puntos ganados por confirmación de pedido #{pedido.id}"
+                )
         
         # Si cambia a CANCELADO
         elif nuevo_estado == "CANCELADO" and estado_anterior != "CANCELADO":
             # Devolver inventario si había sido descontado
             devolver_inventario(pedido, db)
+            
+            # Devolver puntos ganados si habían sido otorgados y el pedido estaba confirmado
+            if estado_anterior == "CONFIRMADO" and pedido.puntos_ganados and pedido.puntos_ganados > 0:
+                # Crear movimiento de ajuste para devolver puntos ganados
+                from database.models import MovimientoPuntos, TipoMovimientoPuntos
+                from datetime import datetime
+                
+                # Obtener puntos del cliente
+                puntos_cliente = PuntosService.obtener_puntos_cliente(db, pedido.cliente_id)
+                
+                # Crear movimiento de devolución (ajuste negativo)
+                movimiento_devolucion = MovimientoPuntos(
+                    cliente_id=pedido.cliente_id,
+                    pedido_id=pedido.id,
+                    tipo_movimiento=TipoMovimientoPuntos.AJUSTE,
+                    puntos=-pedido.puntos_ganados,  # Negativo para devolver
+                    descripcion=f"Devolución por cancelación de pedido #{pedido.id}",
+                    fecha_movimiento=datetime.now()
+                )
+                db.add(movimiento_devolucion)
+                
+                # Actualizar puntos del cliente
+                puntos_cliente.puntos_disponibles -= pedido.puntos_ganados
+                puntos_cliente.puntos_totales_ganados -= pedido.puntos_ganados
+                
+                # Asegurar que no quede negativo
+                if puntos_cliente.puntos_disponibles < 0:
+                    puntos_cliente.puntos_disponibles = 0
+                if puntos_cliente.puntos_totales_ganados < 0:
+                    puntos_cliente.puntos_totales_ganados = 0
+            
+            # Devolver puntos usados si habían sido usados y el pedido estaba confirmado
+            if estado_anterior == "CONFIRMADO" and pedido.puntos_usados and pedido.puntos_usados > 0:
+                from database.models import MovimientoPuntos, TipoMovimientoPuntos
+                from datetime import datetime
+                
+                # Obtener puntos del cliente
+                puntos_cliente = PuntosService.obtener_puntos_cliente(db, pedido.cliente_id)
+                
+                # Crear movimiento de ajuste para devolver puntos usados
+                movimiento_devolucion_usados = MovimientoPuntos(
+                    cliente_id=pedido.cliente_id,
+                    pedido_id=pedido.id,
+                    tipo_movimiento=TipoMovimientoPuntos.AJUSTE,
+                    puntos=pedido.puntos_usados,  # Positivo para devolver
+                    descripcion=f"Devolución de puntos usados por cancelación de pedido #{pedido.id}",
+                    fecha_movimiento=datetime.now()
+                )
+                db.add(movimiento_devolucion_usados)
+                
+                # Actualizar puntos del cliente
+                puntos_cliente.puntos_disponibles += pedido.puntos_usados
+                puntos_cliente.puntos_totales_usados -= pedido.puntos_usados
+                
+                # Asegurar que no quede negativo
+                if puntos_cliente.puntos_totales_usados < 0:
+                    puntos_cliente.puntos_totales_usados = 0
         
         pedido.estado = nuevo_estado
     
@@ -384,6 +720,54 @@ def actualizar_pedido(
         'inventario_descontado': pedido.inventario_descontado,
         'notas': pedido.notas,
         'notas_admin': pedido.notas_admin,
+        'medio_pago_id': pedido.medio_pago_id,
+        'medio_pago_codigo': pedido.medio_pago.codigo if pedido.medio_pago else None,
+        'medio_pago_nombre': pedido.medio_pago.nombre if pedido.medio_pago else None,
+        'permite_cheque': pedido.medio_pago.permite_cheque if pedido.medio_pago else False,
+        'puntos_ganados': pedido.puntos_ganados,
+        'puntos_usados': pedido.puntos_usados,
+        'descuento_puntos': float(pedido.descuento_puntos) if pedido.descuento_puntos else None,
         'cliente': pedido.cliente,
         'items': pedido.items
     }
+
+
+@router.get("/{pedido_id}/boleta")
+def generar_boleta(
+    pedido_id: int, 
+    db: Session = Depends(get_db), 
+    current_user = Depends(get_current_active_user)
+):
+    """
+    Genera y descarga la boleta en PDF de un pedido.
+    
+    **Uso:** Backoffice - Generar boleta para impresión o envío
+    """
+    # Obtener el pedido con todas sus relaciones
+    pedido = db.query(Pedido).filter(Pedido.id == pedido_id).first()
+    if not pedido:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido con ID {pedido_id} no encontrado"
+        )
+    
+    try:
+        # Generar PDF
+        pdf_buffer = generar_boleta_pedido(pedido)
+        
+        # Configurar nombre del archivo
+        numero_pedido = f"PED-{pedido.id:05d}"
+        nombre_archivo = f"Boleta_{numero_pedido}.pdf"
+        
+        # Retornar como streaming response
+        return StreamingResponse(
+            io.BytesIO(pdf_buffer.read()),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={nombre_archivo}"}
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al generar la boleta: {str(e)}"
+        )

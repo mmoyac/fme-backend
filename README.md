@@ -11,6 +11,9 @@ API REST para e-commerce de Masas Estación, construida con FastAPI, SQLAlchemy 
 - 📝 **Alembic** - Migraciones de base de datos
 - 📚 **OpenAPI/Swagger** - Documentación automática
 - 🎯 **Pydantic** - Validación de datos
+- 🏆 **Sistema de Puntos** - Fidelización completa por categorías
+- 🔐 **JWT Auth** - Autenticación y autorización
+- ✅ **32 Tests** - Suite completa de tests automatizados
 
 ## 🚀 Inicio Rápido
 
@@ -103,8 +106,10 @@ fme-backend/
 | `inventario` | Stock por producto/local | producto_id, local_id, cantidad_stock |
 | `precios` | Precio por producto/local | producto_id, local_id, monto_precio |
 | `clientes` | Base de clientes | id, nombre, email, telefono |
-| `pedidos` | Órdenes de compra | id, cliente_id, fecha_pedido, estado |
+| `pedidos` | Órdenes de compra | id, cliente_id, fecha_pedido, estado, puntos_ganados |
 | `items_pedido` | Detalle de pedidos | pedido_id, producto_id, cantidad, precio_unitario |
+| `puntos_cliente` | Estado puntos fidelización | cliente_id, puntos_disponibles, puntos_totales_ganados |
+| `movimientos_puntos` | Historial de puntos | cliente_id, pedido_id, tipo_movimiento, puntos |
 
 ### Relaciones
 
@@ -133,7 +138,21 @@ clientes ─ pedidos (1:N) ─ items_pedido (1:N)
 **GET** `/api/productos/catalogo`
 - Catálogo web con precios del local "WEB"
 - Incluye stock total y descripción
+- Incluye información de puntos de fidelización por categoría
 - Response: `List[ProductoCatalogo]`
+
+### Puntos de Fidelización
+
+**GET** `/api/clientes/{id}`
+- Información completa del cliente incluyendo puntos
+- Response: `ClienteConPuntos`
+
+**POST** `/api/pedidos/`
+- Crear pedido con cálculo automático de puntos
+- Otorga puntos según categoría de productos
+
+**PUT** `/api/pedidos/{id}`
+- Confirmar/cancelar pedido con gestión automática de puntos
 
 ### Documentación Interactiva
 

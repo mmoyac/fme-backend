@@ -87,6 +87,35 @@ def listar_inventario(
     return inventarios
 
 
+@router.get("/producto/{producto_id}/local/{local_id}", response_model=dict)
+def obtener_inventario_producto_local(
+    producto_id: int,
+    local_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene el stock de un producto específico en un local específico.
+    
+    **Uso:** Frontend - Para mostrar stock disponible al crear pedidos
+    """
+    inventario = db.query(Inventario).filter(
+        Inventario.producto_id == producto_id,
+        Inventario.local_id == local_id
+    ).first()
+    
+    if not inventario:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No existe inventario para producto {producto_id} en local {local_id}"
+        )
+    
+    return {
+        "producto_id": inventario.producto_id,
+        "local_id": inventario.local_id,
+        "cantidad_stock": inventario.cantidad_stock
+    }
+
+
 @router.put("/{inventario_id}", response_model=InventarioResponse)
 def actualizar_inventario(
     inventario_id: int,

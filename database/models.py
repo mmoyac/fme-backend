@@ -1,10 +1,11 @@
 """
 Modelos de la base de datos con SQLAlchemy ORM.
 """
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, UniqueConstraint, Index, Text, Table, Numeric
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, UniqueConstraint, Index, Text, Table, Numeric, Enum
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
+import enum
 
 
 # --------------------------------------------------
@@ -72,6 +73,50 @@ class UnidadMedida(Base):
     productos = relationship("Producto", back_populates="unidad_medida")
     recetas_rendimiento = relationship("Receta", back_populates="unidad_rendimiento", foreign_keys="Receta.unidad_rendimiento_id")
     ingredientes = relationship("IngredienteReceta", back_populates="unidad_medida")
+
+
+class MedioPago(Base):
+    """Medios de pago disponibles en el sistema."""
+    __tablename__ = "medios_pago"
+
+    id = Column(Integer, primary_key=True, index=True)
+    codigo = Column(String, unique=True, nullable=False, index=True)
+    nombre = Column(String, nullable=False)
+    descripcion = Column(String)
+    permite_cheque = Column(Boolean, default=False)  # Si permite ingresar datos de cheque
+    activo = Column(Boolean, default=True)
+
+    # Relaciones
+    pedidos = relationship("Pedido", back_populates="medio_pago")
+
+
+class EstadoCheque(Base):
+    """Estados posibles de los cheques (Pendiente, Cobrado, Rechazado, etc.)."""
+    __tablename__ = "estados_cheque"
+
+    id = Column(Integer, primary_key=True, index=True)
+    codigo = Column(String, unique=True, nullable=False, index=True)
+    nombre = Column(String, nullable=False)
+    descripcion = Column(String)
+    es_final = Column(Boolean, default=False)  # Si es un estado final (no cambia más)
+    activo = Column(Boolean, default=True)
+
+    # Relaciones
+    cheques = relationship("Cheque", back_populates="estado")
+
+
+class Banco(Base):
+    """Bancos para gestión de cheques."""
+    __tablename__ = "bancos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    codigo = Column(String, unique=True, nullable=False, index=True)
+    nombre = Column(String, nullable=False)
+    nombre_corto = Column(String, nullable=True)
+    activo = Column(Boolean, default=True)
+
+    # Relaciones
+    cheques = relationship("Cheque", back_populates="banco_rel")
 
 
 # --------------------------------------------------
@@ -155,8 +200,70 @@ class Cliente(Base):
     direccion = Column(String)
     comuna = Column(String)
     
+    # Campos de crédito
+    limite_credito = Column(Numeric(10, 2), nullable=False, default=0.00)
+    credito_usado = Column(Numeric(10, 2), nullable=False, default=0.00)
+    
     # Relaciones
     pedidos = relationship("Pedido", back_populates="cliente")
+    puntos_cliente = relationship("PuntosCliente", back_populates="cliente")
+    movimientos_puntos = relationship("MovimientoPuntos", back_populates="cliente")
+
+
+class TipoMovimientoPuntos(enum.Enum):
+    """Tipos de movimientos de puntos."""
+    GANADOS = "GANADOS"      # Puntos ganados por compras
+    USADOS = "USADOS"        # Puntos usados en compras
+    VENCIDOS = "VENCIDOS"    # Puntos vencidos por tiempo
+    AJUSTE = "AJUSTE"        # Ajustes manuales
+
+
+class PuntosCliente(Base):
+    """Saldo actual de puntos por cliente."""
+    __tablename__ = "puntos_cliente"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cliente_id = Column(Integer, ForeignKey("clientes.id", ondelete="CASCADE"), nullable=False)
+    puntos_disponibles = Column(Integer, default=0, nullable=False)
+    puntos_totales_ganados = Column(Integer, default=0, nullable=False)
+    puntos_totales_usados = Column(Integer, default=0, nullable=False)
+    fecha_actualizacion = Column(DateTime, default=func.now(), onupdate=func.now())
+    
+    # Relaciones
+    cliente = relationship("Cliente", back_populates="puntos_cliente")
+    
+    # Índices
+    __table_args__ = (
+        UniqueConstraint('cliente_id', name='uq_puntos_cliente_id'),
+        Index('ix_puntos_cliente_disponibles', 'puntos_disponibles'),
+    )
+
+
+class MovimientoPuntos(Base):
+    """Historial de movimientos de puntos por cliente."""
+    __tablename__ = "movimientos_puntos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cliente_id = Column(Integer, ForeignKey("clientes.id", ondelete="CASCADE"), nullable=False)
+    pedido_id = Column(Integer, ForeignKey("pedidos.id", ondelete="SET NULL"), nullable=True)
+    categoria_id = Column(Integer, ForeignKey("categorias_producto.id", ondelete="SET NULL"), nullable=True)
+    
+    tipo_movimiento = Column(Enum(TipoMovimientoPuntos), nullable=False)
+    puntos = Column(Integer, nullable=False)  # Positivo para ganados, negativo para usados
+    descripcion = Column(String, nullable=True)
+    fecha_movimiento = Column(DateTime, default=func.now(), nullable=False)
+    
+    # Relaciones
+    cliente = relationship("Cliente", back_populates="movimientos_puntos")
+    pedido = relationship("Pedido")
+    categoria = relationship("CategoriaProducto")
+    
+    # Índices
+    __table_args__ = (
+        Index('ix_movimientos_puntos_cliente_fecha', 'cliente_id', 'fecha_movimiento'),
+        Index('ix_movimientos_puntos_tipo', 'tipo_movimiento'),
+        Index('ix_movimientos_puntos_pedido', 'pedido_id'),
+    )
 
 
 # --------------------------------------------------
@@ -235,6 +342,7 @@ class Pedido(Base):
     cliente_id = Column(Integer, ForeignKey("clientes.id", ondelete="RESTRICT"), nullable=False)
     local_id = Column(Integer, ForeignKey("locales.id", ondelete="RESTRICT"), nullable=False)
     local_despacho_id = Column(Integer, ForeignKey("locales.id", ondelete="RESTRICT"), nullable=True)  # Local de donde se despacha
+    medio_pago_id = Column(Integer, ForeignKey("medios_pago.id", ondelete="RESTRICT"), nullable=True)  # Medio de pago utilizado
     fecha_pedido = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
     monto_total = Column(Float, default=0.00)
     estado = Column(String, nullable=False, default="PENDIENTE")  # PENDIENTE, CONFIRMADO, EN_PREPARACION, ENTREGADO, CANCELADO
@@ -242,6 +350,11 @@ class Pedido(Base):
     inventario_descontado = Column(Boolean, default=False)  # Flag para evitar doble descuento
     notas = Column(Text, nullable=True)
     notas_admin = Column(Text, nullable=True)
+    
+    # Campos de puntos
+    puntos_ganados = Column(Integer, default=0)    # Puntos ganados en este pedido
+    puntos_usados = Column(Integer, default=0)     # Puntos usados como descuento
+    descuento_puntos = Column(Numeric(10, 2), default=0.00)  # Monto descontado por puntos
     
     # Mercado Pago Fields
     mp_preference_id = Column(String, nullable=True)  # ID de la preferencia de pago
@@ -253,8 +366,42 @@ class Pedido(Base):
     cliente = relationship("Cliente", back_populates="pedidos")
     local = relationship("Local", back_populates="pedidos", foreign_keys=[local_id])
     local_despacho = relationship("Local", foreign_keys=[local_despacho_id])
+    medio_pago = relationship("MedioPago", back_populates="pedidos")
     items = relationship("ItemPedido", back_populates="pedido", cascade="all, delete-orphan")
+    cheques = relationship("Cheque", back_populates="pedido", cascade="all, delete-orphan")
 
+
+class Cheque(Base):
+    """Cheques asociados a pedidos para gestión de cobros."""
+    __tablename__ = "cheques"
+
+    id = Column(Integer, primary_key=True, index=True)
+    pedido_id = Column(Integer, ForeignKey("pedidos.id", ondelete="CASCADE"), nullable=False)
+    estado_id = Column(Integer, ForeignKey("estados_cheque.id", ondelete="RESTRICT"), nullable=False)
+    banco_id = Column(Integer, ForeignKey("bancos.id", ondelete="RESTRICT"), nullable=False)
+    
+    # Datos del cheque
+    numero_cheque = Column(String, nullable=False, index=True)
+    monto = Column(Numeric(10, 2), nullable=False)
+    fecha_emision = Column(DateTime(timezone=True), nullable=False)
+    fecha_vencimiento = Column(DateTime(timezone=True), nullable=False)
+    
+    # Datos del librador
+    librador_nombre = Column(String, nullable=False)
+    librador_rut = Column(String, nullable=True)
+    
+    # Fechas de gestión
+    fecha_recepcion = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    fecha_deposito = Column(DateTime(timezone=True), nullable=True)
+    fecha_cobro = Column(DateTime(timezone=True), nullable=True)
+    
+    # Observaciones
+    observaciones = Column(Text, nullable=True)
+    
+    # Relaciones
+    pedido = relationship("Pedido", back_populates="cheques")
+    estado = relationship("EstadoCheque", back_populates="cheques")
+    banco_rel = relationship("Banco", back_populates="cheques")
 
 class ItemPedido(Base):
     """Detalle de items en cada pedido."""

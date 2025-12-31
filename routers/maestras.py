@@ -10,12 +10,18 @@ from database.models import CategoriaProducto as CategoriaProductoModel
 from database.models import TipoProducto as TipoProductoModel
 from database.models import TipoDocumento as TipoDocumentoModel
 from database.models import UnidadMedida as UnidadMedidaModel
+from database.models import MedioPago as MedioPagoModel
+from database.models import EstadoCheque as EstadoChequeModel
+from database.models import Banco as BancoModel
 from database.models import User
 from schemas.maestras import (
     CategoriaProducto, CategoriaProductoCreate, CategoriaProductoUpdate,
     TipoProducto, TipoProductoCreate, TipoProductoUpdate,
     TipoDocumento, TipoDocumentoCreate, TipoDocumentoUpdate,
-    UnidadMedida, UnidadMedidaCreate, UnidadMedidaUpdate, UnidadMedidaConBase
+    UnidadMedida, UnidadMedidaCreate, UnidadMedidaUpdate, UnidadMedidaConBase,
+    MedioPago, MedioPagoCreate, MedioPagoUpdate,
+    EstadoCheque, EstadoChequeCreate, EstadoChequeUpdate,
+    Banco, BancoCreate, BancoUpdate
 )
 from routers.auth import get_current_active_user
 
@@ -455,5 +461,347 @@ def eliminar_unidad(
         )
     
     db.delete(db_unidad)
+    db.commit()
+    return None
+
+
+# ============================================
+# MEDIOS DE PAGO
+# ============================================
+
+@router.get("/medios-pago", response_model=List[MedioPago])
+def listar_medios_pago(
+    skip: int = 0,
+    limit: int = 100,
+    activo: bool = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Listar medios de pago."""
+    query = db.query(MedioPagoModel)
+    
+    if activo is not None:
+        query = query.filter(MedioPagoModel.activo == activo)
+    
+    medios_pago = query.offset(skip).limit(limit).all()
+    return medios_pago
+
+
+@router.post("/medios-pago", response_model=MedioPago)
+def crear_medio_pago(
+    medio_pago: MedioPagoCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Crear un nuevo medio de pago."""
+    # Verificar que el código no exista
+    existing = db.query(MedioPagoModel).filter(MedioPagoModel.codigo == medio_pago.codigo).first()
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Ya existe un medio de pago con el código {medio_pago.codigo}"
+        )
+    
+    db_medio_pago = MedioPagoModel(**medio_pago.model_dump())
+    db.add(db_medio_pago)
+    db.commit()
+    db.refresh(db_medio_pago)
+    return db_medio_pago
+
+
+@router.get("/medios-pago/{medio_pago_id}", response_model=MedioPago)
+def obtener_medio_pago(
+    medio_pago_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Obtener un medio de pago por ID."""
+    db_medio_pago = db.query(MedioPagoModel).filter(MedioPagoModel.id == medio_pago_id).first()
+    if not db_medio_pago:
+        raise HTTPException(status_code=404, detail="Medio de pago no encontrado")
+    return db_medio_pago
+
+
+@router.put("/medios-pago/{medio_pago_id}", response_model=MedioPago)
+def actualizar_medio_pago(
+    medio_pago_id: int,
+    medio_pago_update: MedioPagoUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Actualizar un medio de pago."""
+    db_medio_pago = db.query(MedioPagoModel).filter(MedioPagoModel.id == medio_pago_id).first()
+    if not db_medio_pago:
+        raise HTTPException(status_code=404, detail="Medio de pago no encontrado")
+    
+    # Verificar que el código no exista en otro registro
+    if medio_pago_update.codigo:
+        existing = db.query(MedioPagoModel).filter(
+            MedioPagoModel.codigo == medio_pago_update.codigo,
+            MedioPagoModel.id != medio_pago_id
+        ).first()
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ya existe otro medio de pago con el código {medio_pago_update.codigo}"
+            )
+    
+    # Actualizar solo los campos que no son None
+    update_data = medio_pago_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(db_medio_pago, field, value)
+    
+    db.commit()
+    db.refresh(db_medio_pago)
+    return db_medio_pago
+
+
+@router.delete("/medios-pago/{medio_pago_id}")
+def eliminar_medio_pago(
+    medio_pago_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Eliminar un medio de pago."""
+    db_medio_pago = db.query(MedioPagoModel).filter(MedioPagoModel.id == medio_pago_id).first()
+    if not db_medio_pago:
+        raise HTTPException(status_code=404, detail="Medio de pago no encontrado")
+    
+    # Verificar si tiene referencias (cuando se implemente)
+    # if db_medio_pago.compras or db_medio_pago.pedidos:
+    #     raise HTTPException(
+    #         status_code=400,
+    #         detail="No se puede eliminar el medio de pago porque tiene transacciones asociadas"
+    #     )
+    
+    db.delete(db_medio_pago)
+    db.commit()
+    return None
+
+
+# ============================================
+# ESTADOS DE CHEQUE
+# ============================================
+
+@router.get("/estados-cheque", response_model=List[EstadoCheque])
+def listar_estados_cheque(
+    skip: int = 0,
+    limit: int = 100,
+    activo: bool = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Listar estados de cheque."""
+    query = db.query(EstadoChequeModel)
+    
+    if activo is not None:
+        query = query.filter(EstadoChequeModel.activo == activo)
+    
+    estados = query.offset(skip).limit(limit).all()
+    return estados
+
+
+@router.post("/estados-cheque", response_model=EstadoCheque)
+def crear_estado_cheque(
+    estado: EstadoChequeCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Crear un nuevo estado de cheque."""
+    # Verificar que el código no exista
+    existing = db.query(EstadoChequeModel).filter(EstadoChequeModel.codigo == estado.codigo).first()
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Ya existe un estado de cheque con el código {estado.codigo}"
+        )
+    
+    db_estado = EstadoChequeModel(**estado.model_dump())
+    db.add(db_estado)
+    db.commit()
+    db.refresh(db_estado)
+    return db_estado
+
+
+@router.get("/estados-cheque/{estado_id}", response_model=EstadoCheque)
+def obtener_estado_cheque(
+    estado_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Obtener un estado de cheque por ID."""
+    db_estado = db.query(EstadoChequeModel).filter(EstadoChequeModel.id == estado_id).first()
+    if not db_estado:
+        raise HTTPException(status_code=404, detail="Estado de cheque no encontrado")
+    return db_estado
+
+
+@router.put("/estados-cheque/{estado_id}", response_model=EstadoCheque)
+def actualizar_estado_cheque(
+    estado_id: int,
+    estado_update: EstadoChequeUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Actualizar un estado de cheque."""
+    db_estado = db.query(EstadoChequeModel).filter(EstadoChequeModel.id == estado_id).first()
+    if not db_estado:
+        raise HTTPException(status_code=404, detail="Estado de cheque no encontrado")
+    
+    # Verificar que el código no exista en otro registro
+    if estado_update.codigo:
+        existing = db.query(EstadoChequeModel).filter(
+            EstadoChequeModel.codigo == estado_update.codigo,
+            EstadoChequeModel.id != estado_id
+        ).first()
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ya existe otro estado de cheque con el código {estado_update.codigo}"
+            )
+    
+    # Actualizar solo los campos que no son None
+    update_data = estado_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(db_estado, field, value)
+    
+    db.commit()
+    db.refresh(db_estado)
+    return db_estado
+
+
+@router.delete("/estados-cheque/{estado_id}")
+def eliminar_estado_cheque(
+    estado_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Eliminar un estado de cheque."""
+    db_estado = db.query(EstadoChequeModel).filter(EstadoChequeModel.id == estado_id).first()
+    if not db_estado:
+        raise HTTPException(status_code=404, detail="Estado de cheque no encontrado")
+    
+    # Verificar si tiene referencias (cuando se implemente)
+    # if db_estado.cheques:
+    #     raise HTTPException(
+    #         status_code=400,
+    #         detail="No se puede eliminar el estado porque tiene cheques asociados"
+    #     )
+    
+    db.delete(db_estado)
+    db.commit()
+    return None
+
+
+# ============================================
+# BANCOS
+# ============================================
+
+@router.get("/bancos", response_model=List[Banco])
+def listar_bancos(
+    skip: int = 0,
+    limit: int = 100,
+    activo: bool = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Listar bancos."""
+    query = db.query(BancoModel)
+    
+    if activo is not None:
+        query = query.filter(BancoModel.activo == activo)
+    
+    bancos = query.offset(skip).limit(limit).all()
+    return bancos
+
+
+@router.post("/bancos", response_model=Banco)
+def crear_banco(
+    banco: BancoCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Crear un nuevo banco."""
+    # Verificar que el código no exista
+    existing = db.query(BancoModel).filter(BancoModel.codigo == banco.codigo).first()
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Ya existe un banco con el código {banco.codigo}"
+        )
+    
+    db_banco = BancoModel(**banco.model_dump())
+    db.add(db_banco)
+    db.commit()
+    db.refresh(db_banco)
+    return db_banco
+
+
+@router.get("/bancos/{banco_id}", response_model=Banco)
+def obtener_banco(
+    banco_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Obtener un banco por ID."""
+    db_banco = db.query(BancoModel).filter(BancoModel.id == banco_id).first()
+    if not db_banco:
+        raise HTTPException(status_code=404, detail="Banco no encontrado")
+    return db_banco
+
+
+@router.put("/bancos/{banco_id}", response_model=Banco)
+def actualizar_banco(
+    banco_id: int,
+    banco_update: BancoUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Actualizar un banco."""
+    db_banco = db.query(BancoModel).filter(BancoModel.id == banco_id).first()
+    if not db_banco:
+        raise HTTPException(status_code=404, detail="Banco no encontrado")
+    
+    # Verificar que el código no exista en otro registro
+    if banco_update.codigo:
+        existing = db.query(BancoModel).filter(
+            BancoModel.codigo == banco_update.codigo,
+            BancoModel.id != banco_id
+        ).first()
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ya existe otro banco con el código {banco_update.codigo}"
+            )
+    
+    # Actualizar solo los campos que no son None
+    update_data = banco_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(db_banco, field, value)
+    
+    db.commit()
+    db.refresh(db_banco)
+    return db_banco
+
+
+@router.delete("/bancos/{banco_id}")
+def eliminar_banco(
+    banco_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Eliminar un banco."""
+    db_banco = db.query(BancoModel).filter(BancoModel.id == banco_id).first()
+    if not db_banco:
+        raise HTTPException(status_code=404, detail="Banco no encontrado")
+    
+    # Verificar si tiene cheques asociados
+    if db_banco.cheques:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se puede eliminar el banco porque tiene {len(db_banco.cheques)} cheques asociados"
+        )
+    
+    db.delete(db_banco)
     db.commit()
     return None

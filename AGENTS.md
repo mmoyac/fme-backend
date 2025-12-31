@@ -285,8 +285,10 @@ docker-compose exec backend pytest tests/ --lf
 | `clientes` | Clientes del sistema | `id`, `nombre`, `email`, `telefono`, `direccion` |
 | `inventario` | Stock por producto/local | `producto_id`, `local_id`, `cantidad_stock` |
 | `precios` | Precios por producto/local | `producto_id`, `local_id`, `monto_precio` |
-| `pedidos` | Órdenes de compra | `id`, `cliente_id`, `local_id`, `estado`, `total` |
+| `pedidos` | Órdenes de compra | `id`, `cliente_id`, `local_id`, `estado`, `total`, `puntos_ganados`, `puntos_usados` |
 | `items_pedido` | Detalle de pedidos | `pedido_id`, `producto_id`, `cantidad`, `precio_unitario` |
+| `puntos_cliente` | Estado de puntos por cliente | `cliente_id`, `puntos_disponibles`, `puntos_totales_ganados` |
+| `movimientos_puntos` | Historial de puntos | `id`, `cliente_id`, `pedido_id`, `tipo_movimiento`, `puntos` |
 | `movimientos_inventario` | Historial de movimientos | `id`, `tipo_movimiento`, `cantidad`, `fecha` |
 
 ### 4.2. Relaciones Importantes
@@ -452,10 +454,19 @@ alembic upgrade head
 
 | Método | Endpoint | Descripción |
 | :--- | :--- | :--- |
-| `GET` | `/api/clientes/` | Listar clientes |
+| `GET` | `/api/clientes/` | Listar clientes con información de puntos |
 | `POST` | `/api/clientes/` | Crear cliente |
 | `PUT` | `/api/clientes/{id}` | Actualizar cliente |
 | `DELETE` | `/api/clientes/{id}` | Eliminar cliente (solo sin pedidos) |
+
+### 6.7. Sistema de Puntos
+
+| Método | Endpoint | Descripción |
+| :--- | :--- | :--- |
+| `GET` | `/api/clientes/{id}` | Información completa de puntos del cliente |
+| `POST` | `/api/pedidos/` | Crear pedido con cálculo automático de puntos |
+| `POST` | `/api/pedidos/backoffice` | Crear pedido con opción de canje de puntos |
+| `PUT` | `/api/pedidos/{id}` | Otorgar/devolver puntos según cambio de estado |
 
 ---
 
@@ -557,6 +568,7 @@ docker-compose exec db psql -U fme -d fme_database
 - ✅ Gestión de Inventario con stock por local
 - ✅ Gestión de Precios por local
 - ✅ Sistema completo de Pedidos (5 estados)
+- ✅ Sistema completo de Puntos de Fidelización
 - ✅ Transferencias de inventario con historial
 - ✅ Dashboard con 10+ métricas analíticas
 - ✅ Timezone configurado (America/Santiago)
@@ -601,6 +613,7 @@ backend:
 - [ ] Tests de locales (CRUD)
 - [ ] Tests de precios (CRUD)
 - [x] Sistema de autenticación (JWT) ✅
+- [x] Sistema de Puntos de Fidelización ✅
 - [ ] Caché con Redis
 - [ ] Rate limiting
 - [x] Implementar Roles en todos los Endpoints ✅
@@ -612,8 +625,15 @@ backend:
 
 ---
 
-**Última Actualización:** 2025-12-09
+**Última Actualización:** 2025-12-31
 **Cambios Recientes:**
+- ✅ Sistema completo de Puntos de Fidelización implementado
+- ✅ PuntosService con cálculo por categoría de productos
+- ✅ Endpoints de clientes enriquecidos con información de puntos
+- ✅ Creación y confirmación de pedidos con otorgamiento automático de puntos
+- ✅ Cancelación de pedidos con devolución automática de puntos
+- ✅ Boletas PDF con información completa de puntos
+- ✅ Endpoints de productos con información de categoría y puntos
 - ✅ Workflow de CI/CD implementado (`docker-publish.yml`) para despliegue automático en VPS.
 - ✅ Autenticación JWT y RBAC 100% funcional.
 - ✅ Endpoint de Setup de Admin simplificado y protegido.

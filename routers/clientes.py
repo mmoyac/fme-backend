@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 from database.database import get_db
 from database.models import Cliente
 from schemas.cliente import ClienteCreate, ClienteUpdate, ClienteResponse
+from services.puntos_service import PuntosService
+from routers.auth import get_current_active_user
 
 router = APIRouter()
 
@@ -17,24 +19,48 @@ router = APIRouter()
 def listar_clientes(
     skip: int = 0,
     limit: int = 100,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
 ):
     """
-    Lista todos los clientes con paginación.
+    Lista todos los clientes con paginación e información de puntos.
     
     **Uso:** Backoffice - Tabla de clientes
     """
     clientes = db.query(Cliente).offset(skip).limit(limit).all()
-    return clientes
+    
+    # Enriquecer con información de puntos
+    clientes_con_puntos = []
+    for cliente in clientes:
+        puntos_cliente = PuntosService.obtener_puntos_cliente(db, cliente.id)
+        
+        cliente_data = {
+            "id": cliente.id,
+            "nombre": cliente.nombre,
+            "apellido": cliente.apellido,
+            "email": cliente.email,
+            "telefono": cliente.telefono,
+            "direccion": cliente.direccion,
+            "comuna": cliente.comuna,
+            "limite_credito": float(cliente.limite_credito),
+            "credito_usado": float(cliente.credito_usado),
+            "puntos_disponibles": puntos_cliente.puntos_disponibles,
+            "puntos_totales_ganados": puntos_cliente.puntos_totales_ganados,
+            "puntos_totales_usados": puntos_cliente.puntos_totales_usados
+        }
+        clientes_con_puntos.append(cliente_data)
+    
+    return clientes_con_puntos
 
 
 @router.get("/{cliente_id}", response_model=ClienteResponse)
 def obtener_cliente(
     cliente_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
 ):
     """
-    Obtiene un cliente específico por ID.
+    Obtiene un cliente específico por ID con información completa de puntos.
     
     **Uso:** Backoffice - Ver detalle de cliente
     """
@@ -44,16 +70,34 @@ def obtener_cliente(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Cliente con ID {cliente_id} no encontrado"
         )
-    return cliente
+    
+    # Obtener información de puntos
+    puntos_cliente = PuntosService.obtener_puntos_cliente(db, cliente.id)
+    
+    return {
+        "id": cliente.id,
+        "nombre": cliente.nombre,
+        "apellido": cliente.apellido,
+        "email": cliente.email,
+        "telefono": cliente.telefono,
+        "direccion": cliente.direccion,
+        "comuna": cliente.comuna,
+        "limite_credito": float(cliente.limite_credito),
+        "credito_usado": float(cliente.credito_usado),
+        "puntos_disponibles": puntos_cliente.puntos_disponibles,
+        "puntos_totales_ganados": puntos_cliente.puntos_totales_ganados,
+        "puntos_totales_usados": puntos_cliente.puntos_totales_usados
+    }
 
 
 @router.post("/", response_model=ClienteResponse, status_code=status.HTTP_201_CREATED)
 def crear_cliente(
     cliente: ClienteCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
 ):
     """
-    Crea un nuevo cliente.
+    Crea un nuevo cliente con información inicial de puntos.
     
     **Uso:** Backoffice - Alta de cliente
     """
@@ -70,17 +114,35 @@ def crear_cliente(
     db.add(db_cliente)
     db.commit()
     db.refresh(db_cliente)
-    return db_cliente
+    
+    # Crear registro inicial de puntos
+    puntos_cliente = PuntosService.obtener_puntos_cliente(db, db_cliente.id)
+    
+    return {
+        "id": db_cliente.id,
+        "nombre": db_cliente.nombre,
+        "apellido": db_cliente.apellido,
+        "email": db_cliente.email,
+        "telefono": db_cliente.telefono,
+        "direccion": db_cliente.direccion,
+        "comuna": db_cliente.comuna,
+        "limite_credito": float(db_cliente.limite_credito),
+        "credito_usado": float(db_cliente.credito_usado),
+        "puntos_disponibles": puntos_cliente.puntos_disponibles,
+        "puntos_totales_ganados": puntos_cliente.puntos_totales_ganados,
+        "puntos_totales_usados": puntos_cliente.puntos_totales_usados
+    }
 
 
 @router.put("/{cliente_id}", response_model=ClienteResponse)
 def actualizar_cliente(
     cliente_id: int,
     cliente: ClienteUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
 ):
     """
-    Actualiza los datos de un cliente.
+    Actualiza los datos de un cliente y retorna información completa incluyendo puntos.
     
     **Uso:** Backoffice - Editar cliente
     """
@@ -107,13 +169,31 @@ def actualizar_cliente(
     
     db.commit()
     db.refresh(db_cliente)
-    return db_cliente
+    
+    # Obtener información de puntos actualizada
+    puntos_cliente = PuntosService.obtener_puntos_cliente(db, db_cliente.id)
+    
+    return {
+        "id": db_cliente.id,
+        "nombre": db_cliente.nombre,
+        "apellido": db_cliente.apellido,
+        "email": db_cliente.email,
+        "telefono": db_cliente.telefono,
+        "direccion": db_cliente.direccion,
+        "comuna": db_cliente.comuna,
+        "limite_credito": float(db_cliente.limite_credito),
+        "credito_usado": float(db_cliente.credito_usado),
+        "puntos_disponibles": puntos_cliente.puntos_disponibles,
+        "puntos_totales_ganados": puntos_cliente.puntos_totales_ganados,
+        "puntos_totales_usados": puntos_cliente.puntos_totales_usados
+    }
 
 
 @router.delete("/{cliente_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_cliente(
     cliente_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
 ):
     """
     Elimina un cliente.

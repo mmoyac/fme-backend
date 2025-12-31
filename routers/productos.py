@@ -56,14 +56,49 @@ def listar_productos(
     
     **Uso:** Backoffice - Tabla de productos
     """
-    productos = db.query(Producto).offset(skip).limit(limit).all()
+    from sqlalchemy.orm import joinedload
     
-    # Calcular stock actual dinámicamente
+    productos = (
+        db.query(Producto)
+        .options(joinedload(Producto.categoria))
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    
+    # Preparar lista de respuesta con información de categoría
+    result = []
     for p in productos:
         total_stock = sum(inv.cantidad_stock for inv in p.inventarios)
-        setattr(p, "stock_actual", total_stock)
         
-    return productos
+        # Crear diccionario con todos los campos base
+        producto_dict = {
+            'id': p.id,
+            'nombre': p.nombre,
+            'descripcion': p.descripcion,
+            'sku': p.sku,
+            'imagen_url': p.imagen_url,
+            'categoria_id': p.categoria_id,
+            'tipo_producto_id': p.tipo_producto_id,
+            'unidad_medida_id': p.unidad_medida_id,
+            'precio_compra': p.precio_compra,
+            'costo_fabricacion': p.costo_fabricacion,
+            'es_vendible': p.es_vendible,
+            'es_vendible_web': p.es_vendible_web,
+            'es_ingrediente': p.es_ingrediente,
+            'tiene_receta': p.tiene_receta,
+            'activo': p.activo,
+            'stock_minimo': p.stock_minimo,
+            'stock_critico': p.stock_critico,
+            'stock_actual': total_stock,
+            # Información de categoría
+            'categoria_nombre': p.categoria.nombre if p.categoria else None,
+            'categoria_puntos_fidelidad': p.categoria.puntos_fidelidad if p.categoria else None
+        }
+        
+        result.append(producto_dict)
+        
+    return result
 
 
 @router.get("/{producto_id}", response_model=ProductoResponse)
@@ -73,7 +108,15 @@ def obtener_producto(producto_id: int, db: Session = Depends(get_db), current_us
     
     **Uso:** Backoffice - Detalle/Edición de producto
     """
-    producto = db.query(Producto).filter(Producto.id == producto_id).first()
+    from sqlalchemy.orm import joinedload
+    
+    producto = (
+        db.query(Producto)
+        .options(joinedload(Producto.categoria))
+        .filter(Producto.id == producto_id)
+        .first()
+    )
+    
     if not producto:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -82,9 +125,31 @@ def obtener_producto(producto_id: int, db: Session = Depends(get_db), current_us
     
     # Calcular stock actual
     total_stock = sum(inv.cantidad_stock for inv in producto.inventarios)
-    setattr(producto, "stock_actual", total_stock)
-        
-    return producto
+    
+    # Retornar con información de categoría
+    return {
+        'id': producto.id,
+        'nombre': producto.nombre,
+        'descripcion': producto.descripcion,
+        'sku': producto.sku,
+        'imagen_url': producto.imagen_url,
+        'categoria_id': producto.categoria_id,
+        'tipo_producto_id': producto.tipo_producto_id,
+        'unidad_medida_id': producto.unidad_medida_id,
+        'precio_compra': producto.precio_compra,
+        'costo_fabricacion': producto.costo_fabricacion,
+        'es_vendible': producto.es_vendible,
+        'es_vendible_web': producto.es_vendible_web,
+        'es_ingrediente': producto.es_ingrediente,
+        'tiene_receta': producto.tiene_receta,
+        'activo': producto.activo,
+        'stock_minimo': producto.stock_minimo,
+        'stock_critico': producto.stock_critico,
+        'stock_actual': total_stock,
+        # Información de categoría
+        'categoria_nombre': producto.categoria.nombre if producto.categoria else None,
+        'categoria_puntos_fidelidad': producto.categoria.puntos_fidelidad if producto.categoria else None
+    }
 
 
 @router.post("/", response_model=ProductoResponse, status_code=status.HTTP_201_CREATED)

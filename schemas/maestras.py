@@ -138,3 +138,94 @@ class UnidadMedidaConBase(UnidadMedida):
 
     class Config:
         from_attributes = True
+
+
+# ============================================
+# MEDIOS DE PAGO
+# ============================================
+
+class MedioPagoBase(BaseModel):
+    codigo: str = Field(..., description="Código único del medio de pago")
+    nombre: str = Field(..., description="Nombre del medio de pago")
+    descripcion: Optional[str] = None
+    permite_cheque: bool = Field(default=False, description="Si permite ingresar datos de cheque")
+    activo: bool = True
+
+
+class MedioPagoCreate(MedioPagoBase):
+    pass
+
+
+class MedioPagoUpdate(BaseModel):
+    codigo: Optional[str] = None
+    nombre: Optional[str] = None
+    descripcion: Optional[str] = None
+    permite_cheque: Optional[bool] = None
+    activo: Optional[bool] = None
+
+
+class MedioPago(MedioPagoBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================
+# ESTADOS DE CHEQUE
+# ============================================
+
+class EstadoChequeBase(BaseModel):
+    codigo: str = Field(..., description="Código único del estado de cheque")
+    nombre: str = Field(..., description="Nombre del estado")
+    descripcion: Optional[str] = None
+    es_final: bool = Field(default=False, description="Si es un estado final")
+    activo: bool = True
+
+
+class EstadoChequeCreate(EstadoChequeBase):
+    pass
+
+
+class EstadoChequeUpdate(BaseModel):
+    codigo: Optional[str] = None
+    nombre: Optional[str] = None
+    descripcion: Optional[str] = None
+    es_final: Optional[bool] = None
+    activo: Optional[bool] = None
+
+
+class EstadoCheque(EstadoChequeBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================
+# BANCOS
+# ============================================
+
+class BancoBase(BaseModel):
+    codigo: str = Field(..., description="Código único del banco")
+    nombre: str = Field(..., description="Nombre del banco")
+    nombre_corto: Optional[str] = Field(None, description="Nombre corto del banco")
+    activo: bool = True
+
+
+class BancoCreate(BancoBase):
+    pass
+
+
+class BancoUpdate(BaseModel):
+    codigo: Optional[str] = None
+    nombre: Optional[str] = None
+    nombre_corto: Optional[str] = None
+    activo: Optional[bool] = None
+
+
+class Banco(BancoBase):
+    id: int
+
+    class Config:
+        from_attributes = True
