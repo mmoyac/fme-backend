@@ -5,11 +5,12 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import and_
 import io
 from decimal import Decimal
 
 from database.database import get_db
-from database.models import Pedido, ItemPedido, Cliente, Producto, Local, Inventario, MovimientoInventario
+from database.models import Pedido, ItemPedido, Cliente, Producto, Local, Inventario, MovimientoInventario, TurnoCaja, OperacionCaja, TipoOperacionCaja, EstadoTurnoCaja
 from schemas.pedido import (
     PedidoCreateFrontend,
     PedidoCreateBackoffice,
@@ -127,6 +128,53 @@ def devolver_inventario(pedido: Pedido, db: Session):
             db.add(movimiento)
     
     pedido.inventario_descontado = False
+
+
+def registrar_venta_en_caja(pedido: Pedido, usuario_actual_id: int, db: Session):
+    """
+    Registra automáticamente una operación de venta en el turno de caja activo del vendedor.
+    
+    IMPORTANTE: Solo para locales físicos. Las ventas de Tienda Online (código='WEB') 
+    no se registran en caja física.
+    
+    Args:
+        pedido: El pedido confirmado
+        usuario_actual_id: ID del usuario que confirma el pedido
+        db: Sesión de base de datos
+    """
+    # Verificar que no sea una venta online (código WEB)
+    if pedido.local_despacho and hasattr(pedido.local_despacho, 'codigo'):
+        if pedido.local_despacho.codigo == 'WEB':
+            # Las ventas online no pasan por caja física
+            return
+    
+    # Buscar turno activo del vendedor en el local de despacho
+    turno_activo = db.query(TurnoCaja).filter(
+        TurnoCaja.vendedor_id == usuario_actual_id,
+        TurnoCaja.local_id == pedido.local_despacho_id,
+        TurnoCaja.estado == "ABIERTO"
+    ).first()
+    
+    if not turno_activo:
+        # Si no hay turno activo, no registramos venta automática
+        # (podría ser un admin confirmando pedidos sin estar en caja)
+        return
+    
+    # Crear operación de venta
+    operacion = OperacionCaja(
+        turno_caja_id=turno_activo.id,
+        tipo_operacion=TipoOperacionCaja.VENTA,
+        monto=pedido.monto_total,
+        descripcion=f"Venta - Pedido #{pedido.id}",
+        observaciones=f"Venta automática por confirmación de pedido #{pedido.id} - Cliente: {pedido.cliente.nombre if pedido.cliente else 'N/A'}",
+        pedido_id=pedido.id,
+        medio_pago_id=pedido.medio_pago_id
+    )
+    
+    db.add(operacion)
+    
+    # Los totales se calculan dinámicamente desde las operaciones,
+    # por lo que no necesitamos actualizar campos en TurnoCaja
 
 
 @router.post("/", response_model=PedidoConfirmacion, status_code=status.HTTP_201_CREATED)
@@ -597,14 +645,39 @@ def actualizar_pedido(
         
         # Si cambia a CONFIRMADO
         if nuevo_estado == "CONFIRMADO" and estado_anterior != "CONFIRMADO":
-            if not pedido_update.local_despacho_id:
+            # Auto-asignar local de despacho si el usuario tiene uno asignado por defecto
+            local_despacho_final = pedido_update.local_despacho_id
+            if not local_despacho_final and current_user.local_defecto_id:
+                local_despacho_final = current_user.local_defecto_id
+                pedido.local_despacho_id = local_despacho_final
+            
+            if not local_despacho_final:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Debe seleccionar un local de despacho para confirmar el pedido"
                 )
             
+            # Verificar que haya un turno de caja abierto en el local de despacho
+            # EXCEPCIÓN: El local WEB (Tienda Online) no requiere caja abierta
+            local_despacho_obj = db.query(Local).filter(Local.id == local_despacho_final).first()
+            
+            # Solo validar caja abierta para locales físicos (no para tienda online)
+            if local_despacho_obj and local_despacho_obj.codigo != 'WEB':
+                turno_abierto = db.query(TurnoCaja).filter(
+                    and_(
+                        TurnoCaja.local_id == local_despacho_final,
+                        TurnoCaja.estado == EstadoTurnoCaja.ABIERTO
+                    )
+                ).first()
+                
+                if not turno_abierto:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"No hay caja abierta en el local de despacho '{local_despacho_obj.nombre}'. Debe abrir un turno de caja antes de confirmar pedidos."
+                    )
+            
             # Descontar inventario
-            descontar_inventario(pedido, pedido_update.local_despacho_id, db)
+            descontar_inventario(pedido, local_despacho_final, db)
             
             # Usar puntos si el pedido tenía puntos_usados configurados
             if pedido.puntos_usados and pedido.puntos_usados > 0:
@@ -634,6 +707,9 @@ def actualizar_pedido(
                     pedido.puntos_ganados,
                     f"Puntos ganados por confirmación de pedido #{pedido.id}"
                 )
+            
+            # Registrar venta en caja si hay turno activo del vendedor
+            registrar_venta_en_caja(pedido, current_user.id, db)
         
         # Si cambia a CANCELADO
         elif nuevo_estado == "CANCELADO" and estado_anterior != "CANCELADO":
@@ -702,6 +778,10 @@ def actualizar_pedido(
     # Si solo se actualiza el local de despacho sin cambiar estado (caso raro pero posible)
     elif pedido_update.local_despacho_id and pedido.estado == "CONFIRMADO" and not pedido.inventario_descontado:
         descontar_inventario(pedido, pedido_update.local_despacho_id, db)
+    
+    # Actualizar local de despacho si se proporciona explícitamente (no auto-asignado)
+    if pedido_update.local_despacho_id:
+        pedido.local_despacho_id = pedido_update.local_despacho_id
     
     db.commit()
     db.refresh(pedido)

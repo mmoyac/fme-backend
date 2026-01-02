@@ -88,6 +88,7 @@ class MedioPago(Base):
 
     # Relaciones
     pedidos = relationship("Pedido", back_populates="medio_pago")
+    operaciones_caja = relationship("OperacionCaja", back_populates="medio_pago")
 
 
 class EstadoCheque(Base):
@@ -186,6 +187,7 @@ class Local(Base):
     precios = relationship("Precio", back_populates="local", cascade="all, delete-orphan")
     pedidos = relationship("Pedido", back_populates="local", foreign_keys="Pedido.local_id")
     compras = relationship("Compra", back_populates="local")
+    turnos_caja = relationship("TurnoCaja", back_populates="local", cascade="all, delete-orphan")
 
 
 class Cliente(Base):
@@ -369,6 +371,7 @@ class Pedido(Base):
     medio_pago = relationship("MedioPago", back_populates="pedidos")
     items = relationship("ItemPedido", back_populates="pedido", cascade="all, delete-orphan")
     cheques = relationship("Cheque", back_populates="pedido", cascade="all, delete-orphan")
+    operacion_caja = relationship("OperacionCaja", back_populates="pedido", uselist=False)
 
 
 class Cheque(Base):
@@ -473,9 +476,12 @@ class User(Base):
     nombre_completo = Column(String)
     is_active = Column(Boolean, default=True)
     role_id = Column(Integer, ForeignKey("roles.id", ondelete="RESTRICT"), nullable=False)
+    local_defecto_id = Column(Integer, ForeignKey("locales.id", ondelete="SET NULL"), nullable=True)
 
     # Relaciones
     role = relationship("Role", back_populates="users")
+    local_defecto = relationship("Local", foreign_keys=[local_defecto_id])
+    turnos_caja = relationship("TurnoCaja", back_populates="vendedor", cascade="all, delete-orphan")
 
 
 # --------------------------------------------------
@@ -636,3 +642,81 @@ class DetalleCompra(Base):
     # Relaciones
     compra = relationship("Compra", back_populates="detalles")
     producto = relationship("Producto", back_populates="detalles_compra")
+
+
+# --------------------------------------------------
+# 8. Sistema de Caja (Flujo de Caja para Vendedores)
+# --------------------------------------------------
+
+class EstadoTurnoCaja(enum.Enum):
+    """Estados posibles de un turno de caja."""
+    ABIERTO = "ABIERTO"
+    CERRADO = "CERRADO"
+
+
+class TipoOperacionCaja(enum.Enum):
+    """Tipos de operaciones de caja."""
+    APERTURA = "APERTURA"          # Monto inicial al abrir caja
+    VENTA = "VENTA"                # Venta realizada (automática desde pedidos)
+    INGRESO = "INGRESO"            # Ingreso manual (pagos, otros)
+    EGRESO = "EGRESO"              # Egreso manual (gastos, cambio)
+    DEVOLUCION = "DEVOLUCION"      # Devolución de dinero
+    CIERRE = "CIERRE"              # Registro del cierre de caja
+
+
+class TurnoCaja(Base):
+    """Turnos de caja por vendedor - Control de apertura y cierre."""
+    __tablename__ = "turnos_caja"
+
+    id = Column(Integer, primary_key=True, index=True)
+    vendedor_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    local_id = Column(Integer, ForeignKey("locales.id", ondelete="RESTRICT"), nullable=False)
+    
+    # Control de turno
+    fecha_apertura = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+    fecha_cierre = Column(DateTime(timezone=True), nullable=True, index=True)
+    estado = Column(Enum(EstadoTurnoCaja), nullable=False, default=EstadoTurnoCaja.ABIERTO, index=True)
+    
+    # Montos de control
+    monto_inicial = Column(Numeric(10, 2), nullable=False, default=0.00)  # Efectivo al abrir
+    efectivo_esperado = Column(Numeric(10, 2), nullable=True)  # Calculado automáticamente
+    efectivo_real = Column(Numeric(10, 2), nullable=True)  # Contado físicamente al cerrar
+    diferencia = Column(Numeric(10, 2), nullable=True)  # efectivo_real - efectivo_esperado
+    
+    # Observaciones
+    observaciones_apertura = Column(Text, nullable=True)
+    observaciones_cierre = Column(Text, nullable=True)
+    
+    # Relaciones
+    vendedor = relationship("User", back_populates="turnos_caja")
+    local = relationship("Local", back_populates="turnos_caja")
+    operaciones = relationship("OperacionCaja", back_populates="turno", cascade="all, delete-orphan")
+
+    # Restricción: Solo un turno abierto por vendedor-local
+    __table_args__ = (
+        Index("idx_turno_vendedor_abierto", "vendedor_id", "local_id", "estado"),
+    )
+
+
+class OperacionCaja(Base):
+    """Registro de operaciones individuales en caja."""
+    __tablename__ = "operaciones_caja"
+
+    id = Column(Integer, primary_key=True, index=True)
+    turno_caja_id = Column(Integer, ForeignKey("turnos_caja.id", ondelete="CASCADE"), nullable=False)
+    
+    # Datos de la operación
+    tipo_operacion = Column(Enum(TipoOperacionCaja), nullable=False, index=True)
+    fecha_operacion = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+    monto = Column(Numeric(10, 2), nullable=False)
+    descripcion = Column(String, nullable=False)
+    observaciones = Column(Text, nullable=True)
+    
+    # Referencias opcionales
+    pedido_id = Column(Integer, ForeignKey("pedidos.id", ondelete="SET NULL"), nullable=True)  # Si viene de una venta
+    medio_pago_id = Column(Integer, ForeignKey("medios_pago.id", ondelete="RESTRICT"), nullable=True)  # Efectivo, tarjeta, etc.
+    
+    # Relaciones
+    turno = relationship("TurnoCaja", back_populates="operaciones")
+    pedido = relationship("Pedido", back_populates="operacion_caja")
+    medio_pago = relationship("MedioPago", back_populates="operaciones_caja")

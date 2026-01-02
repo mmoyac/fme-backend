@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 from typing import Annotated
 
 from database.database import get_db
-from database.models import User, Role, MenuItem as MenuItemModel
-from schemas.auth import User as UserSchema, UserCreate, Role as RoleSchema, RoleCreate, MenuItem as MenuItemSchema, MenuItemCreate
+from database.models import User, Role, MenuItem as MenuItemModel, Local
+from schemas.auth import User as UserSchema, UserCreate, UserUpdate, Role as RoleSchema, RoleCreate, MenuItem as MenuItemSchema, MenuItemCreate
 from routers.auth import get_current_active_user
 from utils.security import get_password_hash
 
@@ -183,6 +183,55 @@ def crear_usuario(
     db.commit()
     db.refresh(db_user)
     return db_user
+
+@router.get("/users/{user_id}", response_model=UserSchema)
+def obtener_usuario(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Obtener un usuario por ID."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    return user
+
+@router.put("/users/{user_id}", response_model=UserSchema)
+def actualizar_usuario(
+    user_id: int,
+    user_update: UserUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Actualizar un usuario."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    
+    # Validar rol si se proporciona
+    if user_update.role_id is not None:
+        role = db.query(Role).filter(Role.id == user_update.role_id).first()
+        if not role:
+            raise HTTPException(status_code=400, detail="Rol no encontrado")
+        user.role_id = user_update.role_id
+    
+    # Validar local si se proporciona
+    if user_update.local_defecto_id is not None:
+        from database.models import Local
+        local = db.query(Local).filter(Local.id == user_update.local_defecto_id).first()
+        if not local:
+            raise HTTPException(status_code=400, detail="Local no encontrado")
+        user.local_defecto_id = user_update.local_defecto_id
+    
+    # Actualizar otros campos
+    if user_update.nombre_completo is not None:
+        user.nombre_completo = user_update.nombre_completo
+    if user_update.is_active is not None:
+        user.is_active = user_update.is_active
+    
+    db.commit()
+    db.refresh(user)
+    return user
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_usuario(

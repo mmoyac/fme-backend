@@ -10,7 +10,7 @@ from sqlalchemy import func, and_, case
 import pytz
 
 from database.database import get_db
-from database.models import Pedido, ItemPedido, Producto, Inventario, Cliente, Local
+from database.models import Pedido, ItemPedido, Producto, Inventario, Cliente, Local, TurnoCaja, OperacionCaja, User, TipoOperacionCaja, EstadoTurnoCaja
 
 router = APIRouter()
 
@@ -161,6 +161,25 @@ def obtener_estadisticas_dashboard(db: Session = Depends(get_db)):
         for p in ultimos_pedidos
     ]
     
+    # --- MÉTRICAS DE CAJA (RESUMEN) ---
+    # Turnos abiertos actualmente
+    turnos_abiertos_count = db.query(func.count(TurnoCaja.id)).filter(
+        TurnoCaja.estado == EstadoTurnoCaja.ABIERTO
+    ).scalar() or 0
+    
+    # Ventas de caja del día (desde operaciones de caja)
+    ventas_caja_hoy = db.query(func.sum(OperacionCaja.monto)).filter(
+        func.date(OperacionCaja.fecha_operacion) == hoy,
+        OperacionCaja.tipo_operacion == TipoOperacionCaja.VENTA
+    ).scalar() or 0
+    
+    # Diferencias de cuadre pendientes (turnos cerrados con diferencia != 0)
+    diferencias_pendientes = db.query(func.count(TurnoCaja.id)).filter(
+        TurnoCaja.estado == EstadoTurnoCaja.CERRADO,
+        func.date(TurnoCaja.fecha_cierre) >= hace_7_dias,
+        TurnoCaja.diferencia != 0
+    ).scalar() or 0
+    
     return {
         'ventas': {
             'hoy': float(ventas_hoy),
@@ -179,5 +198,164 @@ def obtener_estadisticas_dashboard(db: Session = Depends(get_db)):
         'stock_bajo': productos_stock_bajo,
         'total_clientes': total_clientes,
         'ventas_por_dia': ventas_por_dia,
-        'ultimos_pedidos': pedidos_recientes
+        'ultimos_pedidos': pedidos_recientes,
+        'caja': {
+            'turnos_abiertos': turnos_abiertos_count,
+            'ventas_hoy': float(ventas_caja_hoy),
+            'diferencias_pendientes': diferencias_pendientes
+        }
+    }
+
+
+@router.get("/metricas-caja")
+def obtener_metricas_caja(db: Session = Depends(get_db)):
+    """
+    Obtiene métricas específicas del sistema de caja.
+    
+    Retorna:
+    - Turnos abiertos por local
+    - Ventas por vendedor del día
+    - Diferencias en cuadres recientes
+    - Resumen de operaciones por tipo
+    """
+    # Obtener fecha actual en zona horaria de Chile
+    ahora_chile = datetime.now(CHILE_TZ)
+    hoy = ahora_chile.date()
+    
+    # --- Turnos abiertos por local ---
+    turnos_abiertos = db.query(
+        TurnoCaja.id,
+        TurnoCaja.local_id,
+        Local.nombre.label('local_nombre'),
+        TurnoCaja.vendedor_id,
+        User.nombre_completo.label('vendedor_nombre'),
+        TurnoCaja.fecha_apertura,
+        TurnoCaja.monto_inicial
+    ).join(Local, TurnoCaja.local_id == Local.id)\
+     .join(User, TurnoCaja.vendedor_id == User.id)\
+     .filter(TurnoCaja.estado == EstadoTurnoCaja.ABIERTO)\
+     .all()
+    
+    turnos_info = []
+    for turno in turnos_abiertos:
+        # Calcular total de operaciones para este turno
+        total_operaciones = db.query(func.sum(OperacionCaja.monto)).filter(
+            OperacionCaja.turno_caja_id == turno.id,
+            OperacionCaja.tipo_operacion == TipoOperacionCaja.VENTA
+        ).scalar() or 0
+        
+        turnos_info.append({
+            'turno_id': turno.id,
+            'local_id': turno.local_id,
+            'local_nombre': turno.local_nombre,
+            'vendedor_id': turno.vendedor_id,
+            'vendedor_nombre': turno.vendedor_nombre,
+            'fecha_apertura': turno.fecha_apertura.strftime('%Y-%m-%d %H:%M:%S'),
+            'monto_inicial': float(turno.monto_inicial),
+            'ventas_acumuladas': float(total_operaciones),
+            'efectivo_esperado': float(turno.monto_inicial + total_operaciones)
+        })
+    
+    # --- Ventas por vendedor del día ---
+    ventas_por_vendedor = db.query(
+        User.id,
+        User.nombre_completo,
+        func.count(OperacionCaja.id).label('num_ventas'),
+        func.sum(OperacionCaja.monto).label('total_ventas')
+    ).join(TurnoCaja, User.id == TurnoCaja.vendedor_id)\
+     .join(OperacionCaja, TurnoCaja.id == OperacionCaja.turno_caja_id)\
+     .filter(
+         func.date(OperacionCaja.fecha_operacion) == hoy,
+         OperacionCaja.tipo_operacion == TipoOperacionCaja.VENTA
+     ).group_by(User.id, User.nombre_completo)\
+     .order_by(func.sum(OperacionCaja.monto).desc())\
+     .limit(10)\
+     .all()
+    
+    vendedores_stats = [
+        {
+            'vendedor_id': v.id,
+            'vendedor_nombre': v.nombre_completo,
+            'num_ventas': v.num_ventas,
+            'total_ventas': float(v.total_ventas or 0)
+        }
+        for v in ventas_por_vendedor
+    ]
+    
+    # --- Diferencias en cuadres recientes (últimos 7 días) ---
+    hace_7_dias = hoy - timedelta(days=7)
+    diferencias_cuadre = db.query(
+        TurnoCaja.id,
+        TurnoCaja.fecha_cierre,
+        Local.nombre.label('local_nombre'),
+        User.nombre_completo.label('vendedor_nombre'),
+        TurnoCaja.efectivo_esperado,
+        TurnoCaja.efectivo_real,
+        TurnoCaja.diferencia
+    ).join(Local, TurnoCaja.local_id == Local.id)\
+     .join(User, TurnoCaja.vendedor_id == User.id)\
+     .filter(
+         TurnoCaja.estado == EstadoTurnoCaja.CERRADO,
+         func.date(TurnoCaja.fecha_cierre) >= hace_7_dias,
+         TurnoCaja.diferencia != 0
+     ).order_by(TurnoCaja.fecha_cierre.desc())\
+     .limit(15)\
+     .all()
+    
+    diferencias_info = [
+        {
+            'turno_id': d.id,
+            'fecha_cierre': d.fecha_cierre.strftime('%Y-%m-%d %H:%M:%S'),
+            'local_nombre': d.local_nombre,
+            'vendedor_nombre': d.vendedor_nombre,
+            'efectivo_esperado': float(d.efectivo_esperado or 0),
+            'efectivo_real': float(d.efectivo_real or 0),
+            'diferencia': float(d.diferencia or 0),
+            'tipo_diferencia': 'sobrante' if (d.diferencia or 0) > 0 else 'faltante'
+        }
+        for d in diferencias_cuadre
+    ]
+    
+    # --- Resumen de operaciones por tipo (últimos 30 días) ---
+    hace_30_dias = hoy - timedelta(days=30)
+    resumen_operaciones = db.query(
+        OperacionCaja.tipo_operacion,
+        func.count(OperacionCaja.id).label('cantidad'),
+        func.sum(OperacionCaja.monto).label('total_monto')
+    ).filter(
+        func.date(OperacionCaja.fecha_operacion) >= hace_30_dias
+    ).group_by(OperacionCaja.tipo_operacion)\
+     .all()
+    
+    operaciones_resumen = [
+        {
+            'tipo': op.tipo_operacion.value,
+            'cantidad': op.cantidad,
+            'total_monto': float(op.total_monto or 0)
+        }
+        for op in resumen_operaciones
+    ]
+    
+    # --- Estadísticas generales ---
+    total_turnos_activos = len(turnos_abiertos)
+    total_vendedores_activos_hoy = len(vendedores_stats)
+    
+    return {
+        'fecha_consulta': hoy.isoformat(),
+        'turnos_abiertos': {
+            'total': total_turnos_activos,
+            'detalle': turnos_info
+        },
+        'ventas_por_vendedor_hoy': {
+            'total_vendedores_activos': total_vendedores_activos_hoy,
+            'detalle': vendedores_stats
+        },
+        'diferencias_cuadre_recientes': {
+            'total_con_diferencia': len(diferencias_info),
+            'detalle': diferencias_info
+        },
+        'resumen_operaciones_30d': {
+            'por_tipo': operaciones_resumen,
+            'total_operaciones': sum(op['cantidad'] for op in operaciones_resumen)
+        }
     }

@@ -289,6 +289,8 @@ docker-compose exec backend pytest tests/ --lf
 | `items_pedido` | Detalle de pedidos | `pedido_id`, `producto_id`, `cantidad`, `precio_unitario` |
 | `puntos_cliente` | Estado de puntos por cliente | `cliente_id`, `puntos_disponibles`, `puntos_totales_ganados` |
 | `movimientos_puntos` | Historial de puntos | `id`, `cliente_id`, `pedido_id`, `tipo_movimiento`, `puntos` |
+| `turnos_caja` | Turnos de trabajo en caja | `id`, `vendedor_id`, `local_id`, `fecha_apertura`, `estado`, `monto_inicial` |
+| `operaciones_caja` | Operaciones financieras | `id`, `turno_caja_id`, `tipo_operacion`, `monto`, `descripcion` |
 | `movimientos_inventario` | Historial de movimientos | `id`, `tipo_movimiento`, `cantidad`, `fecha` |
 
 ### 4.2. Relaciones Importantes
@@ -468,6 +470,25 @@ alembic upgrade head
 | `POST` | `/api/pedidos/backoffice` | Crear pedido con opción de canje de puntos |
 | `PUT` | `/api/pedidos/{id}` | Otorgar/devolver puntos según cambio de estado |
 
+### 6.8. Sistema de Caja (NUEVO)
+
+| Método | Endpoint | Descripción |
+| :--- | :--- | :--- |
+| `GET` | `/api/caja/estado` | Estado actual de caja del vendedor |
+| `POST` | `/api/caja/turno/abrir` | Abrir nuevo turno de caja |
+| `PUT` | `/api/caja/turno/{id}/cerrar` | Cerrar turno con conteo final |
+| `POST` | `/api/caja/operacion` | Registrar operación financiera |
+| `GET` | `/api/caja/turnos/historial` | Historial de turnos |
+| `GET` | `/api/caja/turno/{id}` | Detalle completo del turno |
+| `GET` | `/api/caja/turno/{id}/pdf` | Descargar PDF del cierre |
+
+### 6.9. Dashboard Mejorado
+
+| Método | Endpoint | Descripción |
+| :--- | :--- | :--- |
+| `GET` | `/api/dashboard/estadisticas` | Métricas de ventas y pedidos |
+| `GET` | `/api/dashboard/metricas-caja` | Estado de todas las cajas |
+
 ---
 
 ## 7. 🔐 Reglas de Negocio Críticas
@@ -503,7 +524,30 @@ CANCELADO
 | `AJUSTE` | Devolución por cancelación | Al cancelar pedido confirmado |
 | `ENTRADA_INICIAL` | Carga inicial de stock | Manualmente |
 
-### 7.4. Validaciones Importantes
+### 7.4. Sistema de Caja (NUEVO)
+
+**Estados de Turno:**
+```
+ABIERTO ← (apertura con monto inicial)
+  ↓
+CERRADO ← (cierre con conteo real y diferencia)
+```
+
+**Restricciones:**
+- Un vendedor solo puede tener **un turno abierto** a la vez
+- Solo puede abrir caja en su **local asignado** (`local_defecto_id`)
+- Las operaciones se registran automáticamente al confirmar pedidos
+- El cierre calcula automáticamente diferencias de efectivo
+
+**Tipos de Operaciones:**
+- `APERTURA`: Monto inicial del turno
+- `VENTA`: Registro automático de ventas
+- `INGRESO`: Dinero adicional que entra
+- `EGRESO`: Dinero que sale (gastos, vueltos)
+- `DEVOLUCION`: Devoluciones a clientes
+- `CIERRE`: Operación final del turno
+
+### 7.5. Validaciones Importantes
 
 - **SKU único:** No puede haber dos productos con el mismo SKU
 - **Email único:** No puede haber dos clientes con el mismo email
@@ -569,10 +613,14 @@ docker-compose exec db psql -U fme -d fme_database
 - ✅ Gestión de Precios por local
 - ✅ Sistema completo de Pedidos (5 estados)
 - ✅ Sistema completo de Puntos de Fidelización
+- ✅ **Sistema completo de Caja y Turnos** (NUEVO)
+- ✅ **Control de flujo de efectivo por vendedor** (NUEVO)
+- ✅ **Restricciones de usuario por local asignado** (NUEVO)
+- ✅ **Generación de PDFs para cierre de caja** (NUEVO)
 - ✅ Transferencias de inventario con historial
-- ✅ Dashboard con 10+ métricas analíticas
+- ✅ Dashboard con métricas analíticas y de caja
 - ✅ Timezone configurado (America/Santiago)
-- ✅ 32 tests automatizados (100% pasando)
+- ✅ 32+ tests automatizados (100% pasando)
 
 **Características Técnicas:**
 - FastAPI con Pydantic v2
@@ -625,8 +673,16 @@ backend:
 
 ---
 
-**Última Actualización:** 2025-12-31
+**Última Actualización:** 2026-01-02  
 **Cambios Recientes:**
+- ✅ **Sistema completo de Caja y Turnos implementado**
+- ✅ **Control de flujo de efectivo por vendedor y local**
+- ✅ **Restricciones de usuario por local asignado** (`local_defecto_id`)
+- ✅ **Generación automática de PDFs para cierre de caja**
+- ✅ **Dashboard con métricas de caja en tiempo real**
+- ✅ **Integración automática pedidos → operaciones de caja**
+- ✅ **Endpoint `/api/dashboard/metricas-caja` para supervisión**
+- ✅ **Validaciones de permisos por local en todos los endpoints de caja**
 - ✅ Sistema completo de Puntos de Fidelización implementado
 - ✅ PuntosService con cálculo por categoría de productos
 - ✅ Endpoints de clientes enriquecidos con información de puntos

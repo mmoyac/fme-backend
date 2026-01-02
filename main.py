@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from routers.auth import get_current_active_user
 
 # Importar routers
-from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, payments, test_payments, maestras, recetas, produccion, compras, cheques, puntos
+from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, payments, test_payments, maestras, recetas, produccion, compras, cheques, puntos, caja
 
 app = FastAPI(
     title="FME Backend API",
@@ -57,6 +57,7 @@ app.include_router(produccion.router, prefix="/api", tags=["Producción"])
 app.include_router(compras.router, prefix="/api", tags=["Compras"], dependencies=[Depends(get_current_active_user)])
 app.include_router(cheques.router, prefix="/api/cheques", tags=["Cheques"], dependencies=[Depends(get_current_active_user)])
 app.include_router(puntos.router, tags=["Puntos"])
+app.include_router(caja.router, prefix="/api/caja", tags=["Caja"], dependencies=[Depends(get_current_active_user)])
 
 @app.get("/")
 async def root():

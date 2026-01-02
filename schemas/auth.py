@@ -18,10 +18,17 @@ class UserBase(BaseModel):
     email: str
     nombre_completo: Optional[str] = None
     is_active: Optional[bool] = True
+    local_defecto_id: Optional[int] = None
 
 class UserCreate(UserBase):
     password: str
     role_id: int
+
+class UserUpdate(BaseModel):
+    nombre_completo: Optional[str] = None
+    is_active: Optional[bool] = None
+    local_defecto_id: Optional[int] = None
+    role_id: Optional[int] = None
 
 class User(UserBase):
     id: int
