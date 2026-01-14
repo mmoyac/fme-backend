@@ -14,7 +14,7 @@ ICON_MAP = {
     "/admin/produccion": "🏭",
     "/admin/precios": "💲",
     "/admin/mantenedores": "⚙️",
-    "/admin/users": "👥"
+    "/admin/usuarios": "👥"
 }
 
 def fix_icons():

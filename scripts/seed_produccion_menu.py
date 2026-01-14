@@ -14,7 +14,7 @@ REQUIRED_ITEMS = [
     {"nombre": "Producción", "href": "/admin/produccion", "icon": "Factory", "orden": 6},
     {"nombre": "Precios", "href": "/admin/precios", "icon": "DollarSign", "orden": 7},
     {"nombre": "Mantenedores", "href": "/admin/mantenedores", "icon": "Settings", "orden": 8},
-    {"nombre": "Usuarios", "href": "/admin/users", "icon": "Users", "orden": 9},
+    {"nombre": "Usuarios", "href": "/admin/usuarios", "icon": "Users", "orden": 9},
 ]
 
 def seed_menu():
