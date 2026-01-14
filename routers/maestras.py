@@ -17,6 +17,7 @@ from database.models import TipoVehiculo as TipoVehiculoModel
 from database.models import EstadoEnrolamiento as EstadoEnrolamientoModel
 from database.models import Ubicacion as UbicacionModel
 from database.models import TipoVenta as TipoVentaModel
+from database.models import TipoProveedor as TipoProveedorModel
 from database.models import User
 from schemas.maestras import (
     CategoriaProducto, CategoriaProductoCreate, CategoriaProductoUpdate,
@@ -1306,3 +1307,188 @@ def listar_productos_carnes(db: Session = Depends(get_db)):
         }
         for p in productos
     ]
+
+
+# ============================================
+# ENDPOINTS DE CARGA INICIAL
+# ============================================
+
+@router.post("/seed/all")
+def seed_all_maestras(
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Cargar datos iniciales para todas las tablas maestras.
+    Solo ejecuta si las tablas están vacías.
+    """
+    result = {
+        "status": "success",
+        "loaded": [],
+        "skipped": [],
+        "errors": []
+    }
+    
+    try:
+        # 1. Categorías de producto
+        if db.query(CategoriaProductoModel).count() == 0:
+            categorias = [
+                {"nombre": "Panificados", "descripcion": "Productos de panadería"},
+                {"nombre": "Lácteos", "descripcion": "Productos lácteos"},
+                {"nombre": "Carnes", "descripcion": "Productos cárnicos"},
+                {"nombre": "Verduras", "descripcion": "Productos vegetales"},
+                {"nombre": "Frutas", "descripcion": "Productos frutales"},
+                {"nombre": "Bebidas", "descripcion": "Bebidas y líquidos"},
+                {"nombre": "Snacks", "descripcion": "Aperitivos y snacks"},
+                {"nombre": "Abarrotes", "descripcion": "Productos de abarrotes"}
+            ]
+            
+            for cat_data in categorias:
+                categoria = CategoriaProductoModel(**cat_data)
+                db.add(categoria)
+            
+            db.commit()
+            result["loaded"].append(f"Categorías: {len(categorias)} items")
+        else:
+            result["skipped"].append("Categorías (ya existen)")
+        
+        # 2. Tipos de documento
+        if db.query(TipoDocumentoModel).count() == 0:
+            tipos_doc = [
+                {"codigo": "BOL", "nombre": "Boleta", "descripcion": "Boleta de venta"},
+                {"codigo": "FAC", "nombre": "Factura", "descripcion": "Factura de venta"},
+                {"codigo": "NC", "nombre": "Nota de Crédito", "descripcion": "Nota de crédito"},
+                {"codigo": "ND", "nombre": "Nota de Débito", "descripcion": "Nota de débito"}
+            ]
+            
+            for doc_data in tipos_doc:
+                tipo_doc = TipoDocumentoModel(**doc_data)
+                db.add(tipo_doc)
+            
+            db.commit()
+            result["loaded"].append(f"Tipos de documento: {len(tipos_doc)} items")
+        else:
+            result["skipped"].append("Tipos de documento (ya existen)")
+        
+        # 3. Unidades de medida
+        if db.query(UnidadMedidaModel).count() == 0:
+            unidades = [
+                {"nombre": "Kilogramo", "simbolo": "kg", "factor": 1.0},
+                {"nombre": "Gramo", "simbolo": "g", "factor": 0.001},
+                {"nombre": "Unidad", "simbolo": "un", "factor": 1.0},
+                {"nombre": "Litro", "simbolo": "l", "factor": 1.0},
+                {"nombre": "Metro", "simbolo": "m", "factor": 1.0},
+                {"nombre": "Caja", "simbolo": "caja", "factor": 1.0},
+                {"nombre": "Bolsa", "simbolo": "bolsa", "factor": 1.0}
+            ]
+            
+            for unidad_data in unidades:
+                unidad = UnidadMedidaModel(**unidad_data)
+                db.add(unidad)
+            
+            db.commit()
+            result["loaded"].append(f"Unidades de medida: {len(unidades)} items")
+        else:
+            result["skipped"].append("Unidades de medida (ya existen)")
+        
+        # 4. Medios de pago
+        if db.query(MedioPagoModel).count() == 0:
+            medios_pago = [
+                {"nombre": "Efectivo", "activo": True},
+                {"nombre": "Tarjeta de Débito", "activo": True},
+                {"nombre": "Tarjeta de Crédito", "activo": True},
+                {"nombre": "Transferencia", "activo": True},
+                {"nombre": "Cheque", "activo": True},
+                {"nombre": "MercadoPago", "activo": True}
+            ]
+            
+            for pago_data in medios_pago:
+                medio_pago = MedioPagoModel(**pago_data)
+                db.add(medio_pago)
+            
+            db.commit()
+            result["loaded"].append(f"Medios de pago: {len(medios_pago)} items")
+        else:
+            result["skipped"].append("Medios de pago (ya existen)")
+        
+        # 5. Estados de cheque
+        if db.query(EstadoChequeModel).count() == 0:
+            estados_cheque = [
+                {"nombre": "Recibido", "descripcion": "Cheque recibido"},
+                {"nombre": "Depositado", "descripcion": "Cheque depositado"},
+                {"nombre": "Cobrado", "descripcion": "Cheque cobrado"},
+                {"nombre": "Rebotado", "descripcion": "Cheque rebotado"},
+                {"nombre": "Cancelado", "descripcion": "Cheque cancelado"}
+            ]
+            
+            for estado_data in estados_cheque:
+                estado = EstadoChequeModel(**estado_data)
+                db.add(estado)
+            
+            db.commit()
+            result["loaded"].append(f"Estados de cheque: {len(estados_cheque)} items")
+        else:
+            result["skipped"].append("Estados de cheque (ya existen)")
+        
+        # 6. Bancos
+        if db.query(BancoModel).count() == 0:
+            bancos = [
+                {"nombre": "Banco de Chile", "codigo": "001"},
+                {"nombre": "Banco Santander", "codigo": "037"},
+                {"nombre": "Banco Estado", "codigo": "012"},
+                {"nombre": "Banco BCI", "codigo": "009"},
+                {"nombre": "Banco Falabella", "codigo": "051"},
+                {"nombre": "Banco Itaú", "codigo": "039"},
+                {"nombre": "Banco Security", "codigo": "049"}
+            ]
+            
+            for banco_data in bancos:
+                banco = BancoModel(**banco_data)
+                db.add(banco)
+            
+            db.commit()
+            result["loaded"].append(f"Bancos: {len(bancos)} items")
+        else:
+            result["skipped"].append("Bancos (ya existen)")
+        
+        # 7. Tipos de venta
+        if db.query(TipoVentaModel).count() == 0:
+            tipos_venta = [
+                {"nombre": "Unitario", "descripcion": "Venta por unidades"},
+                {"nombre": "Por Peso", "descripcion": "Venta por peso en kg"}
+            ]
+            
+            for tipo_data in tipos_venta:
+                tipo_venta = TipoVentaModel(**tipo_data)
+                db.add(tipo_venta)
+            
+            db.commit()
+            result["loaded"].append(f"Tipos de venta: {len(tipos_venta)} items")
+        else:
+            result["skipped"].append("Tipos de venta (ya existen)")
+        
+    except Exception as e:
+        db.rollback()
+        result["status"] = "error"
+        result["errors"].append(str(e))
+    
+    return result
+
+
+@router.get("/seed/status")
+def get_seed_status(
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Verificar estado de las tablas maestras.
+    """
+    return {
+        "categorias": db.query(CategoriaProductoModel).count(),
+        "tipos_documento": db.query(TipoDocumentoModel).count(),
+        "unidades_medida": db.query(UnidadMedidaModel).count(),
+        "medios_pago": db.query(MedioPagoModel).count(),
+        "estados_cheque": db.query(EstadoChequeModel).count(),
+        "bancos": db.query(BancoModel).count(),
+        "tipos_venta": db.query(TipoVentaModel).count()
+    }
