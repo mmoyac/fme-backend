@@ -58,6 +58,9 @@ class ProductoResponse(ProductoBase):
     # Información de categoría
     categoria_nombre: Optional[str] = None
     categoria_puntos_fidelidad: Optional[int] = None
+    # Información de tipo de venta (peso vs cantidad)
+    tipo_venta_codigo: Optional[str] = None  # UNITARIO, PESO_SUELTO, CAJA_VARIABLE
+    tipo_venta_nombre: Optional[str] = None
 
     class Config:
         from_attributes = True

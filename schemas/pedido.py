@@ -16,6 +16,18 @@ class EstadoPedido(str, Enum):
     CANCELADO = "CANCELADO"
 
 
+class TipoPedidoCodigo(str, Enum):
+    """Códigos de tipos de pedido disponibles."""
+    PRODUCTOS = "PRODUCTOS"  # Productos regulares (inventario normal)
+    CAJAS_VARIABLES = "CAJAS_VARIABLES"  # Cajas de carne (stock cajas proveedor)
+
+
+class TipoPedidoCodigo(str, Enum):
+    """Códigos de tipos de pedido disponibles."""
+    PRODUCTOS = "PRODUCTOS"  # Productos regulares (inventario normal)
+    CAJAS_VARIABLES = "CAJAS_VARIABLES"  # Cajas de carne (stock cajas proveedor)
+
+
 # ============================================
 # Schemas para crear pedido desde frontend
 # ============================================
@@ -23,7 +35,7 @@ class EstadoPedido(str, Enum):
 class ItemPedidoCreateFrontend(BaseModel):
     """Item de pedido desde el carrito."""
     sku: str
-    cantidad: int = Field(..., gt=0)
+    cantidad: float = Field(..., gt=0)
 
 
 class PedidoCreateFrontend(BaseModel):
@@ -34,9 +46,18 @@ class PedidoCreateFrontend(BaseModel):
     cliente_email: str = Field(..., min_length=5)
     cliente_telefono: str = Field(..., min_length=9, max_length=20)
     
+    # Campos tributarios del cliente
+    cliente_rut: Optional[str] = Field(None, max_length=20, description="RUT del cliente (obligatorio para factura)")
+    cliente_razon_social: Optional[str] = Field(None, max_length=255, description="Razón social empresarial")
+    cliente_giro: Optional[str] = Field(None, max_length=255, description="Actividad comercial")
+    cliente_es_empresa: bool = Field(default=False, description="Indica si requiere factura")
+    
     # Dirección de entrega
     direccion_entrega: str = Field(..., min_length=5, max_length=200)
     comuna: Optional[str] = Field(None, max_length=100)
+    
+    # Tipo de documento tributario
+    tipo_documento_codigo: Optional[str] = Field(default="BOL", description="Código del tipo de documento (BOL, FAC)")
     
     # Notas adicionales
     notas: Optional[str] = Field(None, max_length=500)
@@ -59,7 +80,7 @@ class ItemPedidoCreateBackoffice(BaseModel):
     """Item de pedido desde el backoffice."""
     sku: str
     producto_id: int = Field(..., gt=0)
-    cantidad: int = Field(..., gt=0)
+    cantidad: float = Field(..., gt=0)
     precio_unitario_venta: float = Field(..., gt=0)
 
 
@@ -72,6 +93,8 @@ class PedidoCreateBackoffice(BaseModel):
     direccion_entrega: str
     local_id: int = Field(..., gt=0)
     medio_pago_id: int = Field(..., gt=0)
+    tipo_pedido_id: Optional[int] = Field(default=1, description="ID del tipo de pedido (1=PRODUCTOS, 2=CAJAS_VARIABLES)")
+    tipo_documento_tributario_id: Optional[int] = Field(default=2, description="ID del tipo de documento (2=BOL, 1=FAC)")
     notas: Optional[str] = None
     # Puntos a usar (opcional)
     puntos_usar: Optional[int] = Field(default=0, ge=0, description="Puntos a usar para descuento")
@@ -162,6 +185,7 @@ class PedidoConRelaciones(BaseModel):
     cliente_id: int
     local_id: int
     local_despacho_id: Optional[int] = None
+    tipo_pedido_id: Optional[int] = None
     numero_pedido: Optional[str] = None
     fecha_pedido: datetime
     total: float
@@ -179,6 +203,21 @@ class PedidoConRelaciones(BaseModel):
     puntos_ganados: Optional[int] = None
     puntos_usados: Optional[int] = None
     descuento_puntos: Optional[float] = None
+    
+    # Control SII (Facturación Electrónica)
+    tipo_documento_tributario_id: Optional[int] = None
+    tipo_documento_codigo: Optional[str] = None
+    tipo_documento_nombre: Optional[str] = None
+    estado_sii: Optional[str] = None
+    folio_sii: Optional[str] = None
+    numero_dte: Optional[str] = None
+    fecha_envio_sii: Optional[datetime] = None
+    fecha_respuesta_sii: Optional[datetime] = None
+    observaciones_sii: Optional[str] = None
+    
+    # Información de tipo de pedido
+    tipo_pedido_codigo: Optional[str] = Field(None, description="Código del tipo de pedido")
+    tipo_pedido_nombre: Optional[str] = Field(None, description="Nombre del tipo de pedido")
     cliente: Optional["ClienteResponse"] = None
     items: List["ItemPedidoResponse"] = []
 

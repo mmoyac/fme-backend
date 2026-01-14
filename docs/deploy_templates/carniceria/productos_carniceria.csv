@@ -1,0 +1,11 @@
+nombre,sku,descripcion,categoria_codigo,tipo_producto_codigo,precio_web,es_vendible_web,stock_minimo
+Asado de Tira,CAR-001,Asado de tira premium por kg,CARNES,MATERIA_PRIMA,5500,true,5
+Lomo Liso,CAR-002,Lomo liso de vacuno premium por kg,CARNES,MATERIA_PRIMA,8900,true,3
+Pollo Entero,CAR-003,Pollo entero fresco por unidad,AVES,MATERIA_PRIMA,2800,true,10
+Costillar de Cerdo,CAR-004,Costillar de cerdo por kg,CARNES,MATERIA_PRIMA,4200,true,4
+Chuleta de Cerdo,CAR-005,Chuleta de cerdo por kg,CARNES,MATERIA_PRIMA,3800,true,6
+Pechuga de Pollo,CAR-006,Pechuga de pollo deshuesada por kg,AVES,MATERIA_PRIMA,4500,true,8
+Chorizos Caseros,CHO-001,Chorizos artesanales por kg,CECINAS,PRODUCTO_ELABORADO,6200,true,5
+Morcilla,MOR-001,Morcilla tradicional por kg,CECINAS,PRODUCTO_ELABORADO,3900,true,3
+Prieta,PRI-001,Prieta casera por kg,CECINAS,PRODUCTO_ELABORADO,4100,true,3
+Carne Molida,CAR-007,Carne molida de vacuno por kg,CARNES,PRODUCTO_ELABORADO,4800,true,8

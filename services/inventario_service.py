@@ -6,7 +6,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
-from database.models import Inventario, Producto, Local, Precio
+from database.models import Inventario, Producto, Local, Precio, CategoriaProducto, TipoVenta
 
 
 def get_catalogo_web(db: Session) -> List[dict]:
@@ -29,13 +29,28 @@ def get_catalogo_web(db: Session) -> List[dict]:
             Producto.descripcion,
             Producto.imagen_url,
             Precio.monto_precio.label('precio'),
-            func.coalesce(func.sum(Inventario.cantidad_stock), 0).label('stock_total')
+            func.coalesce(func.sum(Inventario.cantidad_stock), 0).label('stock_total'),
+            CategoriaProducto.codigo.label('categoria_codigo'),
+            TipoVenta.codigo.label('tipo_venta_codigo'),
+            TipoVenta.nombre.label('tipo_venta_nombre')
         )
         .join(Precio, (Precio.producto_id == Producto.id) & (Precio.local_id == local_web.id))
+        .join(CategoriaProducto, CategoriaProducto.id == Producto.categoria_id)
+        .outerjoin(TipoVenta, TipoVenta.id == CategoriaProducto.tipo_venta_id)
         .outerjoin(Inventario, Inventario.producto_id == Producto.id)
         .outerjoin(Local, Local.id == Inventario.local_id)
         .filter((Local.codigo != 'WEB') | (Local.codigo == None))
-        .group_by(Producto.id, Producto.sku, Producto.nombre, Producto.descripcion, Producto.imagen_url, Precio.monto_precio)
+        .group_by(
+            Producto.id, 
+            Producto.sku, 
+            Producto.nombre, 
+            Producto.descripcion, 
+            Producto.imagen_url, 
+            Precio.monto_precio,
+            CategoriaProducto.codigo,
+            TipoVenta.codigo,
+            TipoVenta.nombre
+        )
         .order_by(Producto.nombre)
         .all()
     )
@@ -47,7 +62,9 @@ def get_catalogo_web(db: Session) -> List[dict]:
             "descripcion": r.descripcion or "",
             "imagen_url": r.imagen_url,
             "precio": float(r.precio),
-            "stock_total": int(r.stock_total)
+            "stock_total": int(r.stock_total),
+            "tipo_venta_codigo": r.tipo_venta_codigo,
+            "tipo_venta_nombre": r.tipo_venta_nombre
         }
         for r in resultados
     ]

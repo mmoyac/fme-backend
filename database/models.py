@@ -12,6 +12,36 @@ import enum
 # 1. TABLAS MAESTRAS
 # --------------------------------------------------
 
+class TipoPedido(Base):
+    """Tipos de pedido para distinguir manejo de inventario."""
+    __tablename__ = "tipos_pedido"
+
+    id = Column(Integer, primary_key=True, index=True)
+    codigo = Column(String, unique=True, nullable=False, index=True)
+    nombre = Column(String, nullable=False, index=True)
+    descripcion = Column(String)
+    activo = Column(Boolean, default=True)
+    local_despacho_default_id = Column(Integer, ForeignKey("locales.id", ondelete="SET NULL"), nullable=True)
+
+    # Relaciones
+    pedidos = relationship("Pedido", back_populates="tipo_pedido")
+    local_despacho_default = relationship("Local", foreign_keys=[local_despacho_default_id])
+
+
+class TipoLocal(Base):
+    """Tipos de locales: VENTA, FRIGORIFICO, etc."""
+    __tablename__ = "tipos_local"
+
+    id = Column(Integer, primary_key=True, index=True)
+    codigo = Column(String, unique=True, nullable=False, index=True)
+    nombre = Column(String, nullable=False, index=True)
+    descripcion = Column(String)
+    activo = Column(Boolean, default=True)
+
+    # Relaciones
+    locales = relationship("Local", back_populates="tipo_local")
+
+
 class CategoriaProducto(Base):
     """Categorías de productos para clasificación y puntos de fidelidad."""
     __tablename__ = "categorias_producto"
@@ -21,9 +51,11 @@ class CategoriaProducto(Base):
     nombre = Column(String, nullable=False, index=True)
     descripcion = Column(String)
     puntos_fidelidad = Column(Integer, default=0)
+    tipo_venta_id = Column(Integer, ForeignKey("tipos_venta.id", ondelete="SET NULL"), nullable=True)
     activo = Column(Boolean, default=True)
 
     # Relaciones
+    tipo_venta = relationship("TipoVenta", back_populates="categorias")
     productos = relationship("Producto", back_populates="categoria")
 
 
@@ -49,10 +81,83 @@ class TipoDocumento(Base):
     id = Column(Integer, primary_key=True, index=True)
     codigo = Column(String, unique=True, nullable=False, index=True)
     nombre = Column(String, nullable=False)
+    descripcion = Column(String)
     activo = Column(Boolean, default=True)
 
     # Relaciones
     compras = relationship("Compra", back_populates="tipo_documento_rel")
+    pedidos = relationship("Pedido", back_populates="tipo_documento_tributario")
+
+
+class TipoVenta(Base):
+    """Tipos de venta: UNITARIO, PESO_SUELTO, CAJA_VARIABLE."""
+    __tablename__ = "tipos_venta"
+
+    id = Column(Integer, primary_key=True, index=True)
+    codigo = Column(String, unique=True, nullable=False, index=True)
+    nombre = Column(String, nullable=False)
+    descripcion = Column(String)
+    activo = Column(Boolean, default=True)
+
+    # Relaciones
+    categorias = relationship("CategoriaProducto", back_populates="tipo_venta")
+
+
+class TipoProveedor(Base):
+    """Tipos de proveedor: CARNES, LACTEOS, PANADERIA, etc."""
+    __tablename__ = "tipos_proveedor"
+
+    id = Column(Integer, primary_key=True, index=True)
+    codigo = Column(String, unique=True, nullable=False, index=True)
+    nombre = Column(String, nullable=False)
+    descripcion = Column(String)
+    activo = Column(Boolean, default=True)
+
+    # Relaciones
+    proveedores = relationship("Proveedor", back_populates="tipo_proveedor")
+
+
+class TipoVehiculo(Base):
+    """Tipos de vehículo para enrolamiento: CAMION, FURGON, CAMIONETA."""
+    __tablename__ = "tipos_vehiculo"
+
+    id = Column(Integer, primary_key=True, index=True)
+    codigo = Column(String, unique=True, nullable=False, index=True)
+    nombre = Column(String, nullable=False)
+    descripcion = Column(String)
+    activo = Column(Boolean, default=True)
+
+    # Relaciones
+    enrolamientos = relationship("Enrolamiento", back_populates="tipo_vehiculo")
+
+
+class EstadoEnrolamiento(Base):
+    """Estados del proceso de enrolamiento: PENDIENTE, EN_PROCESO, FINALIZADO."""
+    __tablename__ = "estados_enrolamiento"
+
+    id = Column(Integer, primary_key=True, index=True)
+    codigo = Column(String, unique=True, nullable=False, index=True)
+    nombre = Column(String, nullable=False)
+    descripcion = Column(String)
+    activo = Column(Boolean, default=True)
+
+    # Relaciones
+    enrolamientos = relationship("Enrolamiento", back_populates="estado")
+
+
+class Ubicacion(Base):
+    """Ubicaciones físicas dentro del almacén para trazabilidad de lotes."""
+    __tablename__ = "ubicaciones"
+
+    id = Column(Integer, primary_key=True, index=True)
+    codigo = Column(String, unique=True, nullable=False, index=True)  # P1-A-01, P1-B-02, etc.
+    nombre = Column(String, nullable=False)
+    descripcion = Column(String)
+    capacidad_maxima = Column(Integer, default=0)  # Número máximo de cajas
+    activo = Column(Boolean, default=True)
+
+    # Relaciones
+    lotes = relationship("Lote", back_populates="ubicacion")
 
 
 class UnidadMedida(Base):
@@ -163,6 +268,7 @@ class Producto(Base):
     inventarios = relationship("Inventario", back_populates="producto", cascade="all, delete-orphan")
     precios = relationship("Precio", back_populates="producto", cascade="all, delete-orphan")
     items_pedido = relationship("ItemPedido", back_populates="producto")
+    stock_cajas = relationship("StockCajasProveedor", back_populates="producto", cascade="all, delete-orphan")
     
     # Relaciones de producción
     recetas = relationship("Receta", back_populates="producto", cascade="all, delete-orphan")
@@ -181,8 +287,10 @@ class Local(Base):
     nombre = Column(String, unique=True, nullable=False, index=True)
     direccion = Column(String)
     activo = Column(Boolean, default=True)
+    tipo_local_id = Column(Integer, ForeignKey("tipos_local.id", ondelete="SET NULL"), nullable=True)
     
     # Relaciones
+    tipo_local = relationship("TipoLocal", back_populates="locales")
     inventarios = relationship("Inventario", back_populates="local", cascade="all, delete-orphan")
     precios = relationship("Precio", back_populates="local", cascade="all, delete-orphan")
     pedidos = relationship("Pedido", back_populates="local", foreign_keys="Pedido.local_id")
@@ -202,6 +310,12 @@ class Cliente(Base):
     direccion = Column(String)
     comuna = Column(String)
     
+    # Campos tributarios
+    rut = Column(String, nullable=True, index=True)  # RUT para facturas
+    razon_social = Column(String, nullable=True)  # Nombre empresarial
+    giro = Column(String, nullable=True)  # Actividad comercial
+    es_empresa = Column(Boolean, default=False)  # Si requiere factura
+    
     # Campos de crédito
     limite_credito = Column(Numeric(10, 2), nullable=False, default=0.00)
     credito_usado = Column(Numeric(10, 2), nullable=False, default=0.00)
@@ -218,6 +332,16 @@ class TipoMovimientoPuntos(enum.Enum):
     USADOS = "USADOS"        # Puntos usados en compras
     VENCIDOS = "VENCIDOS"    # Puntos vencidos por tiempo
     AJUSTE = "AJUSTE"        # Ajustes manuales
+
+
+class EstadoSII(enum.Enum):
+    """Estados de procesamiento SII para facturas."""
+    PENDIENTE = "PENDIENTE"        # Factura creada, pendiente de envío al SII
+    ENVIADO = "ENVIADO"           # Enviado al SII, esperando respuesta
+    APROBADO = "APROBADO"         # Aprobado por el SII (factura válida)
+    RECHAZADO = "RECHAZADO"       # Rechazado por el SII
+    ERROR_ENVIO = "ERROR_ENVIO"   # Error técnico al enviar
+    NO_APLICA = "NO_APLICA"       # No requiere SII (boletas)
 
 
 class PuntosCliente(Base):
@@ -332,6 +456,28 @@ class Precio(Base):
     )
 
 
+class PrecioProveedor(Base):
+    """Precios de productos por proveedor (para cajas variables)."""
+    __tablename__ = "precios_proveedor"
+
+    id = Column(Integer, primary_key=True, index=True)
+    producto_id = Column(Integer, ForeignKey("productos.id", ondelete="CASCADE"), nullable=False)
+    proveedor_id = Column(Integer, ForeignKey("proveedores.id", ondelete="CASCADE"), nullable=False)
+    precio_kg = Column(Numeric(10, 2), nullable=False)  # Precio por kilogramo
+    fecha_vigencia = Column(DateTime(timezone=True), server_default=func.now())
+    activo = Column(Boolean, default=True)
+    notas = Column(String, nullable=True)  # Notas sobre el precio (temporal, promocional, etc.)
+    
+    # Relaciones
+    producto = relationship("Producto")
+    proveedor = relationship("Proveedor")
+    
+    # Constraint: Un producto solo puede tener un precio activo por proveedor
+    __table_args__ = (
+        UniqueConstraint('producto_id', 'proveedor_id', name='uix_precio_producto_proveedor'),
+    )
+
+
 # --------------------------------------------------
 # 3. Tablas de Venta (Transaccionales)
 # --------------------------------------------------
@@ -345,6 +491,8 @@ class Pedido(Base):
     local_id = Column(Integer, ForeignKey("locales.id", ondelete="RESTRICT"), nullable=False)
     local_despacho_id = Column(Integer, ForeignKey("locales.id", ondelete="RESTRICT"), nullable=True)  # Local de donde se despacha
     medio_pago_id = Column(Integer, ForeignKey("medios_pago.id", ondelete="RESTRICT"), nullable=True)  # Medio de pago utilizado
+    tipo_pedido_id = Column(Integer, ForeignKey("tipos_pedido.id", ondelete="RESTRICT"), nullable=False, default=1)  # Tipo de inventario a usar
+    tipo_documento_tributario_id = Column(Integer, ForeignKey("tipos_documento_tributario.id", ondelete="RESTRICT"), nullable=True, default=1)  # BOLETA por defecto
     fecha_pedido = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
     monto_total = Column(Float, default=0.00)
     estado = Column(String, nullable=False, default="PENDIENTE")  # PENDIENTE, CONFIRMADO, EN_PREPARACION, ENTREGADO, CANCELADO
@@ -363,15 +511,28 @@ class Pedido(Base):
     mp_payment_id = Column(String, nullable=True)     # ID único del pago en MP
     mp_status = Column(String, nullable=True)         # Estado del pago (approved, pending, etc)
     mp_external_reference = Column(String, nullable=True) # Referencia externa (nuestro ID de pedido)
+    
+    # Control SII (Facturación Electrónica)
+    estado_sii = Column(String, nullable=True, default="PENDIENTE")  # PENDIENTE, ENVIADO, APROBADO, RECHAZADO
+    folio_sii = Column(String, nullable=True, index=True)  # Número oficial del SII
+    numero_dte = Column(String, nullable=True, index=True)  # Número DTE (Documento Tributario Electrónico)
+    fecha_envio_sii = Column(DateTime(timezone=True), nullable=True)  # Cuándo se envió al SII
+    fecha_respuesta_sii = Column(DateTime(timezone=True), nullable=True)  # Respuesta del SII
+    xml_sii = Column(Text, nullable=True)  # XML generado para el SII
+    respuesta_sii = Column(Text, nullable=True)  # Respuesta completa del SII
+    observaciones_sii = Column(Text, nullable=True)  # Notas sobre el proceso SII
 
     # Relaciones
     cliente = relationship("Cliente", back_populates="pedidos")
     local = relationship("Local", back_populates="pedidos", foreign_keys=[local_id])
     local_despacho = relationship("Local", foreign_keys=[local_despacho_id])
     medio_pago = relationship("MedioPago", back_populates="pedidos")
+    tipo_pedido = relationship("TipoPedido", back_populates="pedidos")
+    tipo_documento_tributario = relationship("TipoDocumento", back_populates="pedidos")
     items = relationship("ItemPedido", back_populates="pedido", cascade="all, delete-orphan")
     cheques = relationship("Cheque", back_populates="pedido", cascade="all, delete-orphan")
     operacion_caja = relationship("OperacionCaja", back_populates="pedido", uselist=False)
+    despacho = relationship("Despacho", back_populates="pedido", uselist=False)
 
 
 class Cheque(Base):
@@ -413,16 +574,18 @@ class ItemPedido(Base):
     id = Column(Integer, primary_key=True, index=True)
     pedido_id = Column(Integer, ForeignKey("pedidos.id", ondelete="CASCADE"), nullable=False)
     producto_id = Column(Integer, ForeignKey("productos.id", ondelete="RESTRICT"), nullable=False)
-    cantidad = Column(Integer, nullable=False)
+    lote_id = Column(Integer, ForeignKey("lotes.id", ondelete="RESTRICT"), nullable=True)  # Para productos con trazabilidad
+    cantidad = Column(Float, nullable=False)  # Cambiado a Float para permitir decimales (ej: 0.5 kg)
     precio_unitario_venta = Column(Float, nullable=False)
     
     # Relaciones
     pedido = relationship("Pedido", back_populates="items")
     producto = relationship("Producto", back_populates="items_pedido")
+    lote = relationship("Lote", back_populates="items_pedido")
     
-    # Constraint: Un producto no puede repetirse en el mismo pedido
+    # Constraint: Un producto no puede repetirse en el mismo pedido (excepto si tiene lotes diferentes)
     __table_args__ = (
-        UniqueConstraint('pedido_id', 'producto_id', name='uix_item_pedido_producto'),
+        UniqueConstraint('pedido_id', 'producto_id', 'lote_id', name='uix_item_pedido_producto_lote'),
     )
 
 
@@ -599,10 +762,86 @@ class Proveedor(Base):
     email = Column(String)
     telefono = Column(String)
     direccion = Column(String)
+    tipo_proveedor_id = Column(Integer, ForeignKey("tipos_proveedor.id", ondelete="SET NULL"), nullable=True)
     activo = Column(Boolean, default=True)
 
     # Relaciones
+    tipo_proveedor = relationship("TipoProveedor", back_populates="proveedores")
     compras = relationship("Compra", back_populates="proveedor")
+    enrolamientos = relationship("Enrolamiento", back_populates="proveedor")
+    stock_cajas = relationship("StockCajasProveedor", back_populates="proveedor", cascade="all, delete-orphan")
+
+
+class Enrolamiento(Base):
+    """Sistema de enrolamiento de vehículos para recepción de mercadería."""
+    __tablename__ = "enrolamientos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Datos del vehículo
+    tipo_vehiculo_id = Column(Integer, ForeignKey("tipos_vehiculo.id", ondelete="RESTRICT"), nullable=False)
+    patente = Column(String, nullable=False, index=True)
+    chofer = Column(String, nullable=False)
+    
+    # Datos del proveedor y documento
+    proveedor_id = Column(Integer, ForeignKey("proveedores.id", ondelete="RESTRICT"), nullable=False)
+    numero_documento = Column(String, nullable=False)  # Número de guía o factura
+    
+    # Control de proceso
+    estado_id = Column(Integer, ForeignKey("estados_enrolamiento.id", ondelete="RESTRICT"), nullable=False)
+    usuario_registro_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    fecha_inicio = Column(DateTime(timezone=True), server_default=func.now())
+    fecha_termino = Column(DateTime(timezone=True), nullable=True)
+    
+    # Observaciones
+    notas = Column(Text)
+    
+    # Relaciones
+    tipo_vehiculo = relationship("TipoVehiculo", back_populates="enrolamientos")
+    proveedor = relationship("Proveedor", back_populates="enrolamientos")
+    estado = relationship("EstadoEnrolamiento", back_populates="enrolamientos")
+    usuario_registro = relationship("User", foreign_keys=[usuario_registro_id])
+    lotes = relationship("Lote", back_populates="enrolamiento")
+
+
+class Lote(Base):
+    """Lotes individuales para trazabilidad de productos con caja variable (especialmente carnes)."""
+    __tablename__ = "lotes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    codigo_lote = Column(String, unique=True, nullable=False, index=True)  # Código generado único
+    
+    # Relación con enrolamiento (cuando está finalizado)
+    enrolamiento_id = Column(Integer, ForeignKey("enrolamientos.id", ondelete="RESTRICT"), nullable=False)
+    
+    # Datos del producto y ubicación
+    producto_id = Column(Integer, ForeignKey("productos.id", ondelete="RESTRICT"), nullable=False)
+    ubicacion_id = Column(Integer, ForeignKey("ubicaciones.id", ondelete="RESTRICT"), nullable=False)
+    
+    # Información de trazabilidad
+    qr_original = Column(String, nullable=True)  # QR extraído de la etiqueta original
+    lote_proveedor = Column(String, nullable=True)  # Número de lote del proveedor
+    qr_propio = Column(String, unique=True, nullable=False, index=True)  # QR generado por nosotros
+    
+    # Pesos y fechas
+    peso_original = Column(Numeric(8, 3), nullable=False)  # Peso extraído de la etiqueta
+    peso_actual = Column(Numeric(8, 3), nullable=False)    # Peso actual (puede cambiar)
+    fecha_vencimiento = Column(DateTime(timezone=True), nullable=False)
+    fecha_fabricacion = Column(DateTime(timezone=True), nullable=True)
+    fecha_registro = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Estado del lote
+    disponible_venta = Column(Boolean, default=False)  # Solo True cuando enrolamiento está FINALIZADO
+    vendido = Column(Boolean, default=False)
+    
+    # Archivos e imágenes
+    foto_etiqueta = Column(String, nullable=True)  # Ruta de la foto de la etiqueta original
+    
+    # Relaciones
+    enrolamiento = relationship("Enrolamiento", back_populates="lotes")
+    producto = relationship("Producto", foreign_keys=[producto_id])
+    ubicacion = relationship("Ubicacion", back_populates="lotes")
+    items_pedido = relationship("ItemPedido", back_populates="lote")
 
 
 class Compra(Base):
@@ -720,3 +959,170 @@ class OperacionCaja(Base):
     turno = relationship("TurnoCaja", back_populates="operaciones")
     pedido = relationship("Pedido", back_populates="operacion_caja")
     medio_pago = relationship("MedioPago", back_populates="operaciones_caja")
+
+
+# --------------------------------------------------
+# 10. STOCK CAJAS PROVEEDOR
+# --------------------------------------------------
+
+class StockCajasProveedor(Base):
+    """Stock de cajas por proveedor para productos de peso variable."""
+    __tablename__ = "stock_cajas_proveedor"
+
+    id = Column(Integer, primary_key=True, index=True)
+    producto_id = Column(Integer, ForeignKey("productos.id", ondelete="CASCADE"), nullable=False)
+    proveedor_id = Column(Integer, ForeignKey("proveedores.id", ondelete="CASCADE"), nullable=False)
+    
+    # Stock
+    cajas_disponibles = Column(Integer, nullable=False, default=0)
+    cajas_totales_recibidas = Column(Integer, nullable=False, default=0)
+    cajas_totales_vendidas = Column(Integer, nullable=False, default=0)
+    
+    # Métricas
+    peso_promedio_caja_kg = Column(Float, nullable=True)  # Peso promedio por caja
+    
+    # Control temporal
+    fecha_ultima_actualizacion = Column(DateTime(timezone=True), server_default=func.now(), nullable=True)
+    
+    # Relaciones
+    producto = relationship("Producto", back_populates="stock_cajas")
+    proveedor = relationship("Proveedor", back_populates="stock_cajas")
+    movimientos = relationship("MovimientoStockCajas", back_populates="stock_cajas", cascade="all, delete-orphan")
+    
+    # Restricción única por producto-proveedor
+    __table_args__ = (
+        UniqueConstraint('producto_id', 'proveedor_id', name='uix_stock_cajas_producto_proveedor'),
+    )
+
+
+class MovimientoStockCajas(Base):
+    """Historial de movimientos de stock de cajas por proveedor."""
+    __tablename__ = "movimientos_stock_cajas"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Referencias principales
+    producto_id = Column(Integer, ForeignKey("productos.id", ondelete="RESTRICT"), nullable=False)
+    proveedor_id = Column(Integer, ForeignKey("proveedores.id", ondelete="RESTRICT"), nullable=False)
+    stock_cajas_id = Column(Integer, ForeignKey("stock_cajas_proveedor.id", ondelete="CASCADE"), nullable=True)
+    
+    # Referencias opcionales
+    lote_id = Column(Integer, ForeignKey("lotes.id", ondelete="SET NULL"), nullable=True)
+    enrolamiento_id = Column(Integer, ForeignKey("enrolamientos.id", ondelete="SET NULL"), nullable=True)
+    pedido_id = Column(Integer, ForeignKey("pedidos.id", ondelete="SET NULL"), nullable=True)
+    
+    # Datos del movimiento
+    tipo_movimiento = Column(String, nullable=False, index=True)  # ENTRADA_ENROLAMIENTO, VENTA_LOTE, DEVOLUCION_LOTE, etc.
+    cajas_movimiento = Column(Integer, nullable=False)  # Cantidad de cajas (positivo=entrada, negativo=salida)
+    peso_total_kg = Column(Float, nullable=True)  # Peso total movido
+    
+    # Estado antes y después
+    cajas_antes = Column(Integer, nullable=False, default=0)
+    cajas_despues = Column(Integer, nullable=False, default=0)
+    
+    # Metadatos
+    descripcion = Column(String, nullable=True)
+    usuario = Column(String, nullable=True)
+    fecha_movimiento = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+    
+    # Referencias adicionales para trazabilidad
+    lote_codigo = Column(String, nullable=True, index=True)  # Código del lote específico
+    referencia_tipo = Column(String, nullable=True)  # PEDIDO, AJUSTE, etc.
+    referencia_id = Column(Integer, nullable=True)  # ID de la referencia
+    notas = Column(Text, nullable=True)
+    
+    # Relaciones
+    producto = relationship("Producto")
+    proveedor = relationship("Proveedor")
+    stock_cajas = relationship("StockCajasProveedor", back_populates="movimientos")
+    lote = relationship("Lote")
+    enrolamiento = relationship("Enrolamiento")
+    pedido = relationship("Pedido")
+    
+    # Índices para performance
+    __table_args__ = (
+        Index('ix_movimientos_stock_cajas_fecha', 'fecha_movimiento'),
+        Index('ix_movimientos_stock_cajas_tipo', 'tipo_movimiento'),
+        Index('ix_movimientos_stock_cajas_producto_proveedor', 'producto_id', 'proveedor_id'),
+        Index('ix_movimientos_stock_cajas_lote_codigo', 'lote_codigo'),
+    )
+
+
+# --------------------------------------------------
+# 10. SISTEMA DE DESPACHOS
+# --------------------------------------------------
+
+class EstadoDespacho(enum.Enum):
+    """Estados del proceso de despacho."""
+    ASIGNADO = "ASIGNADO"
+    EN_PICKING = "EN_PICKING"
+    LISTO_EMPAQUE = "LISTO_EMPAQUE"
+    EN_RUTA = "EN_RUTA"
+    ENTREGADO = "ENTREGADO"
+    CANCELADO = "CANCELADO"
+
+
+class Despacho(Base):
+    """Gestión de despachos de pedidos."""
+    __tablename__ = "despachos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    pedido_id = Column(Integer, ForeignKey("pedidos.id", ondelete="CASCADE"), nullable=False, unique=True)
+    despachador_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    estado_despacho = Column(Enum(EstadoDespacho), default=EstadoDespacho.ASIGNADO, nullable=False)
+    
+    # Timestamps del proceso
+    fecha_asignacion = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    fecha_inicio_picking = Column(DateTime(timezone=True), nullable=True)
+    fecha_fin_picking = Column(DateTime(timezone=True), nullable=True)
+    fecha_inicio_ruta = Column(DateTime(timezone=True), nullable=True)
+    fecha_entrega = Column(DateTime(timezone=True), nullable=True)
+    
+    # Información adicional
+    notas_despacho = Column(Text, nullable=True)
+    ubicacion_actual = Column(String, nullable=True)  # GPS coords "lat,lng"
+    hora_estimada_entrega = Column(DateTime(timezone=True), nullable=True)
+    
+    # Relaciones
+    pedido = relationship("Pedido", back_populates="despacho")
+    despachador = relationship("User")
+    picking_items = relationship("PickingItem", back_populates="despacho", cascade="all, delete-orphan")
+
+
+class PickingItem(Base):
+    """Items individuales del proceso de picking."""
+    __tablename__ = "picking_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    despacho_id = Column(Integer, ForeignKey("despachos.id", ondelete="CASCADE"), nullable=False)
+    item_pedido_id = Column(Integer, ForeignKey("items_pedido.id", ondelete="CASCADE"), nullable=False)
+    usuario_picking_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    # Cantidades para productos regulares
+    cantidad_solicitada = Column(Integer, nullable=True)
+    cantidad_pickeada = Column(Integer, nullable=True)
+    
+    # Datos específicos para cajas variables
+    lote_codigo = Column(String, nullable=True)  # Para cajas variables
+    peso_solicitado = Column(Numeric(10, 3), nullable=True)  # kg estimado
+    peso_real = Column(Numeric(10, 3), nullable=True)  # kg real pickeado
+    fecha_vencimiento = Column(DateTime(timezone=True), nullable=True)
+    
+    # Información de ubicación y proceso
+    ubicacion_picking = Column(String, nullable=True)  # "FRIGORIFICO-F1-A2"
+    codigo_barras_escaneado = Column(String, nullable=True)
+    fecha_picking = Column(DateTime(timezone=True), nullable=True)
+    notas_picking = Column(Text, nullable=True)
+    completado = Column(Boolean, default=False, nullable=False)
+    
+    # Relaciones
+    despacho = relationship("Despacho", back_populates="picking_items")
+    item_pedido = relationship("ItemPedido")
+    usuario_picking = relationship("User")
+
+    # Índices
+    __table_args__ = (
+        Index('ix_picking_items_despacho', 'despacho_id'),
+        Index('ix_picking_items_item_pedido', 'item_pedido_id'),
+        Index('ix_picking_items_lote', 'lote_codigo'),
+    )

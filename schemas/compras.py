@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 from typing import List, Optional, Union
 from datetime import datetime, date
+from .maestras import TipoProveedor
 
 # --- Proveedores ---
 
@@ -11,6 +12,7 @@ class ProveedorBase(BaseModel):
     email: Optional[str] = None
     telefono: Optional[str] = None
     direccion: Optional[str] = None
+    tipo_proveedor_id: Optional[int] = None
     activo: bool = True
 
 class ProveedorCreate(ProveedorBase):
@@ -23,13 +25,15 @@ class ProveedorUpdate(BaseModel):
     email: Optional[str] = None
     telefono: Optional[str] = None
     direccion: Optional[str] = None
+    tipo_proveedor_id: Optional[int] = None
     activo: Optional[bool] = None
 
 class ProveedorRead(ProveedorBase):
     id: int
+    tipo_proveedor: Optional[TipoProveedor] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # --- Compras ---
 

@@ -1,0 +1,5 @@
+codigo,nombre,direccion,tipo_local_codigo
+WEB,Tienda Online,Virtual,VENTA
+MATRIZ,Panadería Central,Av. Principal 123,VENTA
+SUCURSAL_1,Sucursal Plaza,Centro Comercial Plaza Norte Local 45,VENTA
+BODEGA,Bodega Principal,Calle Industrial 567,BODEGA

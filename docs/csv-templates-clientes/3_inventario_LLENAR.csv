@@ -1,0 +1,18 @@
+sku_producto,codigo_local,cantidad_stock
+[SKU-001],MATRIZ,[CANTIDAD EN LOCAL PRINCIPAL]
+[SKU-001],SUCURSAL_1,[CANTIDAD EN SUCURSAL 1]
+[SKU-001],BODEGA,[CANTIDAD EN BODEGA]
+[SKU-002],MATRIZ,[CANTIDAD EN LOCAL PRINCIPAL]
+[SKU-002],SUCURSAL_1,[CANTIDAD EN SUCURSAL 1]
+[SKU-002],BODEGA,[CANTIDAD EN BODEGA]
+
+# INSTRUCCIONES:
+# - sku_producto: SKU del producto (debe coincidir con productos.csv)
+# - codigo_local: Código del local (debe coincidir con locales.csv)
+# - cantidad_stock: Cantidad actual en stock en ese local
+#
+# IMPORTANTE:
+# - Cada combinación producto-local debe tener una fila
+# - Si un producto no está en un local, poner cantidad_stock = 0
+# - El stock del local WEB se calcula automáticamente (es la suma de todos los locales físicos)
+# - Ejemplo: si tienes 3 productos y 3 locales físicos = 9 filas de datos

@@ -1,0 +1,11 @@
+nombre,sku,descripcion,categoria_codigo,tipo_producto_codigo,precio_web,es_vendible_web,stock_minimo
+Queso Gouda,LAC-001,Queso Gouda madurado por kg,LACTEOS,PRODUCTO_ELABORADO,6800,true,2
+Queso Chanco,LAC-002,Queso Chanco tradicional por kg,LACTEOS,PRODUCTO_ELABORADO,5200,true,3
+Leche Entera,LAC-003,Leche entera fresca por litro,LACTEOS,MATERIA_PRIMA,1200,true,20
+Yogurt Natural,LAC-004,Yogurt natural sin azúcar por kg,LACTEOS,PRODUCTO_ELABORADO,2400,true,10
+Manjar,LAC-005,Manjar casero tradicional por kg,LACTEOS,PRODUCTO_ELABORADO,4800,true,5
+Ricotta,LAC-006,Ricotta fresca por kg,LACTEOS,PRODUCTO_ELABORADO,3200,true,4
+Crema de Leche,LAC-007,Crema de leche para repostería por litro,LACTEOS,MATERIA_PRIMA,2800,true,8
+Mantequilla,LAC-008,Mantequilla sin sal por kg,LACTEOS,PRODUCTO_ELABORADO,4500,true,6
+Queso Fresco,LAC-009,Queso fresco de cabra por kg,LACTEOS,PRODUCTO_ELABORADO,7200,true,2
+Suero de Leche,LAC-010,Suero de leche natural por litro,LACTEOS,MATERIA_PRIMA,800,true,15

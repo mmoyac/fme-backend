@@ -9,20 +9,20 @@ class ItemPedidoBase(BaseModel):
     """Schema base de ItemPedido."""
     pedido_id: int = Field(..., gt=0)
     producto_id: int = Field(..., gt=0)
-    cantidad: int = Field(..., gt=0)
+    cantidad: float = Field(..., gt=0)  # Cambiado a float para soportar decimales
     precio_unitario_venta: float = Field(..., gt=0)
 
 
 class ItemPedidoCreate(BaseModel):
     """Schema para crear un ItemPedido (sin pedido_id, se asigna automáticamente)."""
     producto_id: int = Field(..., gt=0)
-    cantidad: int = Field(..., gt=0)
+    cantidad: float = Field(..., gt=0)  # Cambiado a float para soportar decimales
     precio_unitario_venta: float = Field(..., gt=0)
 
 
 class ItemPedidoUpdate(BaseModel):
     """Schema para actualizar un ItemPedido."""
-    cantidad: Optional[int] = Field(None, gt=0)
+    cantidad: Optional[float] = Field(None, gt=0)  # Cambiado a float para soportar decimales
     precio_unitario_venta: Optional[float] = Field(None, gt=0)
 
 

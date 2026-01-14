@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List
 from datetime import datetime
 
@@ -18,11 +18,11 @@ router = APIRouter(
 
 @router.get("/proveedores", response_model=List[schemas.ProveedorRead])
 def get_proveedores(db: Session = Depends(get_db)):
-    return db.query(models.Proveedor).order_by(models.Proveedor.nombre).all()
+    return db.query(models.Proveedor).options(joinedload(models.Proveedor.tipo_proveedor)).order_by(models.Proveedor.nombre).all()
 
 @router.post("/proveedores", response_model=schemas.ProveedorRead)
 def create_proveedor(proveedor: schemas.ProveedorCreate, db: Session = Depends(get_db)):
-    db_prov = models.Proveedor(**proveedor.dict())
+    db_prov = models.Proveedor(**proveedor.model_dump())
     db.add(db_prov)
     db.commit()
     db.refresh(db_prov)
@@ -34,7 +34,7 @@ def update_proveedor(proveedor_id: int, proveedor: schemas.ProveedorUpdate, db: 
     if not db_prov:
         raise HTTPException(status_code=404, detail="Proveedor no encontrado")
     
-    for key, value in proveedor.dict(exclude_unset=True).items():
+    for key, value in proveedor.model_dump(exclude_unset=True).items():
         setattr(db_prov, key, value)
     
     db.commit()

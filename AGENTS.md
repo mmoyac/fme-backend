@@ -308,12 +308,36 @@ locales (1) ----< (N) pedidos (local_despacho_id)
 clientes (1) ----< (N) pedidos
 pedidos (1) ----< (N) items_pedido
 
+despachos (1) ----< (N) picking_items
+usuarios (1) ----< (N) despachos (despachador)
+pedidos (1) ---< (1) despachos
+
 movimientos_inventario >---- (1) productos
 movimientos_inventario >---- (1) local_origen
 movimientos_inventario >---- (1) local_destino
 ```
 
-### 4.3. Local WEB (Especial)
+### 4.3. Tablas del Sistema de Despachos (NUEVO)
+
+| Tabla | Descripción | Campos Clave |
+| :--- | :--- | :--- |
+| `despachos` | Gestión de entregas | `id`, `pedido_id`, `despachador_user_id`, `estado`, `fecha_creacion`, `fecha_entrega` |
+| `picking_items` | Items para recolección | `id`, `despacho_id`, `producto_id`, `cantidad_solicitada`, `cantidad_recogida`, `completado` |
+
+### 4.4. Estados del Sistema de Despachos
+
+**EstadoDespacho (Enum):**
+```
+ASIGNADO → EN_PICKING → LISTO_EMPAQUE → EN_RUTA → ENTREGADO
+```
+
+- **ASIGNADO**: Despacho asignado a despachador, pendiente de picking
+- **EN_PICKING**: Proceso de recolección de productos activo
+- **LISTO_EMPAQUE**: Todos los items recogidos, listo para empacar y enviar
+- **EN_RUTA**: Despachador en camino al cliente
+- **ENTREGADO**: Entrega completada exitosamente
+
+### 4.5. Local WEB (Especial)
 
 El local con `codigo = 'WEB'` es **virtual** y actúa como agregador de precios:
 - **No tiene stock físico** (su stock es la suma de locales físicos)
@@ -470,7 +494,7 @@ alembic upgrade head
 | `POST` | `/api/pedidos/backoffice` | Crear pedido con opción de canje de puntos |
 | `PUT` | `/api/pedidos/{id}` | Otorgar/devolver puntos según cambio de estado |
 
-### 6.8. Sistema de Caja (NUEVO)
+### 6.8. Sistema de Caja
 
 | Método | Endpoint | Descripción |
 | :--- | :--- | :--- |
@@ -482,7 +506,30 @@ alembic upgrade head
 | `GET` | `/api/caja/turno/{id}` | Detalle completo del turno |
 | `GET` | `/api/caja/turno/{id}/pdf` | Descargar PDF del cierre |
 
-### 6.9. Dashboard Mejorado
+### 6.9. Sistema de Cajas Variables (NUEVO)
+
+| Método | Endpoint | Descripción |
+| :--- | :--- | :--- |
+| `GET` | `/api/stock-cajas/lotes-disponibles/{producto_id}` | Lotes FIFO disponibles para asignación |
+| `GET` | `/api/stock-cajas/resumen` | Resumen de stock de cajas por proveedor |
+| `POST` | `/api/pedidos/` | Crear pedido (detecta tipo automáticamente) |
+| `PUT` | `/api/pedidos/{id}` | Confirmar/cancelar con lógica de lotes específicos |
+
+### 6.10. Sistema de Despachos (NUEVO)
+
+| Método | Endpoint | Descripción |
+| :--- | :--- | :--- |
+| `POST` | `/api/despachos/asignar/{pedido_id}` | Asignar pedido confirmado a despachador |
+| `GET` | `/api/despachos/` | Listar despachos con filtros por estado |
+| `GET` | `/api/despachos/{id}` | Obtener despacho específico con detalles completos |
+| `PUT` | `/api/despachos/{id}` | Actualizar estado, hora estimada y notas |
+| `POST` | `/api/despachos/{id}/iniciar-picking` | Iniciar proceso de picking (ASIGNADO → EN_PICKING) |
+| `PUT` | `/api/despachos/picking-item/{item_id}` | Actualizar cantidad recogida de item específico |
+| `POST` | `/api/despachos/{id}/completar-picking` | Completar picking (EN_PICKING → LISTO_EMPAQUE) |
+| `GET` | `/api/despachos/estadisticas` | Métricas de performance de despachos |
+| `GET` | `/api/despachos/{id}/tracking` | Información de tracking para despachador/cliente |
+
+### 6.11. Dashboard Mejorado
 
 | Método | Endpoint | Descripción |
 | :--- | :--- | :--- |
@@ -547,11 +594,68 @@ CERRADO ← (cierre con conteo real y diferencia)
 - `DEVOLUCION`: Devoluciones a clientes
 - `CIERRE`: Operación final del turno
 
-### 7.5. Validaciones Importantes
+### 7.5. Sistema de Cajas Variables (NUEVO)
+
+**Tipos de Pedido:**
+- **PRODUCTOS (ID=1):** Inventario tradicional por unidades
+- **CAJAS_VARIABLES (ID=2):** Inventario por lotes específicos con peso y precio/kg
+
+**Flujo de Cajas Variables:**
+```
+Pedido PENDIENTE (precio estimado)
+↓
+Confirmar → Asignar lotes FIFO → Calcular precio real → Actualizar monto_total
+↓
+Lotes: disponible_venta=False, vendido=True
+Stock: cajas_disponibles -= cantidad, cajas_totales_vendidas += cantidad
+```
+
+**Restauración al Cancelar:**
+```
+Cancelar pedido confirmado
+↓
+Lotes: disponible_venta=True, vendido=False
+Stock: cajas_disponibles += cantidad, cajas_totales_vendidas -= cantidad (si > 0)
+```
+
+**FIFO (First In, First Out):**
+- Lotes se asignan por `fecha_vencimiento ASC`
+- Automatiza rotación de inventario perecedero
+- Minimiza pérdidas por vencimiento
+
+**Trazabilidad:**
+- `MovimientoStockCajas` registra cada operación
+- Tipos: `VENTA_LOTE`, `DEVOLUCION_LOTE`
+- Campos: `lote_codigo`, `referencia_tipo`, `referencia_id`
+
+### 7.7. Sistema de Despachos (NUEVO)
+
+**Estados del Flujo:**
+```
+ASIGNADO → EN_PICKING → LISTO_EMPAQUE → EN_RUTA → ENTREGADO
+```
+
+**Proceso Completo:**
+1. **Asignar Despacho**: Pedido CONFIRMADO → Crear despacho ASIGNADO con despachador
+2. **Iniciar Picking**: ASIGNADO → EN_PICKING, crear picking_items por cada producto del pedido
+3. **Recolección**: Actualizar cantidad_recogida por cada item
+4. **Completar Picking**: Todos items completos → EN_PICKING → LISTO_EMPAQUE
+5. **En Ruta**: LISTO_EMPAQUE → EN_RUTA (manual desde backoffice)
+6. **Entregar**: EN_RUTA → ENTREGADO con timestamp de entrega
+
+**Automatizaciones:**
+- Crear picking_items automáticamente al asignar despacho
+- Validar que todos los items estén completos antes de finalizar picking
+- Calcular tiempos de picking y eficiencia de entrega
+- Tracking completo con timestamps por cada estado
+
+### 7.8. Validaciones Importantes
 
 - **SKU único:** No puede haber dos productos con el mismo SKU
 - **Email único:** No puede haber dos clientes con el mismo email
 - **Stock suficiente:** Antes de confirmar pedido o transferir
+- **Lotes suficientes:** Validación específica para cajas variables
+- **Consistencia lotes-stock:** Stock agregado debe coincidir con lotes reales
 - **Protección de referencias:** No eliminar cliente con pedidos asociados
 - **Local WEB requerido:** Debe existir para crear pedidos desde landing
 
@@ -613,10 +717,20 @@ docker-compose exec db psql -U fme -d fme_database
 - ✅ Gestión de Precios por local
 - ✅ Sistema completo de Pedidos (5 estados)
 - ✅ Sistema completo de Puntos de Fidelización
-- ✅ **Sistema completo de Caja y Turnos** (NUEVO)
-- ✅ **Control de flujo de efectivo por vendedor** (NUEVO)
-- ✅ **Restricciones de usuario por local asignado** (NUEVO)
-- ✅ **Generación de PDFs para cierre de caja** (NUEVO)
+- ✅ **Sistema completo de Caja y Turnos**
+- ✅ **Control de flujo de efectivo por vendedor**
+- ✅ **Restricciones de usuario por local asignado**
+- ✅ **Generación de PDFs para cierre de caja**
+- ✅ **Sistema de Cajas Variables con Lotes Específicos** (NUEVO)
+- ✅ **Asignación Automática FIFO de Lotes por Peso y Precio** (NUEVO)
+- ✅ **Actualización Automática de Precios: Estimado → Real** (NUEVO)
+- ✅ **Inventario Dual: Productos Regulares vs Cajas Variables** (NUEVO)
+- ✅ **Restauración Completa de Lotes al Cancelar Pedidos** (NUEVO)
+- ✅ **Sistema Completo de Despachos (Delivery/Picking)** (NUEVO)
+- ✅ **Estados de Despacho: ASIGNADO → EN_PICKING → LISTO_EMPAQUE → EN_RUTA → ENTREGADO** (NUEVO)
+- ✅ **Picking Items con Cantidades Solicitadas vs Recogidas** (NUEVO)
+- ✅ **Tracking Completo de Tiempos por Estado** (NUEVO)
+- ✅ **Estadísticas y Dashboard de Despachos** (NUEVO)
 - ✅ Transferencias de inventario con historial
 - ✅ Dashboard con métricas analíticas y de caja
 - ✅ Timezone configurado (America/Santiago)
@@ -673,16 +787,28 @@ backend:
 
 ---
 
-**Última Actualización:** 2026-01-02  
+**Última Actualización:** 2026-01-07  
 **Cambios Recientes:**
-- ✅ **Sistema completo de Caja y Turnos implementado**
-- ✅ **Control de flujo de efectivo por vendedor y local**
-- ✅ **Restricciones de usuario por local asignado** (`local_defecto_id`)
-- ✅ **Generación automática de PDFs para cierre de caja**
-- ✅ **Dashboard con métricas de caja en tiempo real**
-- ✅ **Integración automática pedidos → operaciones de caja**
-- ✅ **Endpoint `/api/dashboard/metricas-caja` para supervisión**
-- ✅ **Validaciones de permisos por local en todos los endpoints de caja**
+- ✅ **Sistema Completo de Despachos implementado** (NUEVO)
+- ✅ **Modelos: Despacho, PickingItem con EstadoDespacho enum**
+- ✅ **Schemas completos para todas las operaciones de despacho**
+- ✅ **Router con 9 endpoints para flujo completo de delivery/picking**
+- ✅ **Asignación automática de despachos a despachadores**
+- ✅ **Sistema de picking con tracking de items individuales**
+- ✅ **Estados: ASIGNADO → EN_PICKING → LISTO_EMPAQUE → EN_RUTA → ENTREGADO**
+- ✅ **Dashboard de métricas de despacho con estadísticas completas**
+- ✅ **Tracking de tiempos por estado para optimización de procesos**
+- ✅ **Integración con sistema de pedidos existente**
+- ✅ Sistema completo de Cajas Variables implementado
+- ✅ TipoPedido escalable: PRODUCTOS vs CAJAS_VARIABLES
+- ✅ Asignación automática FIFO de lotes específicos
+- ✅ Actualización automática de precios: estimado → real
+- ✅ Inventario dual sincronizado: lotes individuales ↔ stock agregado
+- ✅ Restauración completa al cancelar pedidos
+- ✅ Endpoint `/api/stock-cajas/lotes-disponibles` con información detallada
+- ✅ Trazabilidad completa con MovimientoStockCajas
+- ✅ Modal de confirmación con detalles de lotes en frontend
+- ✅ **Validación de consistencia entre lotes reales y stock registrado**
 - ✅ Sistema completo de Puntos de Fidelización implementado
 - ✅ PuntosService con cálculo por categoría de productos
 - ✅ Endpoints de clientes enriquecidos con información de puntos

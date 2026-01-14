@@ -1,0 +1,84 @@
+version: '3.8'
+
+# Instancia de Carnicería - Ports: 8002, 3002, 3003, 5434
+services:
+  # Base de datos PostgreSQL
+  db:
+    image: postgres:14
+    container_name: fme_carniceria_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: fme_carniceria
+      POSTGRES_PASSWORD: fme_carniceria_pass
+      POSTGRES_DB: fme_carniceria_db
+    ports:
+      - "5434:5432"
+    volumes:
+      - ./volumes/postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fme_carniceria"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Backend API
+  backend:
+    build:
+      context: ../../../fme-backend
+      dockerfile: Dockerfile
+    container_name: fme_carniceria_backend
+    restart: unless-stopped
+    ports:
+      - "8002:8000"
+    environment:
+      DATABASE_URL: postgresql://fme_carniceria:fme_carniceria_pass@db:5432/fme_carniceria_db
+      INSTANCE_TYPE: carniceria
+      BUSINESS_NAME: "Carnicería Premium"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/instance_data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/docs')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Landing page
+  landing:
+    build:
+      context: ../../../fme-landing
+      dockerfile: Dockerfile.prod
+    container_name: fme_carniceria_landing
+    restart: unless-stopped
+    ports:
+      - "3002:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8002
+      NEXT_PUBLIC_BUSINESS_TYPE: carniceria
+      NEXT_PUBLIC_BUSINESS_NAME: "Carnicería Premium"
+      NODE_ENV: production
+    depends_on:
+      - backend
+
+  # Backoffice
+  backoffice:
+    build:
+      context: ../../../fme-backend
+      dockerfile: Dockerfile.prod
+    container_name: fme_carniceria_backoffice
+    restart: unless-stopped
+    ports:
+      - "3003:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8002
+      NEXT_PUBLIC_BUSINESS_TYPE: carniceria
+      NEXT_PUBLIC_BUSINESS_NAME: "Carnicería Premium"
+      NODE_ENV: production
+    depends_on:
+      - backend
+
+networks:
+  default:
+    name: fme_carniceria_network

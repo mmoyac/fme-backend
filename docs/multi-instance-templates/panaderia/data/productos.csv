@@ -1,0 +1,11 @@
+nombre,sku,descripcion,categoria_codigo,tipo_producto_codigo,precio_web,es_vendible_web,stock_minimo
+Pan Amasado,PAN-001,Pan casero tradicional amasado a mano,PANADERIA,PRODUCTO_ELABORADO,500,true,10
+Pan de Molde,PAN-002,Pan de molde ideal para tostadas,PANADERIA,PRODUCTO_ELABORADO,800,true,8
+Empanada de Pino,EMP-001,Empanada tradicional chilena con pino,PANADERIA,PRODUCTO_ELABORADO,1500,true,20
+Empanada de Queso,EMP-002,Empanada rellena con queso derretido,PANADERIA,PRODUCTO_ELABORADO,1200,true,15
+Torta de Chocolate,TOR-001,Torta casera de chocolate con manjar,REPOSTERIA,PRODUCTO_ELABORADO,8000,true,2
+Torta de Mil Hojas,TOR-002,Clásica torta mil hojas con manjar,REPOSTERIA,PRODUCTO_ELABORADO,9500,true,2
+Completo Italiano,COM-001,Completo con palta tomate y mayo,COMIDA_RAPIDA,PRODUCTO_ELABORADO,2500,true,5
+Sandwich Churrasco,SAN-001,Sandwich de churrasco con agregados,COMIDA_RAPIDA,PRODUCTO_ELABORADO,3200,true,5
+Croissant Simple,CRO-001,Croissant de mantequilla horneado fresco,PANADERIA,PRODUCTO_ELABORADO,1800,true,12
+Cupcake Vainilla,CUP-001,Cupcake de vainilla con betún,REPOSTERIA,PRODUCTO_ELABORADO,2200,true,6

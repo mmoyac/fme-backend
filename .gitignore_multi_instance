@@ -1,0 +1,12 @@
+# Instancias locales de desarrollo multi-negocio
+../_instancias_locales/
+_instancias_locales/
+instancias_locales/
+
+# Reportes de deploy y validación
+docs/deploy_reports/
+docs/validation_reports/
+
+# Volúmenes Docker locales
+volumes/
+postgres_data/

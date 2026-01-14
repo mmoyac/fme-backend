@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
 
 from database.database import get_db
-from database.models import Producto
+from database.models import Producto, CategoriaProducto
 from schemas.catalogo import ProductoCatalogo
 from schemas.producto import ProductoResponse, ProductoCreate, ProductoUpdate
 from services import inventario_service
@@ -57,10 +57,14 @@ def listar_productos(
     **Uso:** Backoffice - Tabla de productos
     """
     from sqlalchemy.orm import joinedload
+    from database.models import CategoriaProducto
     
     productos = (
         db.query(Producto)
-        .options(joinedload(Producto.categoria))
+        .options(
+            joinedload(Producto.categoria).joinedload(CategoriaProducto.tipo_venta),
+            joinedload(Producto.categoria)
+        )
         .offset(skip)
         .limit(limit)
         .all()
@@ -93,7 +97,10 @@ def listar_productos(
             'stock_actual': total_stock,
             # Información de categoría
             'categoria_nombre': p.categoria.nombre if p.categoria else None,
-            'categoria_puntos_fidelidad': p.categoria.puntos_fidelidad if p.categoria else None
+            'categoria_puntos_fidelidad': p.categoria.puntos_fidelidad if p.categoria else None,
+            # Información de tipo de venta (peso vs cantidad)
+            'tipo_venta_codigo': p.categoria.tipo_venta.codigo if p.categoria and p.categoria.tipo_venta else None,
+            'tipo_venta_nombre': p.categoria.tipo_venta.nombre if p.categoria and p.categoria.tipo_venta else None
         }
         
         result.append(producto_dict)
@@ -112,7 +119,10 @@ def obtener_producto(producto_id: int, db: Session = Depends(get_db), current_us
     
     producto = (
         db.query(Producto)
-        .options(joinedload(Producto.categoria))
+        .options(
+            joinedload(Producto.categoria).joinedload(CategoriaProducto.tipo_venta),
+            joinedload(Producto.categoria)
+        )
         .filter(Producto.id == producto_id)
         .first()
     )
@@ -148,7 +158,10 @@ def obtener_producto(producto_id: int, db: Session = Depends(get_db), current_us
         'stock_actual': total_stock,
         # Información de categoría
         'categoria_nombre': producto.categoria.nombre if producto.categoria else None,
-        'categoria_puntos_fidelidad': producto.categoria.puntos_fidelidad if producto.categoria else None
+        'categoria_puntos_fidelidad': producto.categoria.puntos_fidelidad if producto.categoria else None,
+        # Información de tipo de venta (peso vs cantidad)
+        'tipo_venta_codigo': producto.categoria.tipo_venta.codigo if producto.categoria and producto.categoria.tipo_venta else None,
+        'tipo_venta_nombre': producto.categoria.tipo_venta.nombre if producto.categoria and producto.categoria.tipo_venta else None
     }
 
 

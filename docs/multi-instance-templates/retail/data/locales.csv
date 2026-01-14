@@ -1,0 +1,7 @@
+codigo,nombre,direccion,tipo_local_codigo
+WEB,Tienda Online El Olivo,Virtual,VENTA
+MATRIZ,El Olivo Lampa,Av. Manuel Rodríguez 1234 Lampa,VENTA
+SUCURSAL_2,El Olivo Batuco,Ruta 5 Norte Km 35 Batuco,VENTA
+SUCURSAL_3,El Olivo Colina,Av. Presidente Kennedy 567 Colina,VENTA
+BODEGA_CENTRAL,Bodega Central,Parque Industrial Lampa Sector B,BODEGA
+CENTRO_DISTRIBUCION,Centro de Distribución,Ruta 57 Km 12 Lampa,DISTRIBUCION

@@ -52,6 +52,67 @@ class PuntosService:
         return puntos_cliente
 
     @staticmethod
+    def estimar_puntos_por_items(db: Session, items: List[dict]) -> dict:
+        """
+        Estima los puntos que se ganarían por una lista de productos.
+        
+        Args:
+            db: Sesión de base de datos
+            items: Lista de items con producto_id y cantidad
+            
+        Returns:
+            dict: Estimación de puntos con detalle por categoría
+        """
+        total_puntos = 0
+        detalle_por_categoria = []
+        
+        # Agrupar por categoría
+        categorias_procesadas = {}
+        
+        for item in items:
+            producto_id = item.get('producto_id')
+            cantidad = float(item.get('cantidad', 0))
+            
+            # Obtener producto con categoría
+            producto = (
+                db.query(Producto)
+                .filter(Producto.id == producto_id)
+                .first()
+            )
+            
+            if not producto or not producto.categoria:
+                continue
+            
+            categoria = producto.categoria
+            categoria_nombre = categoria.nombre
+            puntos_por_unidad = categoria.puntos_fidelidad or 0
+            
+            if puntos_por_unidad > 0:
+                # Calcular puntos para este item
+                puntos_item = int(puntos_por_unidad * cantidad)
+                total_puntos += puntos_item
+                
+                # Agrupar por categoría
+                if categoria_nombre in categorias_procesadas:
+                    categorias_procesadas[categoria_nombre]['cantidad'] += cantidad
+                    categorias_procesadas[categoria_nombre]['puntos_subtotal'] += puntos_item
+                else:
+                    categorias_procesadas[categoria_nombre] = {
+                        'categoria_nombre': categoria_nombre,
+                        'puntos_por_unidad': puntos_por_unidad,
+                        'cantidad': cantidad,
+                        'puntos_subtotal': puntos_item
+                    }
+        
+        # Convertir a lista
+        detalle_por_categoria = list(categorias_procesadas.values())
+        
+        return {
+            'total_puntos': total_puntos,
+            'detalle_por_categoria': detalle_por_categoria
+        }
+
+    @staticmethod
     def calcular_puntos_por_pedido(db: Session, pedido_id: int) -> int:
         """
         Calcula los puntos a ganar por un pedido basado en las categorías de productos.

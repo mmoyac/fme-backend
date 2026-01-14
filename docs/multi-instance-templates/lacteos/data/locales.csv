@@ -1,0 +1,5 @@
+codigo,nombre,direccion,tipo_local_codigo
+WEB,Tienda Online,Virtual,VENTA
+MATRIZ,Quesería Principal,Campo Sector Norte,VENTA
+PLANTA,Planta de Procesamiento,Zona Rural Km 45,PRODUCCION
+BODEGA_FRIA,Cámara Frigorífica,Complejo Industrial,FRIGORIFICO

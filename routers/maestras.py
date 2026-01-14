@@ -1,9 +1,9 @@
 """
 Router para gestión de tablas maestras (Categorías, Tipos, Unidades de Medida).
 """
-from typing import List
+from typing import List, Dict
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from database.database import get_db
 from database.models import CategoriaProducto as CategoriaProductoModel
@@ -13,6 +13,10 @@ from database.models import UnidadMedida as UnidadMedidaModel
 from database.models import MedioPago as MedioPagoModel
 from database.models import EstadoCheque as EstadoChequeModel
 from database.models import Banco as BancoModel
+from database.models import TipoVehiculo as TipoVehiculoModel
+from database.models import EstadoEnrolamiento as EstadoEnrolamientoModel
+from database.models import Ubicacion as UbicacionModel
+from database.models import TipoVenta as TipoVentaModel
 from database.models import User
 from schemas.maestras import (
     CategoriaProducto, CategoriaProductoCreate, CategoriaProductoUpdate,
@@ -21,7 +25,12 @@ from schemas.maestras import (
     UnidadMedida, UnidadMedidaCreate, UnidadMedidaUpdate, UnidadMedidaConBase,
     MedioPago, MedioPagoCreate, MedioPagoUpdate,
     EstadoCheque, EstadoChequeCreate, EstadoChequeUpdate,
-    Banco, BancoCreate, BancoUpdate
+    Banco, BancoCreate, BancoUpdate,
+    TipoVenta, TipoVentaCreate, TipoVentaUpdate,
+    TipoProveedor, TipoProveedorCreate, TipoProveedorUpdate,
+    TipoVehiculo, TipoVehiculoCreate, TipoVehiculoUpdate,
+    EstadoEnrolamiento, EstadoEnrolamientoCreate, EstadoEnrolamientoUpdate,
+    Ubicacion, UbicacionCreate, UbicacionUpdate
 )
 from routers.auth import get_current_active_user
 
@@ -51,7 +60,7 @@ def listar_categorias(
     current_user: User = Depends(get_current_active_user)
 ):
     """Listar categorías de productos."""
-    query = db.query(CategoriaProductoModel)
+    query = db.query(CategoriaProductoModel).options(joinedload(CategoriaProductoModel.tipo_venta))
     
     if activo is not None:
         query = query.filter(CategoriaProductoModel.activo == activo)
@@ -66,7 +75,7 @@ def obtener_categoria(
     current_user: User = Depends(get_current_active_user)
 ):
     """Obtener una categoría por ID."""
-    categoria = db.query(CategoriaProductoModel).filter(CategoriaProductoModel.id == categoria_id).first()
+    categoria = db.query(CategoriaProductoModel).options(joinedload(CategoriaProductoModel.tipo_venta)).filter(CategoriaProductoModel.id == categoria_id).first()
     if not categoria:
         raise HTTPException(status_code=404, detail="Categoría no encontrada")
     return categoria
@@ -805,3 +814,495 @@ def eliminar_banco(
     db.delete(db_banco)
     db.commit()
     return None
+
+
+# ============================================
+# TIPOS DE VENTA
+# ============================================
+
+@router.get("/tipos-venta", response_model=List[TipoVenta])
+def listar_tipos_venta(
+    skip: int = 0,
+    limit: int = 100,
+    activo: bool = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Listar tipos de venta."""
+    query = db.query(TipoVentaModel)
+    
+    if activo is not None:
+        query = query.filter(TipoVentaModel.activo == activo)
+    
+    return query.offset(skip).limit(limit).all()
+
+
+@router.post("/tipos-venta", response_model=TipoVenta, status_code=status.HTTP_201_CREATED)
+def crear_tipo_venta(
+    tipo_venta: TipoVentaCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Crear un nuevo tipo de venta."""
+    # Verificar que el código no exista
+    existing = db.query(TipoVentaModel).filter(TipoVentaModel.codigo == tipo_venta.codigo).first()
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Ya existe un tipo de venta con el código {tipo_venta.codigo}"
+        )
+    
+    db_tipo_venta = TipoVentaModel(**tipo_venta.model_dump())
+    db.add(db_tipo_venta)
+    db.commit()
+    db.refresh(db_tipo_venta)
+    return db_tipo_venta
+
+
+@router.put("/tipos-venta/{tipo_venta_id}", response_model=TipoVenta)
+def actualizar_tipo_venta(
+    tipo_venta_id: int,
+    tipo_venta_update: TipoVentaUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Actualizar un tipo de venta."""
+    db_tipo_venta = db.query(TipoVentaModel).filter(TipoVentaModel.id == tipo_venta_id).first()
+    if not db_tipo_venta:
+        raise HTTPException(status_code=404, detail="Tipo de venta no encontrado")
+    
+    # Verificar que el código no exista en otro registro
+    if tipo_venta_update.codigo:
+        existing = db.query(TipoVentaModel).filter(
+            TipoVentaModel.codigo == tipo_venta_update.codigo,
+            TipoVentaModel.id != tipo_venta_id
+        ).first()
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ya existe otro tipo de venta con el código {tipo_venta_update.codigo}"
+            )
+    
+    # Actualizar solo los campos que no son None
+    update_data = tipo_venta_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(db_tipo_venta, field, value)
+    
+    db.commit()
+    db.refresh(db_tipo_venta)
+    return db_tipo_venta
+
+
+@router.delete("/tipos-venta/{tipo_venta_id}")
+def eliminar_tipo_venta(
+    tipo_venta_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Eliminar un tipo de venta."""
+    db_tipo_venta = db.query(TipoVentaModel).filter(TipoVentaModel.id == tipo_venta_id).first()
+    if not db_tipo_venta:
+        raise HTTPException(status_code=404, detail="Tipo de venta no encontrado")
+    
+    # Verificar si tiene categorías asociadas
+    if db_tipo_venta.categorias:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se puede eliminar el tipo de venta porque tiene {len(db_tipo_venta.categorias)} categorías asociadas"
+        )
+    
+    db.delete(db_tipo_venta)
+    db.commit()
+    return None
+
+
+# ============================================
+# TIPOS DE PROVEEDOR
+# ============================================
+
+@router.get("/tipos-proveedor", response_model=List[TipoProveedor])
+def listar_tipos_proveedor(
+    skip: int = 0,
+    limit: int = 100,
+    activo: bool = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Listar tipos de proveedor."""
+    query = db.query(TipoProveedorModel)
+    
+    if activo is not None:
+        query = query.filter(TipoProveedorModel.activo == activo)
+    
+    return query.offset(skip).limit(limit).all()
+
+
+@router.post("/tipos-proveedor", response_model=TipoProveedor, status_code=status.HTTP_201_CREATED)
+def crear_tipo_proveedor(
+    tipo_proveedor: TipoProveedorCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Crear un nuevo tipo de proveedor."""
+    # Verificar que el código no exista
+    existing = db.query(TipoProveedorModel).filter(TipoProveedorModel.codigo == tipo_proveedor.codigo).first()
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Ya existe un tipo de proveedor con el código {tipo_proveedor.codigo}"
+        )
+    
+    db_tipo_proveedor = TipoProveedorModel(**tipo_proveedor.model_dump())
+    db.add(db_tipo_proveedor)
+    db.commit()
+    db.refresh(db_tipo_proveedor)
+    return db_tipo_proveedor
+
+
+@router.put("/tipos-proveedor/{tipo_proveedor_id}", response_model=TipoProveedor)
+def actualizar_tipo_proveedor(
+    tipo_proveedor_id: int,
+    tipo_proveedor_update: TipoProveedorUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Actualizar un tipo de proveedor."""
+    db_tipo_proveedor = db.query(TipoProveedorModel).filter(TipoProveedorModel.id == tipo_proveedor_id).first()
+    if not db_tipo_proveedor:
+        raise HTTPException(status_code=404, detail="Tipo de proveedor no encontrado")
+    
+    # Verificar que el código no exista en otro registro
+    if tipo_proveedor_update.codigo:
+        existing = db.query(TipoProveedorModel).filter(
+            TipoProveedorModel.codigo == tipo_proveedor_update.codigo,
+            TipoProveedorModel.id != tipo_proveedor_id
+        ).first()
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ya existe otro tipo de proveedor con el código {tipo_proveedor_update.codigo}"
+            )
+    
+    # Actualizar solo los campos que no son None
+    update_data = tipo_proveedor_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(db_tipo_proveedor, field, value)
+    
+    db.commit()
+    db.refresh(db_tipo_proveedor)
+    return db_tipo_proveedor
+
+
+@router.delete("/tipos-proveedor/{tipo_proveedor_id}")
+def eliminar_tipo_proveedor(
+    tipo_proveedor_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Eliminar un tipo de proveedor."""
+    db_tipo_proveedor = db.query(TipoProveedorModel).filter(TipoProveedorModel.id == tipo_proveedor_id).first()
+    if not db_tipo_proveedor:
+        raise HTTPException(status_code=404, detail="Tipo de proveedor no encontrado")
+    
+    # Verificar si tiene proveedores asociados
+    if db_tipo_proveedor.proveedores:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se puede eliminar el tipo de proveedor porque tiene {len(db_tipo_proveedor.proveedores)} proveedores asociados"
+        )
+    
+    db.delete(db_tipo_proveedor)
+    db.commit()
+    return None
+
+
+# ============================================
+# TIPOS DE VEHÍCULO
+# ============================================
+
+@router.get("/tipos-vehiculo", response_model=List[TipoVehiculo])
+def listar_tipos_vehiculo(db: Session = Depends(get_db)):
+    """Listar todos los tipos de vehículo."""
+    return db.query(TipoVehiculoModel).filter(TipoVehiculoModel.activo == True).all()
+
+
+@router.post("/tipos-vehiculo", response_model=TipoVehiculo, status_code=status.HTTP_201_CREATED)
+def crear_tipo_vehiculo(
+    tipo_vehiculo: TipoVehiculoCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Crear un nuevo tipo de vehículo."""
+    # Verificar código único
+    db_tipo_vehiculo = db.query(TipoVehiculoModel).filter(TipoVehiculoModel.codigo == tipo_vehiculo.codigo).first()
+    if db_tipo_vehiculo:
+        raise HTTPException(status_code=400, detail="Ya existe un tipo de vehículo con este código")
+    
+    db_tipo_vehiculo = TipoVehiculoModel(**tipo_vehiculo.model_dump())
+    db.add(db_tipo_vehiculo)
+    db.commit()
+    db.refresh(db_tipo_vehiculo)
+    return db_tipo_vehiculo
+
+
+@router.put("/tipos-vehiculo/{tipo_vehiculo_id}", response_model=TipoVehiculo)
+def actualizar_tipo_vehiculo(
+    tipo_vehiculo_id: int,
+    tipo_vehiculo: TipoVehiculoUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Actualizar un tipo de vehículo."""
+    db_tipo_vehiculo = db.query(TipoVehiculoModel).filter(TipoVehiculoModel.id == tipo_vehiculo_id).first()
+    if not db_tipo_vehiculo:
+        raise HTTPException(status_code=404, detail="Tipo de vehículo no encontrado")
+    
+    # Verificar código único si se está cambiando
+    if tipo_vehiculo.codigo and tipo_vehiculo.codigo != db_tipo_vehiculo.codigo:
+        existing = db.query(TipoVehiculoModel).filter(TipoVehiculoModel.codigo == tipo_vehiculo.codigo).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Ya existe un tipo de vehículo con este código")
+    
+    # Actualizar solo los campos proporcionados
+    update_data = tipo_vehiculo.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(db_tipo_vehiculo, field, value)
+    
+    db.commit()
+    db.refresh(db_tipo_vehiculo)
+    return db_tipo_vehiculo
+
+
+@router.delete("/tipos-vehiculo/{tipo_vehiculo_id}")
+def eliminar_tipo_vehiculo(
+    tipo_vehiculo_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Eliminar un tipo de vehículo."""
+    db_tipo_vehiculo = db.query(TipoVehiculoModel).filter(TipoVehiculoModel.id == tipo_vehiculo_id).first()
+    if not db_tipo_vehiculo:
+        raise HTTPException(status_code=404, detail="Tipo de vehículo no encontrado")
+    
+    # Verificar si tiene enrolamientos asociados
+    if db_tipo_vehiculo.enrolamientos:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se puede eliminar el tipo de vehículo porque tiene {len(db_tipo_vehiculo.enrolamientos)} enrolamientos asociados"
+        )
+    
+    db.delete(db_tipo_vehiculo)
+    db.commit()
+    return None
+
+
+# ============================================
+# ESTADOS DE ENROLAMIENTO
+# ============================================
+
+@router.get("/estados-enrolamiento", response_model=List[EstadoEnrolamiento])
+def listar_estados_enrolamiento(db: Session = Depends(get_db)):
+    """Listar todos los estados de enrolamiento."""
+    return db.query(EstadoEnrolamientoModel).filter(EstadoEnrolamientoModel.activo == True).all()
+
+
+@router.post("/estados-enrolamiento", response_model=EstadoEnrolamiento, status_code=status.HTTP_201_CREATED)
+def crear_estado_enrolamiento(
+    estado: EstadoEnrolamientoCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Crear un nuevo estado de enrolamiento."""
+    # Verificar código único
+    db_estado = db.query(EstadoEnrolamientoModel).filter(EstadoEnrolamientoModel.codigo == estado.codigo).first()
+    if db_estado:
+        raise HTTPException(status_code=400, detail="Ya existe un estado de enrolamiento con este código")
+    
+    db_estado = EstadoEnrolamientoModel(**estado.model_dump())
+    db.add(db_estado)
+    db.commit()
+    db.refresh(db_estado)
+    return db_estado
+
+
+@router.put("/estados-enrolamiento/{estado_id}", response_model=EstadoEnrolamiento)
+def actualizar_estado_enrolamiento(
+    estado_id: int,
+    estado: EstadoEnrolamientoUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Actualizar un estado de enrolamiento."""
+    db_estado = db.query(EstadoEnrolamientoModel).filter(EstadoEnrolamientoModel.id == estado_id).first()
+    if not db_estado:
+        raise HTTPException(status_code=404, detail="Estado de enrolamiento no encontrado")
+    
+    # Verificar código único si se está cambiando
+    if estado.codigo and estado.codigo != db_estado.codigo:
+        existing = db.query(EstadoEnrolamientoModel).filter(EstadoEnrolamientoModel.codigo == estado.codigo).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Ya existe un estado de enrolamiento con este código")
+    
+    # Actualizar solo los campos proporcionados
+    update_data = estado.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(db_estado, field, value)
+    
+    db.commit()
+    db.refresh(db_estado)
+    return db_estado
+
+
+@router.delete("/estados-enrolamiento/{estado_id}")
+def eliminar_estado_enrolamiento(
+    estado_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Eliminar un estado de enrolamiento."""
+    db_estado = db.query(EstadoEnrolamientoModel).filter(EstadoEnrolamientoModel.id == estado_id).first()
+    if not db_estado:
+        raise HTTPException(status_code=404, detail="Estado de enrolamiento no encontrado")
+    
+    # Verificar si tiene enrolamientos asociados
+    if db_estado.enrolamientos:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se puede eliminar el estado porque tiene {len(db_estado.enrolamientos)} enrolamientos asociados"
+        )
+    
+    db.delete(db_estado)
+    db.commit()
+    return None
+
+
+# ============================================
+# UBICACIONES
+# ============================================
+
+@router.get("/ubicaciones", response_model=List[Ubicacion])
+def listar_ubicaciones(db: Session = Depends(get_db)):
+    """Listar todas las ubicaciones activas."""
+    return db.query(UbicacionModel).filter(UbicacionModel.activo == True).all()
+
+
+@router.post("/ubicaciones", response_model=Ubicacion, status_code=status.HTTP_201_CREATED)
+def crear_ubicacion(
+    ubicacion: UbicacionCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Crear una nueva ubicación."""
+    # Verificar código único
+    db_ubicacion = db.query(UbicacionModel).filter(UbicacionModel.codigo == ubicacion.codigo).first()
+    if db_ubicacion:
+        raise HTTPException(status_code=400, detail="Ya existe una ubicación con este código")
+    
+    db_ubicacion = UbicacionModel(**ubicacion.model_dump())
+    db.add(db_ubicacion)
+    db.commit()
+    db.refresh(db_ubicacion)
+    return db_ubicacion
+
+
+@router.put("/ubicaciones/{ubicacion_id}", response_model=Ubicacion)
+def actualizar_ubicacion(
+    ubicacion_id: int,
+    ubicacion: UbicacionUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Actualizar una ubicación."""
+    db_ubicacion = db.query(UbicacionModel).filter(UbicacionModel.id == ubicacion_id).first()
+    if not db_ubicacion:
+        raise HTTPException(status_code=404, detail="Ubicación no encontrada")
+    
+    # Verificar código único si se está cambiando
+    if ubicacion.codigo and ubicacion.codigo != db_ubicacion.codigo:
+        existing = db.query(UbicacionModel).filter(UbicacionModel.codigo == ubicacion.codigo).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Ya existe una ubicación con este código")
+    
+    # Actualizar solo los campos proporcionados
+    update_data = ubicacion.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(db_ubicacion, field, value)
+    
+    db.commit()
+    db.refresh(db_ubicacion)
+    return db_ubicacion
+
+
+@router.delete("/ubicaciones/{ubicacion_id}")
+def eliminar_ubicacion(
+    ubicacion_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Eliminar una ubicación."""
+    db_ubicacion = db.query(UbicacionModel).filter(UbicacionModel.id == ubicacion_id).first()
+    if not db_ubicacion:
+        raise HTTPException(status_code=404, detail="Ubicación no encontrada")
+    
+    # Verificar si tiene lotes asociados
+    if db_ubicacion.lotes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se puede eliminar la ubicación porque tiene {len(db_ubicacion.lotes)} lotes asociados"
+        )
+    
+    db.delete(db_ubicacion)
+    db.commit()
+    return None
+
+
+# ============================================
+# TIPOS DE DOCUMENTO TRIBUTARIO
+# ============================================
+
+@router.get("/tipos-documento", response_model=List[TipoDocumento])
+def listar_tipos_documento(
+    activo: bool = None,
+    db: Session = Depends(get_db)
+):
+    """Listar tipos de documento tributario (endpoint público)."""
+    query = db.query(TipoDocumentoModel)
+    
+    if activo is not None:
+        query = query.filter(TipoDocumentoModel.activo == activo)
+    
+    tipos = query.order_by(TipoDocumentoModel.nombre).all()
+    return tipos
+
+
+# ============================================
+# PRODUCTOS DE CARNES (Para WMS)
+# ============================================
+
+@router.get("/productos-carnes", response_model=List[Dict])
+def listar_productos_carnes(db: Session = Depends(get_db)):
+    """Listar productos de la categoría CARNES para el sistema WMS."""
+    from database.models import Producto, CategoriaProducto
+    
+    # Buscar categoría CARNES
+    categoria_carnes = db.query(CategoriaProducto).filter(
+        CategoriaProducto.nombre.ilike('CARNES')
+    ).first()
+    
+    if not categoria_carnes:
+        return []
+    
+    # Obtener productos de carnes
+    productos = db.query(Producto).filter(
+        Producto.categoria_id == categoria_carnes.id
+    ).all()
+    
+    return [
+        {
+            "id": p.id,
+            "nombre": p.nombre,
+            "sku": p.sku,
+            "descripcion": p.descripcion or ""
+        }
+        for p in productos
+    ]

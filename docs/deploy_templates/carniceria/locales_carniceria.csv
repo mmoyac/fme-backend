@@ -1,0 +1,5 @@
+codigo,nombre,direccion,tipo_local_codigo
+WEB,Tienda Online,Virtual,VENTA
+MATRIZ,Carnicería Principal,Mercado Central Local 12,VENTA
+SUCURSAL_1,Sucursal Mall,Mall Plaza Local 89,VENTA
+FRIGORIFICO,Frigorífico Central,Zona Industrial Sector B,FRIGORIFICO

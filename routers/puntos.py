@@ -15,7 +15,9 @@ from schemas.puntos_schemas import (
     UsarPuntosResponse,
     EstadisticasPuntosResponse,
     ValidacionPuntosRequest,
-    ValidacionPuntosResponse
+    ValidacionPuntosResponse,
+    EstimacionPuntosRequest,
+    EstimacionPuntosResponse
 )
 from routers.auth import get_current_active_user
 from database.models import User
@@ -185,4 +187,23 @@ def otorgar_puntos_manual(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al otorgar puntos: {str(e)}"
+        )
+
+
+@router.post("/estimar", response_model=EstimacionPuntosResponse)
+def estimar_puntos_por_items(
+    request: EstimacionPuntosRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Estima los puntos que se ganarían por una lista de productos.
+    """
+    try:
+        estimacion = PuntosService.estimar_puntos_por_items(db, request.items)
+        return estimacion
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al estimar puntos: {str(e)}"
         )

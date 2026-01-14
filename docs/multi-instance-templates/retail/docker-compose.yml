@@ -1,0 +1,84 @@
+version: '3.8'
+
+# Instancia de Retail/Productos Varios - Ports: 8006, 3006, 3007, 5438
+services:
+  # Base de datos PostgreSQL
+  db:
+    image: postgres:14
+    container_name: fme_retail_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: fme_retail
+      POSTGRES_PASSWORD: fme_retail_pass
+      POSTGRES_DB: fme_retail_db
+    ports:
+      - "5438:5432"
+    volumes:
+      - ./volumes/postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fme_retail"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Backend API
+  backend:
+    build:
+      context: ../../../fme-backend
+      dockerfile: Dockerfile
+    container_name: fme_retail_backend
+    restart: unless-stopped
+    ports:
+      - "8006:8000"
+    environment:
+      DATABASE_URL: postgresql://fme_retail:fme_retail_pass@db:5432/fme_retail_db
+      INSTANCE_TYPE: retail
+      BUSINESS_NAME: "El Olivo Lampa"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/instance_data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/docs')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Landing page
+  landing:
+    build:
+      context: ../../../fme-landing
+      dockerfile: Dockerfile.prod
+    container_name: fme_retail_landing
+    restart: unless-stopped
+    ports:
+      - "3006:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8006
+      NEXT_PUBLIC_BUSINESS_TYPE: retail
+      NEXT_PUBLIC_BUSINESS_NAME: "El Olivo Lampa"
+      NODE_ENV: production
+    depends_on:
+      - backend
+
+  # Backoffice
+  backoffice:
+    build:
+      context: ../../../fme-backoffice
+      dockerfile: Dockerfile.prod
+    container_name: fme_retail_backoffice
+    restart: unless-stopped
+    ports:
+      - "3007:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8006
+      NEXT_PUBLIC_BUSINESS_TYPE: retail
+      NEXT_PUBLIC_BUSINESS_NAME: "El Olivo Lampa"
+      NODE_ENV: production
+    depends_on:
+      - backend
+
+networks:
+  default:
+    name: fme_retail_network

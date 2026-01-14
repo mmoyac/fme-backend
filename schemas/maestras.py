@@ -7,6 +7,64 @@ from decimal import Decimal
 
 
 # ============================================
+# TIPOS DE VENTA
+# ============================================
+
+class TipoVentaBase(BaseModel):
+    codigo: str = Field(..., description="Código único del tipo de venta")
+    nombre: str = Field(..., description="Nombre del tipo de venta")
+    descripcion: Optional[str] = None
+    activo: bool = True
+
+
+class TipoVentaCreate(TipoVentaBase):
+    pass
+
+
+class TipoVentaUpdate(BaseModel):
+    codigo: Optional[str] = None
+    nombre: Optional[str] = None
+    descripcion: Optional[str] = None
+    activo: Optional[bool] = None
+
+
+class TipoVenta(TipoVentaBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================
+# TIPOS DE PROVEEDOR
+# ============================================
+
+class TipoProveedorBase(BaseModel):
+    codigo: str = Field(..., description="Código único del tipo de proveedor")
+    nombre: str = Field(..., description="Nombre del tipo de proveedor")
+    descripcion: Optional[str] = None
+    activo: bool = True
+
+
+class TipoProveedorCreate(TipoProveedorBase):
+    pass
+
+
+class TipoProveedorUpdate(BaseModel):
+    codigo: Optional[str] = None
+    nombre: Optional[str] = None
+    descripcion: Optional[str] = None
+    activo: Optional[bool] = None
+
+
+class TipoProveedor(TipoProveedorBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================
 # CATEGORÍAS DE PRODUCTO
 # ============================================
 
@@ -15,6 +73,7 @@ class CategoriaProductoBase(BaseModel):
     nombre: str = Field(..., description="Nombre de la categoría")
     descripcion: Optional[str] = None
     puntos_fidelidad: int = Field(default=0, description="Puntos que otorga por venta")
+    tipo_venta_id: Optional[int] = Field(None, description="ID del tipo de venta")
     activo: bool = True
 
 
@@ -27,11 +86,13 @@ class CategoriaProductoUpdate(BaseModel):
     nombre: Optional[str] = None
     descripcion: Optional[str] = None
     puntos_fidelidad: Optional[int] = None
+    tipo_venta_id: Optional[int] = None
     activo: Optional[bool] = None
 
 
 class CategoriaProducto(CategoriaProductoBase):
     id: int
+    tipo_venta: Optional[TipoVenta] = None
 
     class Config:
         from_attributes = True
@@ -225,6 +286,124 @@ class BancoUpdate(BaseModel):
 
 
 class Banco(BancoBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================
+# TIPOS DE VEHÍCULO
+# ============================================
+
+class TipoVehiculoBase(BaseModel):
+    codigo: str = Field(..., description="Código único del tipo de vehículo")
+    nombre: str = Field(..., description="Nombre del tipo de vehículo")
+    descripcion: Optional[str] = None
+    activo: bool = True
+
+
+class TipoVehiculoCreate(TipoVehiculoBase):
+    pass
+
+
+class TipoVehiculoUpdate(BaseModel):
+    codigo: Optional[str] = None
+    nombre: Optional[str] = None
+    descripcion: Optional[str] = None
+    activo: Optional[bool] = None
+
+
+class TipoVehiculo(TipoVehiculoBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================
+# ESTADOS DE ENROLAMIENTO
+# ============================================
+
+class EstadoEnrolamientoBase(BaseModel):
+    codigo: str = Field(..., description="Código único del estado")
+    nombre: str = Field(..., description="Nombre del estado")
+    descripcion: Optional[str] = None
+    activo: bool = True
+
+
+class EstadoEnrolamientoCreate(EstadoEnrolamientoBase):
+    pass
+
+
+class EstadoEnrolamientoUpdate(BaseModel):
+    codigo: Optional[str] = None
+    nombre: Optional[str] = None
+    descripcion: Optional[str] = None
+    activo: Optional[bool] = None
+
+
+class EstadoEnrolamiento(EstadoEnrolamientoBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================
+# UBICACIONES
+# ============================================
+
+class UbicacionBase(BaseModel):
+    codigo: str = Field(..., description="Código único de la ubicación (P1-A-01)")
+    nombre: str = Field(..., description="Nombre de la ubicación")
+    descripcion: Optional[str] = None
+    capacidad_maxima: int = Field(default=0, description="Número máximo de cajas")
+    activo: bool = True
+
+
+class UbicacionCreate(UbicacionBase):
+    pass
+
+
+class UbicacionUpdate(BaseModel):
+    codigo: Optional[str] = None
+    nombre: Optional[str] = None
+    descripcion: Optional[str] = None
+    capacidad_maxima: Optional[int] = None
+    activo: Optional[bool] = None
+
+
+class Ubicacion(UbicacionBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+# ============================================
+# TIPOS DE DOCUMENTO TRIBUTARIO
+# ============================================
+
+class TipoDocumentoBase(BaseModel):
+    codigo: str = Field(..., description="Código único del tipo de documento")
+    nombre: str = Field(..., description="Nombre del tipo de documento")
+    descripcion: Optional[str] = None
+    activo: bool = True
+
+
+class TipoDocumentoCreate(TipoDocumentoBase):
+    pass
+
+
+class TipoDocumentoUpdate(BaseModel):
+    codigo: Optional[str] = None
+    nombre: Optional[str] = None
+    descripcion: Optional[str] = None
+    activo: Optional[bool] = None
+
+
+class TipoDocumento(TipoDocumentoBase):
     id: int
 
     class Config:

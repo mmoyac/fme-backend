@@ -13,6 +13,13 @@ class ClienteBase(BaseModel):
     telefono: Optional[str] = None
     direccion: Optional[str] = None
     comuna: Optional[str] = None
+    
+    # Campos tributarios
+    rut: Optional[str] = Field(None, max_length=20, description="RUT del cliente (obligatorio para facturas)")
+    razon_social: Optional[str] = Field(None, max_length=255, description="Razón social (nombre empresarial)")
+    giro: Optional[str] = Field(None, max_length=255, description="Actividad comercial de la empresa")
+    es_empresa: bool = Field(default=False, description="Indica si es empresa y requiere factura")
+    
     limite_credito: float = Field(default=0.0, ge=0, description="Límite de crédito del cliente")
 
 
@@ -29,6 +36,13 @@ class ClienteUpdate(BaseModel):
     telefono: Optional[str] = None
     direccion: Optional[str] = None
     comuna: Optional[str] = None
+    
+    # Campos tributarios
+    rut: Optional[str] = Field(None, max_length=20, description="RUT del cliente")
+    razon_social: Optional[str] = Field(None, max_length=255, description="Razón social")
+    giro: Optional[str] = Field(None, max_length=255, description="Actividad comercial")
+    es_empresa: Optional[bool] = Field(None, description="Indica si es empresa")
+    
     limite_credito: Optional[float] = Field(None, ge=0, description="Límite de crédito del cliente")
 
 

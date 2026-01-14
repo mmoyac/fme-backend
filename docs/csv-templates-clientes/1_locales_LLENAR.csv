@@ -1,0 +1,17 @@
+codigo,nombre,direccion,tipo_local_codigo,activo
+WEB,Tienda Online,Virtual,VENTA,true
+MATRIZ,Local Principal,[ESCRIBIR DIRECCION REAL],VENTA,true
+SUCURSAL_1,[NOMBRE SUCURSAL 1],[DIRECCION SUCURSAL 1],VENTA,true
+BODEGA,Bodega Principal,[DIRECCION BODEGA],BODEGA,true
+
+# INSTRUCCIONES:
+# - codigo: Código único del local (sin espacios, mayúsculas)
+# - nombre: Nombre descriptivo del local
+# - direccion: Dirección completa del local
+# - tipo_local_codigo: VENTA (punto de venta), BODEGA (almacén), FRIGORIFICO (cámara fría), PRODUCCION (fábrica)
+# - activo: true/false
+#
+# IMPORTANTE: 
+# - El local WEB es obligatorio para la tienda online
+# - Agregar tantas filas como locales tenga
+# - No usar tildes ni caracteres especiales en los códigos

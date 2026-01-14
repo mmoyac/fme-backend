@@ -101,16 +101,24 @@ def crear_cliente(
     
     **Uso:** Backoffice - Alta de cliente
     """
+    # Normalizar email vacío a None
+    email_normalizado = cliente.email.strip() if cliente.email else None
+    if email_normalizado == "":
+        email_normalizado = None
+        
     # Verificar si el email ya existe (si se proporciona)
-    if cliente.email:
-        cliente_existente = db.query(Cliente).filter(Cliente.email == cliente.email).first()
+    if email_normalizado:
+        cliente_existente = db.query(Cliente).filter(Cliente.email == email_normalizado).first()
         if cliente_existente:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Ya existe un cliente con el email '{cliente.email}'"
+                detail=f"Ya existe un cliente con el email '{email_normalizado}'"
             )
     
-    db_cliente = Cliente(**cliente.model_dump())
+    # Crear cliente con email normalizado
+    cliente_data = cliente.model_dump()
+    cliente_data['email'] = email_normalizado
+    db_cliente = Cliente(**cliente_data)
     db.add(db_cliente)
     db.commit()
     db.refresh(db_cliente)
@@ -154,16 +162,24 @@ def actualizar_cliente(
         )
     
     # Verificar email único si se está actualizando
-    if cliente.email and cliente.email != db_cliente.email:
-        cliente_existente = db.query(Cliente).filter(Cliente.email == cliente.email).first()
-        if cliente_existente:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Ya existe un cliente con el email '{cliente.email}'"
-            )
+    email_normalizado = None
+    if cliente.email is not None:
+        email_normalizado = cliente.email.strip()
+        if email_normalizado == "":
+            email_normalizado = None
+            
+        if email_normalizado and email_normalizado != db_cliente.email:
+            cliente_existente = db.query(Cliente).filter(Cliente.email == email_normalizado).first()
+            if cliente_existente:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Ya existe un cliente con el email '{email_normalizado}'"
+                )
     
     # Actualizar campos
     update_data = cliente.model_dump(exclude_unset=True)
+    if 'email' in update_data:
+        update_data['email'] = email_normalizado
     for field, value in update_data.items():
         setattr(db_cliente, field, value)
     

@@ -1,0 +1,18 @@
+email,password,nombre_completo,rol_codigo,local_defecto_codigo,activo
+admin@[DOMINIO_CLIENTE].cl,admin123,[NOMBRE ADMINISTRADOR],admin,MATRIZ,true
+vendedor1@[DOMINIO_CLIENTE].cl,vendedor123,[NOMBRE VENDEDOR 1],vendedor,MATRIZ,true
+vendedor2@[DOMINIO_CLIENTE].cl,vendedor123,[NOMBRE VENDEDOR 2],vendedor,SUCURSAL_1,true
+cajero1@[DOMINIO_CLIENTE].cl,cajero123,[NOMBRE CAJERO 1],vendedor,MATRIZ,true
+
+# INSTRUCCIONES:
+# - email: Email de acceso al sistema (debe ser único)
+# - password: Contraseña inicial (cambiarán al primer ingreso)
+# - nombre_completo: Nombre completo del usuario
+# - rol_codigo: admin (administrador total), vendedor (puede vender y usar caja), despachador (solo despachos)
+# - local_defecto_codigo: Local donde trabaja habitualmente (para restricciones de caja)
+# - activo: true/false
+#
+# IMPORTANTE:
+# - Siempre crear al menos un usuario admin
+# - Los vendedores solo pueden abrir caja en su local asignado
+# - Cambiar [DOMINIO_CLIENTE] por el dominio real del cliente

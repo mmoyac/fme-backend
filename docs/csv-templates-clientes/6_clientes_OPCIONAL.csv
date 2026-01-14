@@ -1,0 +1,17 @@
+nombre,email,telefono,direccion,comuna,activo
+[NOMBRE CLIENTE 1],[email1@cliente.cl],[+56912345678],[DIRECCION CLIENTE 1],[COMUNA],true
+[NOMBRE CLIENTE 2],[email2@cliente.cl],[+56987654321],[DIRECCION CLIENTE 2],[COMUNA],true
+
+# INSTRUCCIONES:
+# - nombre: Nombre completo del cliente
+# - email: Email del cliente (debe ser único)
+# - telefono: Teléfono con formato +56XXXXXXXXX
+# - direccion: Dirección completa para despachos
+# - comuna: Comuna del cliente
+# - activo: true/false
+#
+# NOTA: 
+# - Este archivo es OPCIONAL
+# - Solo llenar si tiene clientes previos que quiere cargar
+# - Los clientes también se pueden crear desde la tienda online o el backoffice
+# - Útil para migrar desde otro sistema

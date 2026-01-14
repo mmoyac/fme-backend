@@ -1,0 +1,18 @@
+sku_producto,codigo_local,monto_precio
+[SKU-001],WEB,[PRECIO TIENDA ONLINE]
+[SKU-001],MATRIZ,[PRECIO LOCAL PRINCIPAL]
+[SKU-001],SUCURSAL_1,[PRECIO SUCURSAL 1]
+[SKU-002],WEB,[PRECIO TIENDA ONLINE]
+[SKU-002],MATRIZ,[PRECIO LOCAL PRINCIPAL]
+[SKU-002],SUCURSAL_1,[PRECIO SUCURSAL 1]
+
+# INSTRUCCIONES:
+# - sku_producto: SKU del producto (debe coincidir con productos.csv)
+# - codigo_local: Código del local (debe coincidir con locales.csv)  
+# - monto_precio: Precio de venta en pesos chilenos (sin puntos ni comas)
+#
+# IMPORTANTE:
+# - Cada producto debe tener precio en el local WEB (obligatorio para tienda online)
+# - Los precios pueden variar por local (ej: local centro vs mall puede tener precios diferentes)
+# - Solo poner precios en locales de tipo VENTA (no en bodegas)
+# - Ejemplo: precio $1500 se escribe como 1500

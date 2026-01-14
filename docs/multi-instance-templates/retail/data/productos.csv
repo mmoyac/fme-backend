@@ -1,0 +1,16 @@
+nombre,sku,descripcion,categoria_codigo,tipo_producto_codigo,precio_web,es_vendible_web,stock_minimo
+Papas Fritas Congeladas 2.5kg,ELO-001,Papas fritas precocidas para freír en bolsa de 2.5kg,CONGELADOS,MATERIA_PRIMA,3500,true,20
+Papas Fritas Congeladas 9mm,ELO-002,Papas fritas corte 9mm para restaurantes,CONGELADOS,MATERIA_PRIMA,4200,true,15
+Aceitunas Verdes 5kg,ELO-003,Aceitunas verdes en salmuera balde 5kg,CONSERVAS,MATERIA_PRIMA,8500,true,10
+Aceitunas Negras Premium,ELO-004,Aceitunas negras tipo botija 3kg,CONSERVAS,MATERIA_PRIMA,12000,true,8
+Vasos Plásticos 500ml x100,ELO-005,Vasos desechables transparentes 500ml pack 100 unidades,DESCARTABLES,INSUMO,2500,true,50
+Vasos Plásticos 250ml x100,ELO-006,Vasos desechables transparentes 250ml pack 100 unidades,DESCARTABLES,INSUMO,1800,true,50
+Platos Descartables x50,ELO-007,Platos desechables blancos pack 50 unidades,DESCARTABLES,INSUMO,3200,true,30
+Servilletas Pack x200,ELO-008,Servilletas blancas de papel pack 200 unidades,DESCARTABLES,INSUMO,1200,true,40
+Bolsas Plásticas Grandes,ELO-009,Bolsas plásticas resistentes 60x90cm pack 100,DESCARTABLES,INSUMO,4500,true,25
+Aceite para Freír 20L,ELO-010,Aceite vegetal para fritura industrial bidón 20 litros,ACEITES,MATERIA_PRIMA,18000,true,5
+Sal Industrial 25kg,ELO-011,Sal refinada para uso industrial saco 25kg,CONDIMENTOS,MATERIA_PRIMA,3500,true,8
+Condimento Papa Frita,ELO-012,Condimento especializado para papas fritas 1kg,CONDIMENTOS,INSUMO,6500,true,12
+Bandejitas Foam x100,ELO-013,Bandejitas de foam para comida pack 100 unidades,DESCARTABLES,INSUMO,2800,true,35
+Film Plástico Industrial,ELO-014,Film transparente para envoltorios rollo 500m,EMPAQUES,INSUMO,5500,true,15
+Guantes Desechables x100,ELO-015,Guantes de nitrilo para manipulación pack 100,DESCARTABLES,INSUMO,4200,true,20

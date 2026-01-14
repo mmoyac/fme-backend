@@ -1,0 +1,20 @@
+nombre,sku,descripcion,categoria_codigo,tipo_producto_codigo,es_vendible,es_vendible_web,stock_minimo,activo
+[PRODUCTO 1],[SKU-001],[DESCRIPCION PRODUCTO 1],CATEGORIA1,PRODUCTO_ELABORADO,true,true,10,true
+[PRODUCTO 2],[SKU-002],[DESCRIPCION PRODUCTO 2],CATEGORIA1,MATERIA_PRIMA,true,true,5,true
+[PRODUCTO 3],[SKU-003],[DESCRIPCION PRODUCTO 3],CATEGORIA2,PRODUCTO_ELABORADO,true,false,15,true
+
+# INSTRUCCIONES:
+# - nombre: Nombre comercial del producto
+# - sku: Código único del producto (ejemplo: PAN-001, CAR-001, LAC-001)
+# - descripcion: Descripción detallada del producto
+# - categoria_codigo: PANADERIA, CARNES, LACTEOS, CONSERVAS, DESCARTABLES, etc.
+# - tipo_producto_codigo: PRODUCTO_ELABORADO (producto final), MATERIA_PRIMA (ingrediente), INSUMO (material)
+# - es_vendible: true si se puede vender en el sistema
+# - es_vendible_web: true si aparece en la tienda online
+# - stock_minimo: Cantidad mínima de stock antes de alerta
+# - activo: true/false
+#
+# IMPORTANTE:
+# - Cada SKU debe ser único
+# - Categorías comunes: PANADERIA, CARNES, LACTEOS, CONSERVAS, DESCARTABLES, CONGELADOS, ACEITES, CONDIMENTOS
+# - Agregar tantas filas como productos tenga

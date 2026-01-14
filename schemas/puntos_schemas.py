@@ -125,3 +125,28 @@ class ValidacionPuntosResponse(BaseModel):
     mensaje: str
     descuento_aplicable: Decimal
     puntos_maximos_usables: Optional[int] = None
+
+# =======================================
+# Schemas para estimación de puntos
+# =======================================
+
+class ItemParaEstimacionPuntos(BaseModel):
+    """Item para estimar puntos."""
+    producto_id: int = Field(..., gt=0)
+    cantidad: float = Field(..., gt=0)
+
+class EstimacionPuntosRequest(BaseModel):
+    """Schema para solicitud de estimación de puntos."""
+    items: List[ItemParaEstimacionPuntos] = Field(..., min_length=1)
+
+class DetallePuntosPorCategoria(BaseModel):
+    """Detalle de puntos por categoría."""
+    categoria_nombre: str
+    puntos_por_unidad: int
+    cantidad: float
+    puntos_subtotal: int
+
+class EstimacionPuntosResponse(BaseModel):
+    """Schema de respuesta para estimación de puntos."""
+    total_puntos: int
+    detalle_por_categoria: List[DetallePuntosPorCategoria]
