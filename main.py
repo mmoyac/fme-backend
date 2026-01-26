@@ -25,6 +25,9 @@ origins = [
     "http://localhost:3000",  # Landing en desarrollo
     "http://localhost:3001",  # Backoffice en desarrollo
     "http://localhost:8080",
+    "http://localhost",       # POS App (Capacitor Android)
+    "capacitor://localhost",  # POS App (Capacitor iOS)
+    "ionic://localhost",      # POS App (Capacitor alternativo)
 ]
 
 app.add_middleware(
