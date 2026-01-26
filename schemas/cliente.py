@@ -18,7 +18,7 @@ class ClienteBase(BaseModel):
     rut: Optional[str] = Field(None, max_length=20, description="RUT del cliente (obligatorio para facturas)")
     razon_social: Optional[str] = Field(None, max_length=255, description="Razón social (nombre empresarial)")
     giro: Optional[str] = Field(None, max_length=255, description="Actividad comercial de la empresa")
-    es_empresa: bool = Field(default=False, description="Indica si es empresa y requiere factura")
+    es_empresa: Optional[bool] = Field(default=False, description="Indica si es empresa y requiere factura")
     
     limite_credito: float = Field(default=0.0, ge=0, description="Límite de crédito del cliente")
 
