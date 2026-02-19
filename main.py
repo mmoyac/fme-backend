@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from routers.auth import get_current_active_user
 
 # Importar routers
-from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, payments, test_payments, maestras, recetas, produccion, compras, cheques, puntos, caja, enrolamiento, gemini_vision, precios_proveedor, stock_cajas, alertas, tipos_pedido, despachos, configuracion, debug_menu, admin_configuracion_landing, tenants, etiquetas
+from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, admin_utils, payments, test_payments, maestras, recetas, produccion, compras, cheques, puntos, caja, enrolamiento, gemini_vision, precios_proveedor, stock_cajas, alertas, tipos_pedido, despachos, configuracion, debug_menu, admin_configuracion_landing, tenants, etiquetas
 
 app = FastAPI(
     title="FME Backend API",
@@ -67,6 +67,7 @@ app.include_router(movimientos_inventario.router, prefix="/api/movimientos", tag
 app.include_router(clientes.router, prefix="/api/clientes", tags=["Clientes"], dependencies=[Depends(get_current_active_user)])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"], dependencies=[Depends(get_current_active_user)])
 app.include_router(admin_users.router, prefix="/api/admin", tags=["Administración Usuarios"])
+app.include_router(admin_utils.router, prefix="/api/admin", tags=["Utilidades Admin"], dependencies=[Depends(get_current_active_user)])
 app.include_router(auth.router, prefix="/api/auth", tags=["Autenticación"])
 app.include_router(payments.router, prefix="/api/payments", tags=["Pagos"])
 app.include_router(test_payments.router, prefix="/api/test", tags=["⚠️ TEST ONLY - ELIMINAR EN PRODUCCIÓN"])

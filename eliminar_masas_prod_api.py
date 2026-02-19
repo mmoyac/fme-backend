@@ -143,6 +143,60 @@ def eliminar_compras(headers):
         return 0
 
 
+def eliminar_ordenes_produccion(headers):
+    """Eliminar todas las órdenes de producción del tenant."""
+    try:
+        response = requests.get(f"{API_URL}/api/produccion/ordenes", headers=headers, timeout=30)
+        if response.status_code != 200:
+            print(f"❌ Error obteniendo órdenes de producción: {response.status_code}")
+            return 0
+        
+        ordenes = response.json()
+        count = len(ordenes)
+        
+        if count == 0:
+            print("✅ No hay órdenes de producción para eliminar")
+            return 0
+        
+        print(f"\n🗑️  Eliminando {count} órdenes de producción...")
+        eliminados = 0
+        
+        for orden in ordenes:
+            orden_id = orden.get('id')
+            estado = orden.get('estado', 'N/A')
+            fecha = orden.get('fecha_programada', 'N/A')
+            
+            try:
+                resp = requests.delete(
+                    f"{API_URL}/api/produccion/ordenes/{orden_id}", 
+                    headers=headers, 
+                    timeout=30
+                )
+                
+                if resp.status_code in [200, 204]:
+                    eliminados += 1
+                    print(f"   ✓ Orden #{orden_id} ({estado}) eliminada")
+                elif resp.status_code == 404:
+                    print(f"   ⚠️  Orden #{orden_id} ya no existe")
+                else:
+                    try:
+                        error = resp.json().get('detail', resp.text) if resp.text else resp.status_code
+                    except:
+                        error = resp.text if resp.text else resp.status_code
+                    print(f"   ❌ Error eliminando orden #{orden_id}: {error}")
+                    
+            except Exception as e:
+                print(f"   ❌ Excepción eliminando orden #{orden_id}: {e}")
+                continue
+        
+        print(f"✅ {eliminados} órdenes de producción eliminadas")
+        return eliminados
+        
+    except Exception as e:
+        print(f"❌ Error general eliminando órdenes de producción: {e}")
+        return 0
+
+
 def eliminar_productos(headers):
     """Eliminar todos los productos del tenant."""
     productos, count = listar_y_contar("/api/productos/", headers, "productos")
@@ -224,6 +278,45 @@ def eliminar_clientes(headers):
     
     print(f"✅ {eliminados} clientes eliminados")
     return eliminados
+
+
+def resetear_secuencias(headers):
+    """Resetear todas las secuencias de IDs a 1."""
+    print("\n🔄 Reseteando secuencias de IDs...")
+    
+    try:
+        resp = requests.post(
+            f"{API_URL}/api/admin/reset-sequences", 
+            headers=headers,
+            timeout=60
+        )
+        
+        if resp.status_code == 200:
+            data = resp.json()
+            resetadas = data.get('resetadas', 0)
+            total = data.get('total', 0)
+            errores = data.get('errores', [])
+            
+            print(f"✅ {resetadas}/{total} secuencias reseteadas")
+            
+            if errores:
+                print("⚠️  Algunas secuencias tuvieron errores:")
+                for error in errores[:5]:  # Mostrar solo primeros 5 errores
+                    print(f"   • {error}")
+            
+            return resetadas
+        else:
+            print(f"❌ Error reseteando secuencias: {resp.status_code}")
+            try:
+                error = resp.json().get('detail', resp.text) if resp.text else resp.status_code
+            except:
+                error = resp.text if resp.text else resp.status_code
+            print(f"   {error}")
+            return 0
+            
+    except Exception as e:
+        print(f"❌ Excepción reseteando secuencias: {e}")
+        return 0
 
 
 def resetear_inventario(headers):
@@ -470,11 +563,28 @@ def eliminar_datos_masasestacion():
         productos, productos_count = listar_y_contar("/api/productos/", headers, "productos")
         clientes, clientes_count = listar_y_contar("/api/clientes/", headers, "clientes")
         
+        # Contar órdenes de producción y compras
+        try:
+            resp_ordenes = requests.get(f"{API_URL}/api/produccion/ordenes", headers=headers, timeout=30)
+            ordenes_count = len(resp_ordenes.json()) if resp_ordenes.status_code == 200 else 0
+        except:
+            ordenes_count = 0
+            
+        try:
+            resp_compras = requests.get(f"{API_URL}/api/compras/", headers=headers, timeout=30)
+            compras_count = len(resp_compras.json()) if resp_compras.status_code == 200 else 0
+        except:
+            compras_count = 0
+        
         print(f"   📋 Pedidos: {pedidos_count}")
         print(f"   📦 Productos: {productos_count}")
         print(f"   👥 Clientes: {clientes_count}")
+        print(f"   🏭 Órdenes Producción: {ordenes_count}")
+        print(f"   📦 Compras: {compras_count}")
         
-        if pedidos_count == 0 and productos_count == 0 and clientes_count == 0:
+        total_registros = pedidos_count + productos_count + clientes_count + ordenes_count + compras_count
+        
+        if total_registros == 0:
             print('\n✅ No hay datos para eliminar')
             print('✅ Base de datos ya está limpia para Masas Estación')
             return
@@ -483,6 +593,8 @@ def eliminar_datos_masasestacion():
         print(f'   💀 {pedidos_count} pedidos')
         print(f'   💀 {productos_count} productos')
         print(f'   💀 {clientes_count} clientes')
+        print(f'   💀 {ordenes_count} órdenes de producción')
+        print(f'   💀 {compras_count} compras')
         print(f'   💀 Inventario → 0')
         print('=' * 60)
         
@@ -509,11 +621,17 @@ def eliminar_datos_masasestacion():
         # 3.5. Eliminar compras (antes de productos por FK en detalles_compra)
         compras_eliminadas = eliminar_compras(headers)
         
-        # 3.6. Eliminar productos (después de limpiar todas sus dependencias)
+        # 3.6. Eliminar órdenes de producción (antes de productos por FK en detalles)
+        ordenes_eliminadas = eliminar_ordenes_produccion(headers)
+        
+        # 3.7. Eliminar productos (después de limpiar todas sus dependencias)
         productos_eliminados = eliminar_productos(headers)
         
-        # 3.7. Eliminar clientes (después de pedidos, con force=true)
+        # 3.8. Eliminar clientes (después de pedidos, con force=true)
         clientes_eliminados = eliminar_clientes(headers)
+        
+        # 3.9. Resetear secuencias de IDs a 1
+        secuencias_reseteadas = resetear_secuencias(headers)
         
         # 4. Resumen final
         print('\n' + '=' * 60)
@@ -525,8 +643,10 @@ def eliminar_datos_masasestacion():
         print(f'   ✓ {precios_eliminados} precios eliminados')
         print(f'   ✓ {dependencias_limpiadas} dependencias de productos limpiadas')
         print(f'   ✓ {compras_eliminadas} compras eliminadas')
+        print(f'   ✓ {ordenes_eliminadas} órdenes de producción eliminadas')
         print(f'   ✓ {productos_eliminados} productos eliminados')
         print(f'   ✓ {clientes_eliminados} clientes eliminados')
+        print(f'   ✓ {secuencias_reseteadas} secuencias de IDs reseteadas')
         
         # 5. Verificación final
         print('\n🔍 Verificación final...')
