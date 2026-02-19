@@ -1,0 +1,4 @@
+sku,nombre,descripcion,categoria_id,tipo_producto_id,unidad_medida_id,precio_compra,costo_fabricacion,stock_minimo,stock_critico,es_vendible,es_vendible_web,es_ingrediente
+PROD-001,Producto Ejemplo 1,Descripción del producto 1,1,1,1,1000,800,10,5,true,true,false
+PROD-002,Producto Ejemplo 2,Descripción del producto 2,1,1,1,2000,1500,20,10,true,true,false
+PROD-003,Producto Ejemplo 3,Descripción del producto 3,2,1,2,3000,2500,15,8,true,false,false

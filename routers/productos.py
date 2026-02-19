@@ -4,14 +4,14 @@ Router para endpoints de Productos y Catálogo.
 from typing import List
 import os
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request
 from sqlalchemy.orm import Session
 
 from database.database import get_db
 from database.models import Producto, CategoriaProducto
 from schemas.catalogo import ProductoCatalogo
 from schemas.producto import ProductoResponse, ProductoCreate, ProductoUpdate
-from services import inventario_service
+from services import inventario_service, tenant_service
 
 from routers.auth import get_current_active_user
 
@@ -23,20 +23,36 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @router.get("/catalogo", response_model=List[ProductoCatalogo])
-def obtener_catalogo_web(db: Session = Depends(get_db)):
+def obtener_catalogo_web(
+    request: Request,
+    db: Session = Depends(get_db)
+):
     """
     Obtiene el catálogo de productos con precios del local WEB.
+    
+    Detecta automáticamente el tenant por dominio:
+    - masasestacion.cl → Productos de Masas Estación
+    - elolivo.masasestacion.cl → Productos de El Olivo
+    - localhost → Masas Estación (desarrollo)
     
     Retorna:
     - SKU del producto
     - Nombre del producto
     - Descripción del producto
     - Precio (del local WEB/e-commerce)
-    - Stock total (suma de todos los locales físicos)
+    - Stock total (suma de todos los locales físicos o WEB)
     
     **Ideal para:** Mostrar productos en la tienda online con precios de e-commerce
     """
-    catalogo = inventario_service.get_catalogo_web(db)
+    # Detectar y validar tenant
+    tenant = tenant_service.get_tenant_from_request(request, db)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+    
+    # Validar que el tenant esté activo
+    tenant_service.validar_tenant_activo(tenant)
+    
+    catalogo = inventario_service.get_catalogo_web(db, tenant_id=tenant.id)
     return catalogo
 
 
@@ -52,7 +68,7 @@ def listar_productos(
     current_user = Depends(get_current_active_user)
 ):
     """
-    Lista todos los productos con paginación.
+    Lista todos los productos con paginación (filtrados por tenant del usuario).
     
     **Uso:** Backoffice - Tabla de productos
     """
@@ -65,6 +81,7 @@ def listar_productos(
             joinedload(Producto.categoria).joinedload(CategoriaProducto.tipo_venta),
             joinedload(Producto.categoria)
         )
+        .filter(Producto.tenant_id == current_user.tenant_id)
         .offset(skip)
         .limit(limit)
         .all()
@@ -82,6 +99,7 @@ def listar_productos(
             'descripcion': p.descripcion,
             'sku': p.sku,
             'imagen_url': p.imagen_url,
+            'codigo_barra': p.codigo_barra,
             'categoria_id': p.categoria_id,
             'tipo_producto_id': p.tipo_producto_id,
             'unidad_medida_id': p.unidad_medida_id,
@@ -111,7 +129,7 @@ def listar_productos(
 @router.get("/{producto_id}", response_model=ProductoResponse)
 def obtener_producto(producto_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
     """
-    Obtiene un producto por ID.
+    Obtiene un producto por ID (filtrado por tenant del usuario).
     
     **Uso:** Backoffice - Detalle/Edición de producto
     """
@@ -123,7 +141,10 @@ def obtener_producto(producto_id: int, db: Session = Depends(get_db), current_us
             joinedload(Producto.categoria).joinedload(CategoriaProducto.tipo_venta),
             joinedload(Producto.categoria)
         )
-        .filter(Producto.id == producto_id)
+        .filter(
+            Producto.id == producto_id,
+            Producto.tenant_id == current_user.tenant_id
+        )
         .first()
     )
     
@@ -143,6 +164,7 @@ def obtener_producto(producto_id: int, db: Session = Depends(get_db), current_us
         'descripcion': producto.descripcion,
         'sku': producto.sku,
         'imagen_url': producto.imagen_url,
+        'codigo_barra': producto.codigo_barra,
         'categoria_id': producto.categoria_id,
         'tipo_producto_id': producto.tipo_producto_id,
         'unidad_medida_id': producto.unidad_medida_id,
@@ -175,16 +197,21 @@ def crear_producto(producto: ProductoCreate, db: Session = Depends(get_db), curr
     
     **Uso:** Backoffice - Crear producto
     """
-    # Verificar que el SKU no exista
-    existing = db.query(Producto).filter(Producto.sku == producto.sku).first()
+    # Verificar que el SKU no exista en el tenant
+    existing = db.query(Producto).filter(
+        Producto.sku == producto.sku,
+        Producto.tenant_id == current_user.tenant_id
+    ).first()
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Ya existe un producto con SKU '{producto.sku}'"
+            detail=f"❌ SKU duplicado: Ya existe un producto con el código '{producto.sku}'. Por favor, usa un código diferente."
         )
     
     # Crear nuevo producto
-    db_producto = Producto(**producto.model_dump())
+    producto_data = producto.model_dump()
+    producto_data['tenant_id'] = current_user.tenant_id
+    db_producto = Producto(**producto_data)
     db.add(db_producto)
     db.commit()
     db.refresh(db_producto)

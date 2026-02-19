@@ -7,15 +7,8 @@ from datetime import datetime
 from enum import Enum
 from decimal import Decimal
 
-
-class EstadoDespacho(str, Enum):
-    """Estados del proceso de despacho."""
-    ASIGNADO = "ASIGNADO"
-    EN_PICKING = "EN_PICKING"
-    LISTO_EMPAQUE = "LISTO_EMPAQUE"
-    EN_RUTA = "EN_RUTA"
-    ENTREGADO = "ENTREGADO"
-    CANCELADO = "CANCELADO"
+# Importar el enum desde models para tener una sola fuente de verdad
+from database.models import EstadoDespacho
 
 
 # ============================================

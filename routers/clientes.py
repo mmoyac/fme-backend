@@ -23,11 +23,11 @@ def listar_clientes(
     current_user = Depends(get_current_active_user)
 ):
     """
-    Lista todos los clientes con paginación e información de puntos.
+    Lista todos los clientes del tenant con paginación e información de puntos.
     
     **Uso:** Backoffice - Tabla de clientes
     """
-    clientes = db.query(Cliente).offset(skip).limit(limit).all()
+    clientes = db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).offset(skip).limit(limit).all()
     
     # Enriquecer con información de puntos
     clientes_con_puntos = []
@@ -64,7 +64,7 @@ def obtener_cliente(
     
     **Uso:** Backoffice - Ver detalle de cliente
     """
-    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id, Cliente.tenant_id == current_user.tenant_id).first()
     if not cliente:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -106,18 +106,19 @@ def crear_cliente(
     if email_normalizado == "":
         email_normalizado = None
         
-    # Verificar si el email ya existe (si se proporciona)
+    # Verificar si el email ya existe (si se proporciona) dentro del tenant
     if email_normalizado:
-        cliente_existente = db.query(Cliente).filter(Cliente.email == email_normalizado).first()
+        cliente_existente = db.query(Cliente).filter(Cliente.email == email_normalizado, Cliente.tenant_id == current_user.tenant_id).first()
         if cliente_existente:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Ya existe un cliente con el email '{email_normalizado}'"
             )
     
-    # Crear cliente con email normalizado
+    # Crear cliente con email normalizado y tenant_id
     cliente_data = cliente.model_dump()
     cliente_data['email'] = email_normalizado
+    cliente_data['tenant_id'] = current_user.tenant_id
     db_cliente = Cliente(**cliente_data)
     db.add(db_cliente)
     db.commit()
@@ -154,14 +155,14 @@ def actualizar_cliente(
     
     **Uso:** Backoffice - Editar cliente
     """
-    db_cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    db_cliente = db.query(Cliente).filter(Cliente.id == cliente_id, Cliente.tenant_id == current_user.tenant_id).first()
     if not db_cliente:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Cliente con ID {cliente_id} no encontrado"
         )
     
-    # Verificar email único si se está actualizando
+    # Verificar email único si se está actualizando dentro del tenant
     email_normalizado = None
     if cliente.email is not None:
         email_normalizado = cliente.email.strip()
@@ -169,7 +170,7 @@ def actualizar_cliente(
             email_normalizado = None
             
         if email_normalizado and email_normalizado != db_cliente.email:
-            cliente_existente = db.query(Cliente).filter(Cliente.email == email_normalizado).first()
+            cliente_existente = db.query(Cliente).filter(Cliente.email == email_normalizado, Cliente.tenant_id == current_user.tenant_id).first()
             if cliente_existente:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -212,12 +213,12 @@ def eliminar_cliente(
     current_user = Depends(get_current_active_user)
 ):
     """
-    Elimina un cliente.
+    Elimina un cliente del tenant.
     
     **Uso:** Backoffice - Borrar cliente
     **Nota:** No se puede eliminar si tiene pedidos asociados.
     """
-    db_cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    db_cliente = db.query(Cliente).filter(Cliente.id == cliente_id, Cliente.tenant_id == current_user.tenant_id).first()
     if not db_cliente:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

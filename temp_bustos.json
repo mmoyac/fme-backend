@@ -1,0 +1,10 @@
+﻿{
+  "nombre": "BUSTOS",
+  "rut": "1",
+  "contacto": "",
+  "email": "",
+  "telefono": "",
+  "direccion": "",
+  "tipo_proveedor_id": 1,
+  "activo": true
+}

@@ -60,7 +60,7 @@ def listar_categorias(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Listar categorías de productos."""
+    """Listar categorías de productos (tabla maestra global)."""
     query = db.query(CategoriaProductoModel).options(joinedload(CategoriaProductoModel.tipo_venta))
     
     if activo is not None:
@@ -75,8 +75,10 @@ def obtener_categoria(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Obtener una categoría por ID."""
-    categoria = db.query(CategoriaProductoModel).options(joinedload(CategoriaProductoModel.tipo_venta)).filter(CategoriaProductoModel.id == categoria_id).first()
+    """Obtener una categoría por ID (tabla maestra global)."""
+    categoria = db.query(CategoriaProductoModel).options(joinedload(CategoriaProductoModel.tipo_venta)).filter(
+        CategoriaProductoModel.id == categoria_id
+    ).first()
     if not categoria:
         raise HTTPException(status_code=404, detail="Categoría no encontrada")
     return categoria
@@ -88,9 +90,11 @@ def crear_categoria(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
 ):
-    """Crear una nueva categoría de producto."""
+    """Crear una nueva categoría de producto (tabla maestra global)."""
     # Verificar código único
-    existing = db.query(CategoriaProductoModel).filter(CategoriaProductoModel.codigo == categoria.codigo).first()
+    existing = db.query(CategoriaProductoModel).filter(
+        CategoriaProductoModel.codigo == categoria.codigo
+    ).first()
     if existing:
         raise HTTPException(status_code=400, detail=f"El código '{categoria.codigo}' ya existe")
     
@@ -108,14 +112,18 @@ def actualizar_categoria(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
 ):
-    """Actualizar una categoría existente."""
-    db_categoria = db.query(CategoriaProductoModel).filter(CategoriaProductoModel.id == categoria_id).first()
+    """Actualizar una categoría existente (tabla maestra global)."""
+    db_categoria = db.query(CategoriaProductoModel).filter(
+        CategoriaProductoModel.id == categoria_id
+    ).first()
     if not db_categoria:
         raise HTTPException(status_code=404, detail="Categoría no encontrada")
     
     # Verificar código único si se está actualizando
     if categoria.codigo and categoria.codigo != db_categoria.codigo:
-        existing = db.query(CategoriaProductoModel).filter(CategoriaProductoModel.codigo == categoria.codigo).first()
+        existing = db.query(CategoriaProductoModel).filter(
+            CategoriaProductoModel.codigo == categoria.codigo
+        ).first()
         if existing:
             raise HTTPException(status_code=400, detail=f"El código '{categoria.codigo}' ya existe")
     
@@ -134,8 +142,10 @@ def eliminar_categoria(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
 ):
-    """Eliminar una categoría (solo si no tiene productos asociados)."""
-    db_categoria = db.query(CategoriaProductoModel).filter(CategoriaProductoModel.id == categoria_id).first()
+    """Eliminar una categoría (solo si no tiene productos asociados) - tabla maestra global."""
+    db_categoria = db.query(CategoriaProductoModel).filter(
+        CategoriaProductoModel.id == categoria_id
+    ).first()
     if not db_categoria:
         raise HTTPException(status_code=404, detail="Categoría no encontrada")
     
@@ -163,7 +173,7 @@ def listar_tipos(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Listar tipos de productos."""
+    """Listar tipos de productos (tabla maestra global)."""
     query = db.query(TipoProductoModel)
     
     if activo is not None:
@@ -178,8 +188,10 @@ def obtener_tipo(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Obtener un tipo de producto por ID."""
-    tipo = db.query(TipoProductoModel).filter(TipoProductoModel.id == tipo_id).first()
+    """Obtener un tipo de producto por ID (tabla maestra global)."""
+    tipo = db.query(TipoProductoModel).filter(
+        TipoProductoModel.id == tipo_id
+    ).first()
     if not tipo:
         raise HTTPException(status_code=404, detail="Tipo de producto no encontrado")
     return tipo
@@ -191,9 +203,11 @@ def crear_tipo(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
 ):
-    """Crear un nuevo tipo de producto."""
+    """Crear un nuevo tipo de producto (tabla maestra global)."""
     # Verificar código único
-    existing = db.query(TipoProductoModel).filter(TipoProductoModel.codigo == tipo.codigo).first()
+    existing = db.query(TipoProductoModel).filter(
+        TipoProductoModel.codigo == tipo.codigo
+    ).first()
     if existing:
         raise HTTPException(status_code=400, detail=f"El código '{tipo.codigo}' ya existe")
     
@@ -211,14 +225,18 @@ def actualizar_tipo(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
 ):
-    """Actualizar un tipo de producto existente."""
-    db_tipo = db.query(TipoProductoModel).filter(TipoProductoModel.id == tipo_id).first()
+    """Actualizar un tipo de producto existente (tabla maestra global)."""
+    db_tipo = db.query(TipoProductoModel).filter(
+        TipoProductoModel.id == tipo_id
+    ).first()
     if not db_tipo:
         raise HTTPException(status_code=404, detail="Tipo de producto no encontrado")
     
     # Verificar código único si se está actualizando
     if tipo.codigo and tipo.codigo != db_tipo.codigo:
-        existing = db.query(TipoProductoModel).filter(TipoProductoModel.codigo == tipo.codigo).first()
+        existing = db.query(TipoProductoModel).filter(
+            TipoProductoModel.codigo == tipo.codigo
+        ).first()
         if existing:
             raise HTTPException(status_code=400, detail=f"El código '{tipo.codigo}' ya existe")
     
@@ -237,8 +255,10 @@ def eliminar_tipo(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
 ):
-    """Eliminar un tipo de producto (solo si no tiene productos asociados)."""
-    db_tipo = db.query(TipoProductoModel).filter(TipoProductoModel.id == tipo_id).first()
+    """Eliminar un tipo de producto (solo si no tiene productos asociados) - tabla maestra global."""
+    db_tipo = db.query(TipoProductoModel).filter(
+        TipoProductoModel.id == tipo_id
+    ).first()
     if not db_tipo:
         raise HTTPException(status_code=404, detail="Tipo de producto no encontrado")
     
@@ -1281,8 +1301,11 @@ def listar_tipos_documento(
 # ============================================
 
 @router.get("/productos-carnes", response_model=List[Dict])
-def listar_productos_carnes(db: Session = Depends(get_db)):
-    """Listar productos de la categoría CARNES para el sistema WMS."""
+def listar_productos_carnes(
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    """Listar productos de la categoría CARNES para el sistema WMS (filtrado por tenant)."""
     from database.models import Producto, CategoriaProducto
     
     # Buscar categoría CARNES
@@ -1293,9 +1316,10 @@ def listar_productos_carnes(db: Session = Depends(get_db)):
     if not categoria_carnes:
         return []
     
-    # Obtener productos de carnes
+    # Obtener productos de carnes filtrado por tenant
     productos = db.query(Producto).filter(
-        Producto.categoria_id == categoria_carnes.id
+        Producto.categoria_id == categoria_carnes.id,
+        Producto.tenant_id == current_user.tenant_id
     ).all()
     
     return [

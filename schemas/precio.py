@@ -10,6 +10,7 @@ class PrecioBase(BaseModel):
     """Schema base de Precio."""
     producto_id: int = Field(..., gt=0)
     local_id: int = Field(..., gt=0)
+    unidad_medida_id: int = Field(..., gt=0, description="ID de la unidad de medida (ej: unidad, media docena, docena)")
     monto_precio: float = Field(..., gt=0)
 
 
@@ -20,6 +21,7 @@ class PrecioCreate(PrecioBase):
 
 class PrecioUpdate(BaseModel):
     """Schema para actualizar un Precio."""
+    unidad_medida_id: Optional[int] = Field(None, gt=0, description="ID de la unidad de medida")
     monto_precio: Optional[float] = Field(None, gt=0)
 
 

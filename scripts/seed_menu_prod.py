@@ -40,15 +40,22 @@ def setup_menu_prod():
     items_data = [
         { "nombre": "Dashboard", "href": "/admin/dashboard", "icon": "📊", "orden": 1 },
         { "nombre": "Pedidos", "href": "/admin/pedidos", "icon": "🛒", "orden": 2 },
-        { "nombre": "Productos", "href": "/admin/productos", "icon": "📦", "orden": 3 },
-        { "nombre": "Locales", "href": "/admin/locales", "icon": "🏢", "orden": 4 },
-        { "nombre": "Inventario", "href": "/admin/inventario", "icon": "📈", "orden": 5 },
-        { "nombre": "Precios", "href": "/admin/precios", "icon": "💰", "orden": 6 },
-        { "nombre": "Clientes", "href": "/admin/clientes", "icon": "👥", "orden": 7 },
-        { "nombre": "Transferencias", "href": "/admin/transferencias", "icon": "↔️", "orden": 8 },
-        { "nombre": "Historial", "href": "/admin/historial", "icon": "📋", "orden": 9 },
-        { "nombre": "Usuarios", "href": "/admin/usuarios", "icon": "👤", "orden": 10 },
-        { "nombre": "Mantenedores", "href": "/admin/mantenedores", "icon": "⚙️", "orden": 11 },
+        { "nombre": "POS", "href": "/admin/pedidos/pos", "icon": "💳", "orden": 3 },
+        { "nombre": "Productos", "href": "/admin/productos", "icon": "📦", "orden": 4 },
+        { "nombre": "Locales", "href": "/admin/locales", "icon": "🏢", "orden": 5 },
+        { "nombre": "Inventario", "href": "/admin/inventario", "icon": "📈", "orden": 6 },
+        { "nombre": "Precios", "href": "/admin/precios", "icon": "💰", "orden": 7 },
+        { "nombre": "Clientes", "href": "/admin/clientes", "icon": "👥", "orden": 8 },
+        { "nombre": "Caja", "href": "/admin/caja", "icon": "💵", "orden": 9 },
+        { "nombre": "Despacho", "href": "/admin/despacho", "icon": "🚚", "orden": 10 },
+        { "nombre": "Transferencias", "href": "/admin/transferencias", "icon": "↔️", "orden": 11 },
+        { "nombre": "Compras", "href": "/admin/compras", "icon": "🛍️", "orden": 12 },
+        { "nombre": "Recepción", "href": "/admin/recepcion", "icon": "📥", "orden": 13 },
+        { "nombre": "Producción", "href": "/admin/produccion", "icon": "🏭", "orden": 14 },
+        { "nombre": "Historial", "href": "/admin/historial", "icon": "📋", "orden": 15 },
+        { "nombre": "Alertas", "href": "/admin/alertas", "icon": "🔔", "orden": 16 },
+        { "nombre": "Mantenedores", "href": "/admin/mantenedores", "icon": "⚙️", "orden": 17 },
+        { "nombre": "Usuarios", "href": "/admin/usuarios", "icon": "👤", "orden": 18 },
     ]
 
     print("--- Creando/Verificando Items de Menú ---")
@@ -98,8 +105,10 @@ def setup_menu_prod():
     roles_config = {
         "admin": list(menu_map.keys()), # Todos
         "administrador": list(menu_map.keys()), # Todos
-        "vendedor": ["Dashboard", "Pedidos", "Productos", "Inventario", "Clientes", "Transferencias"],
-        "tesorero": ["Dashboard", "Pedidos", "Precios", "Clientes"],
+        "vendedor": ["Dashboard", "Pedidos", "POS", "Productos", "Inventario", "Clientes", "Caja", "Despacho"],
+        "tesorero": ["Dashboard", "Pedidos", "Precios", "Clientes", "Caja"],
+        "bodeguero": ["Dashboard", "Inventario", "Transferencias", "Recepción", "Productos"],
+        "despachador": ["Dashboard", "Despacho", "Pedidos"],
     }
 
     for role_name, menu_names in roles_config.items():

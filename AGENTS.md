@@ -6,6 +6,43 @@ El objetivo es mantener la consistencia en el entorno, el código y la arquitect
 
 ---
 
+## 🏢 Arquitectura Multi-Tenant SaaS
+
+**El sistema es multi-tenant con detección automática por dominio.**
+
+### Estructura de Dominios (Producción)
+
+```
+Landing Pages (Por tenant):
+├─ masasestacion.cl              → Masas Estación (tenant 1)
+└─ elolivo.masasestacion.cl      → El Olivo (tenant 2)
+
+Infraestructura (Única):
+├─ api.masasestacion.cl          → API REST
+└─ admin.masasestacion.cl        → Backoffice multi-tenant
+```
+
+### Detección Automática de Tenant
+
+El sistema detecta el tenant basándose en el header `Host` de la petición HTTP:
+
+```python
+# services/tenant_service.py
+def get_tenant_from_request(request: Request, db: Session):
+    # 1. Match exacto por dominio_principal
+    # 2. Localhost → tenant_id=1 (desarrollo)
+    # 3. Subdominio (.masasestacion.cl) → buscar por subdomain
+    # 4. Fallback → tenant_id=1
+```
+
+**Endpoints públicos con detección automática:**
+- `GET /api/config/landing` - Configuración de landing page
+- `GET /api/productos/catalogo` - Catálogo de productos
+
+**NO** se requiere enviar `tenant_id` como query parameter.
+
+---
+
 ## 1. ⚙️ Arquitectura del Proyecto y Convenciones
 
 ### 1.1. Stack Tecnológico

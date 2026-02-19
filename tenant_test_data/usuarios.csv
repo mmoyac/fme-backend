@@ -1,0 +1,4 @@
+email,nombre_completo,password,role_id,local_defecto_codigo
+admin@donajuanita.cl,Juanita Pérez,admin123,1,MAIPU
+vendedor.maipu@donajuanita.cl,Pedro González,vendedor123,2,MAIPU
+vendedor.pudahuel@donajuanita.cl,María Silva,vendedor123,2,PUDAHUEL

@@ -9,20 +9,34 @@ from sqlalchemy import func
 from database.models import Inventario, Producto, Local, Precio, CategoriaProducto, TipoVenta
 
 
-def get_catalogo_web(db: Session) -> List[dict]:
+def get_catalogo_web(db: Session, tenant_id: int = 1) -> List[dict]:
     """
     Obtiene el catálogo de productos con precios del local WEB.
     Stock total = suma de locales físicos (excluye Tienda Online)
     
+    Args:
+        db: Sesión de base de datos
+        tenant_id: ID del tenant para filtrar productos
+    
     Returns:
         Lista de productos con SKU, nombre, descripción, precio y stock total
     """
-    # Primero obtenemos el ID del local WEB
-    local_web = db.query(Local).filter(Local.codigo == 'WEB').first()
+    # Primero obtenemos el ID del local WEB del tenant específico
+    local_web = db.query(Local).filter(
+        Local.codigo == 'WEB',
+        Local.tenant_id == tenant_id
+    ).first()
     if not local_web:
         return []
     
-    resultados = (
+    # Verificar si el tenant tiene locales físicos (no-WEB)
+    tiene_locales_fisicos = db.query(Local).filter(
+        Local.tenant_id == tenant_id,
+        Local.codigo != 'WEB'
+    ).count() > 0
+    
+    # Construir query base
+    query = (
         db.query(
             Producto.sku,
             Producto.nombre,
@@ -39,7 +53,18 @@ def get_catalogo_web(db: Session) -> List[dict]:
         .outerjoin(TipoVenta, TipoVenta.id == CategoriaProducto.tipo_venta_id)
         .outerjoin(Inventario, Inventario.producto_id == Producto.id)
         .outerjoin(Local, Local.id == Inventario.local_id)
-        .filter((Local.codigo != 'WEB') | (Local.codigo == None))
+        .filter(Producto.tenant_id == tenant_id)
+        .filter(Producto.es_vendible_web == True)  # Solo productos marcados como vendibles en web
+        .filter(Producto.activo == True)  # Solo productos activos
+    )
+    
+    # Si tiene locales físicos, excluir WEB del cálculo de stock
+    # Si NO tiene locales físicos, incluir WEB en el cálculo de stock
+    if tiene_locales_fisicos:
+        query = query.filter((Local.codigo != 'WEB') | (Local.codigo == None))
+    
+    resultados = (
+        query
         .group_by(
             Producto.id, 
             Producto.sku, 

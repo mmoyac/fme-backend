@@ -32,6 +32,9 @@ class UserUpdate(BaseModel):
 
 class User(UserBase):
     id: int
+    tenant_id: int
+    tenant_nombre: Optional[str] = None
+    tenant_dominio: Optional[str] = None
     role: Role
 
     class Config:

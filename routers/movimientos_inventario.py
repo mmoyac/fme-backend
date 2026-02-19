@@ -13,6 +13,7 @@ from schemas.movimiento_inventario import (
     AjusteInventario,
     MovimientoInventarioResponse
 )
+from routers.auth import get_current_active_user
 
 router = APIRouter()
 
@@ -20,14 +21,15 @@ router = APIRouter()
 @router.post("/transferencia", response_model=dict, status_code=status.HTTP_201_CREATED)
 def transferir_inventario(
     transferencia: TransferenciaInventario,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
 ):
     """
-    Transfiere inventario de un local a otro.
+    Transfiere inventario de un local a otro del tenant.
     
     **Validaciones:**
     - Stock suficiente en local origen
-    - Producto y locales existen
+    - Producto y locales existen y pertenecen al tenant
     - Crea entrada en movimientos
     - Actualiza inventarios
     """
@@ -38,17 +40,17 @@ def transferir_inventario(
             detail="El local de origen y destino deben ser diferentes"
         )
     
-    # Validar producto existe
-    producto = db.query(Producto).filter(Producto.id == transferencia.producto_id).first()
+    # Validar producto existe y pertenece al tenant
+    producto = db.query(Producto).filter(Producto.id == transferencia.producto_id, Producto.tenant_id == current_user.tenant_id).first()
     if not producto:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Producto con ID {transferencia.producto_id} no encontrado"
         )
     
-    # Validar locales existen
-    local_origen = db.query(Local).filter(Local.id == transferencia.local_origen_id).first()
-    local_destino = db.query(Local).filter(Local.id == transferencia.local_destino_id).first()
+    # Validar locales existen y pertenecen al tenant
+    local_origen = db.query(Local).filter(Local.id == transferencia.local_origen_id, Local.tenant_id == current_user.tenant_id).first()
+    local_destino = db.query(Local).filter(Local.id == transferencia.local_destino_id, Local.tenant_id == current_user.tenant_id).first()
     
     if not local_origen or not local_destino:
         raise HTTPException(
@@ -131,17 +133,19 @@ def listar_movimientos(
     producto_id: Optional[int] = None,
     local_id: Optional[int] = None,
     tipo_movimiento: Optional[str] = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
 ):
     """
-    Lista el historial de movimientos de inventario.
+    Lista el historial de movimientos de inventario del tenant.
     
     **Filtros opcionales:**
     - producto_id: Movimientos de un producto específico
     - local_id: Movimientos que involucran un local (origen o destino)
     - tipo_movimiento: TRANSFERENCIA, AJUSTE, PEDIDO, etc.
     """
-    query = db.query(MovimientoInventario)
+    # Filtrar por tenant mediante join con Producto
+    query = db.query(MovimientoInventario).join(Producto).filter(Producto.tenant_id == current_user.tenant_id)
     
     if producto_id:
         query = query.filter(MovimientoInventario.producto_id == producto_id)

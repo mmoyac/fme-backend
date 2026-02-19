@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from database.database import get_db
 from database.models import Precio, Producto, Local
 from schemas.precio import PrecioResponse, PrecioCreate, PrecioUpdate
+from routers.auth import get_current_active_user
 
 router = APIRouter()
 
@@ -18,14 +19,16 @@ def listar_precios(
     limit: int = 100,
     producto_id: int = None,
     local_id: int = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
 ):
     """
-    Lista precios con filtros opcionales.
+    Lista precios del tenant con filtros opcionales.
     
     **Uso:** Backoffice - Tabla de precios
     """
-    query = db.query(Precio)
+    # Unir con Producto para filtrar por tenant_id
+    query = db.query(Precio).join(Producto).filter(Producto.tenant_id == current_user.tenant_id)
     
     if producto_id:
         query = query.filter(Precio.producto_id == producto_id)
@@ -37,41 +40,42 @@ def listar_precios(
 
 
 @router.post("/", response_model=PrecioResponse, status_code=status.HTTP_201_CREATED)
-def crear_precio(precio: PrecioCreate, db: Session = Depends(get_db)):
+def crear_precio(precio: PrecioCreate, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
     """
-    Crea un nuevo precio para un producto en un local.
+    Crea un nuevo precio para un producto en un local del tenant.
     
     **Validaciones:**
-    - Producto y local deben existir
+    - Producto y local deben existir y pertenecer al tenant
     - No debe existir otro precio activo para el mismo producto/local
     
     **Uso:** Backoffice - Asignar precio
     """
-    # Verificar que producto y local existan
-    producto = db.query(Producto).filter(Producto.id == precio.producto_id).first()
+    # Verificar que producto y local existan y pertenezcan al tenant
+    producto = db.query(Producto).filter(Producto.id == precio.producto_id, Producto.tenant_id == current_user.tenant_id).first()
     if not producto:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Producto con ID {precio.producto_id} no encontrado"
         )
     
-    local = db.query(Local).filter(Local.id == precio.local_id).first()
+    local = db.query(Local).filter(Local.id == precio.local_id, Local.tenant_id == current_user.tenant_id).first()
     if not local:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Local con ID {precio.local_id} no encontrado"
         )
     
-    # Verificar si ya existe un precio para este producto/local
+    # Verificar si ya existe un precio para este producto/local/unidad
     existing = db.query(Precio).filter(
         Precio.producto_id == precio.producto_id,
-        Precio.local_id == precio.local_id
+        Precio.local_id == precio.local_id,
+        Precio.unidad_medida_id == precio.unidad_medida_id
     ).first()
     
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Ya existe un precio para este producto en este local. Use PUT para actualizar."
+            detail=f"Ya existe un precio para este producto/local/unidad. Use PUT para actualizar."
         )
     
     # Crear nuevo precio
@@ -86,50 +90,59 @@ def crear_precio(precio: PrecioCreate, db: Session = Depends(get_db)):
 def actualizar_precio(
     precio_id: int,
     precio: PrecioUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
 ):
     """
-    Actualiza un precio existente.
+    Actualiza un precio existente del tenant.
     
     **Uso:** Backoffice - Modificar precio
     """
-    db_precio = db.query(Precio).filter(Precio.id == precio_id).first()
+    # Validar que el precio pertenece al tenant
+    db_precio = db.query(Precio).join(Producto).filter(
+        Precio.id == precio_id,
+        Producto.tenant_id == current_user.tenant_id
+    ).first()
     if not db_precio:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Precio con ID {precio_id} no encontrado"
         )
     
-    # Actualizar monto
+    # Actualizar campos
     if precio.monto_precio is not None:
         db_precio.monto_precio = precio.monto_precio
+    if precio.unidad_medida_id is not None:
+        db_precio.unidad_medida_id = precio.unidad_medida_id
     
     db.commit()
     db.refresh(db_precio)
     return db_precio
 
 
-@router.put("/producto/{producto_id}/local/{local_id}", response_model=PrecioResponse)
+@router.put("/producto/{producto_id}/local/{local_id}/unidad/{unidad_medida_id}", response_model=PrecioResponse)
 def actualizar_precio_por_producto_local(
     producto_id: int,
     local_id: int,
+    unidad_medida_id: int,
     precio_data: PrecioUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
 ):
     """
-    Actualiza o crea el precio de un producto en un local específico.
+    Actualiza o crea el precio de un producto en un local y unidad específicos del tenant.
     
-    **Uso:** Backoffice - Asignar/actualizar precio por producto/local
+    **Uso:** Backoffice - Asignar/actualizar precio por producto/local/unidad
     """
-    # Verificar que producto y local existan
-    producto = db.query(Producto).filter(Producto.id == producto_id).first()
+    # Verificar que producto y local existan y pertenezcan al tenant
+    producto = db.query(Producto).filter(Producto.id == producto_id, Producto.tenant_id == current_user.tenant_id).first()
     if not producto:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Producto con ID {producto_id} no encontrado"
         )
     
-    local = db.query(Local).filter(Local.id == local_id).first()
+    local = db.query(Local).filter(Local.id == local_id, Local.tenant_id == current_user.tenant_id).first()
     if not local:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -139,7 +152,8 @@ def actualizar_precio_por_producto_local(
     # Buscar o crear precio
     db_precio = db.query(Precio).filter(
         Precio.producto_id == producto_id,
-        Precio.local_id == local_id
+        Precio.local_id == local_id,
+        Precio.unidad_medida_id == unidad_medida_id
     ).first()
     
     if db_precio:
@@ -150,6 +164,7 @@ def actualizar_precio_por_producto_local(
         db_precio = Precio(
             producto_id=producto_id,
             local_id=local_id,
+            unidad_medida_id=unidad_medida_id,
             monto_precio=precio_data.monto_precio
         )
         db.add(db_precio)
@@ -159,43 +174,43 @@ def actualizar_precio_por_producto_local(
     return db_precio
 
 
-@router.get("/producto/{producto_id}/local/{local_id}", response_model=dict)
-def obtener_precio_producto_local(
+@router.get("/producto/{producto_id}/local/{local_id}", response_model=List[PrecioResponse])
+def obtener_precios_producto_local(
     producto_id: int,
     local_id: int,
     db: Session = Depends(get_db)
 ):
     """
-    Obtiene el precio de un producto específico en un local específico.
+    Obtiene todos los precios de un producto en un local (por diferentes unidades de medida).
     
-    **Uso:** Frontend - Para auto-completar precios al crear pedidos
+    **Uso:** Frontend/Backoffice - Para mostrar opciones de precio por unidad
     """
-    precio = db.query(Precio).filter(
+    precios = db.query(Precio).filter(
         Precio.producto_id == producto_id,
         Precio.local_id == local_id
-    ).first()
+    ).all()
     
-    if not precio:
+    if not precios:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No existe precio para producto {producto_id} en local {local_id}"
+            detail=f"No existen precios para producto {producto_id} en local {local_id}"
         )
     
-    return {
-        "producto_id": precio.producto_id,
-        "local_id": precio.local_id,
-        "monto_precio": precio.monto_precio
-    }
+    return precios
 
 
 @router.delete("/{precio_id}", status_code=status.HTTP_204_NO_CONTENT)
-def eliminar_precio(precio_id: int, db: Session = Depends(get_db)):
+def eliminar_precio(precio_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
     """
-    Elimina un precio.
+    Elimina un precio del tenant.
     
     **Uso:** Backoffice - Eliminar precio
     """
-    db_precio = db.query(Precio).filter(Precio.id == precio_id).first()
+    # Validar que el precio pertenece al tenant
+    db_precio = db.query(Precio).join(Producto).filter(
+        Precio.id == precio_id,
+        Producto.tenant_id == current_user.tenant_id
+    ).first()
     if not db_precio:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

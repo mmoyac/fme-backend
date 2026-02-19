@@ -39,6 +39,10 @@ def listar_precios_proveedor(
     query = db.query(PrecioProveedor).options(
         joinedload(PrecioProveedor.producto),
         joinedload(PrecioProveedor.proveedor)
+    ).join(
+        Producto, PrecioProveedor.producto_id == Producto.id
+    ).filter(
+        Producto.tenant_id == current_user.tenant_id
     )
     
     # Aplicar filtros
@@ -159,7 +163,9 @@ def listar_productos_con_precios(
     current_user: User = Depends(get_current_active_user)
 ):
     """Listar todos los productos con sus precios por proveedor."""
-    productos = db.query(Producto).all()
+    productos = db.query(Producto).filter(
+        Producto.tenant_id == current_user.tenant_id
+    ).all()
     resultado = []
     
     for producto in productos:

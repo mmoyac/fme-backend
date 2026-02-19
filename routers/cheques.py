@@ -89,7 +89,7 @@ def obtener_pedido_con_cheques(
     
     return PedidoConCheques(
         pedido_id=pedido.id,
-        numero_pedido=f"PED-{pedido.id:05d}",
+        numero_pedido=pedido.numero_pedido,
         monto_total=pedido.monto_total,
         es_pagado=pedido.es_pagado,
         medio_pago_codigo=pedido.medio_pago.codigo if pedido.medio_pago else None,

@@ -11,6 +11,7 @@ import pytz
 
 from database.database import get_db
 from database.models import Pedido, ItemPedido, Producto, Inventario, Cliente, Local, TurnoCaja, OperacionCaja, User, TipoOperacionCaja, EstadoTurnoCaja
+from routers.auth import get_current_active_user
 
 router = APIRouter()
 
@@ -19,9 +20,9 @@ CHILE_TZ = pytz.timezone('America/Santiago')
 
 
 @router.get("/estadisticas")
-def obtener_estadisticas_dashboard(db: Session = Depends(get_db)):
+def obtener_estadisticas_dashboard(db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
     """
-    Obtiene las estadísticas principales para el dashboard.
+    Obtiene las estadísticas principales para el dashboard del tenant.
     
     Retorna:
     - Ventas del día y del mes
@@ -38,40 +39,48 @@ def obtener_estadisticas_dashboard(db: Session = Depends(get_db)):
     inicio_mes = datetime(hoy.year, hoy.month, 1, tzinfo=CHILE_TZ).date()
     hace_7_dias = hoy - timedelta(days=7)
     
-    # --- Ventas del día ---
-    ventas_hoy = db.query(func.sum(Pedido.monto_total)).filter(
-        func.date(Pedido.fecha_pedido) == hoy
+    # --- Ventas del día (filtrado por tenant) ---
+    ventas_hoy = db.query(func.sum(Pedido.monto_total)).join(Cliente).filter(
+        func.date(Pedido.fecha_pedido) == hoy,
+        Cliente.tenant_id == current_user.tenant_id
     ).scalar() or 0
     
-    # --- Ventas del mes ---
-    ventas_mes = db.query(func.sum(Pedido.monto_total)).filter(
-        func.date(Pedido.fecha_pedido) >= inicio_mes
+    # --- Ventas del mes (filtrado por tenant) ---
+    ventas_mes = db.query(func.sum(Pedido.monto_total)).join(Cliente).filter(
+        func.date(Pedido.fecha_pedido) >= inicio_mes,
+        Cliente.tenant_id == current_user.tenant_id
     ).scalar() or 0
     
-    # --- Pedidos pendientes de pago ---
-    pedidos_sin_pagar = db.query(Pedido).filter(
+    # --- Pedidos pendientes de pago (filtrado por tenant) ---
+    from database.models import EstadoPedido as EstadoPedidoModel
+    
+    # Buscar el ID del estado CANCELADO
+    estado_cancelado = db.query(EstadoPedidoModel).filter(
+        EstadoPedidoModel.codigo == 'CANCELADO'
+    ).first()
+    
+    pedidos_sin_pagar = db.query(Pedido).join(Cliente).filter(
         Pedido.es_pagado == False,
-        Pedido.estado != 'CANCELADO'
+        Pedido.estado_id != estado_cancelado.id if estado_cancelado else True,
+        Cliente.tenant_id == current_user.tenant_id
     ).all()
     
     monto_por_cobrar = sum(p.monto_total for p in pedidos_sin_pagar)
     cantidad_sin_pagar = len(pedidos_sin_pagar)
     
-    # --- Pedidos por estado ---
-    pedidos_por_estado = db.query(
-        Pedido.estado,
+    # --- Pedidos por estado (filtrado por tenant) ---
+    pedidos_por_estado_query = db.query(
+        EstadoPedidoModel.codigo,
         func.count(Pedido.id).label('cantidad')
-    ).group_by(Pedido.estado).all()
+    ).join(Pedido, Pedido.estado_id == EstadoPedidoModel.id).join(Cliente).filter(
+        Cliente.tenant_id == current_user.tenant_id
+    ).group_by(EstadoPedidoModel.codigo).all()
     
-    estados = {
-        'PENDIENTE': 0,
-        'CONFIRMADO': 0,
-        'EN_PREPARACION': 0,
-        'ENTREGADO': 0,
-        'CANCELADO': 0
-    }
+    # Inicializar estados dinámicamente desde la base de datos
+    todos_estados = db.query(EstadoPedidoModel).filter(EstadoPedidoModel.activo == True).all()
+    estados = {estado.codigo: 0 for estado in todos_estados}
     
-    for estado, cantidad in pedidos_por_estado:
+    for estado, cantidad in pedidos_por_estado_query:
         estados[estado] = cantidad
     
     total_pedidos = sum(estados.values())
@@ -82,15 +91,18 @@ def obtener_estadisticas_dashboard(db: Session = Depends(get_db)):
     else:
         ticket_promedio = 0
     
-    # --- Productos más vendidos (top 5) ---
+    # --- Productos más vendidos (top 5, filtrado por tenant) ---
     productos_mas_vendidos = db.query(
         Producto.nombre,
         Producto.sku,
         func.sum(ItemPedido.cantidad).label('total_vendido')
     ).join(ItemPedido, Producto.id == ItemPedido.producto_id)\
      .join(Pedido, Pedido.id == ItemPedido.pedido_id)\
-     .filter(Pedido.estado != 'CANCELADO')\
-     .group_by(Producto.id, Producto.nombre, Producto.sku)\
+     .join(Cliente, Cliente.id == Pedido.cliente_id)\
+     .filter(
+         Pedido.estado_id != estado_cancelado.id if estado_cancelado else True,
+         Producto.tenant_id == current_user.tenant_id
+     ).group_by(Producto.id, Producto.nombre, Producto.sku)\
      .order_by(func.sum(ItemPedido.cantidad).desc())\
      .limit(5)\
      .all()
@@ -104,15 +116,17 @@ def obtener_estadisticas_dashboard(db: Session = Depends(get_db)):
         for p in productos_mas_vendidos
     ]
     
-    # --- Stock bajo (menos de 10 unidades totales) ---
+    # --- Stock bajo (menos de 10 unidades totales, filtrado por tenant) ---
     stock_bajo = db.query(
         Producto.nombre,
         Producto.sku,
         func.sum(Inventario.cantidad_stock).label('stock_total')
     ).join(Inventario, Producto.id == Inventario.producto_id)\
      .join(Local, Local.id == Inventario.local_id)\
-     .filter(Local.codigo != 'WEB')\
-     .group_by(Producto.id, Producto.nombre, Producto.sku)\
+     .filter(
+         Local.codigo != 'WEB',
+         Producto.tenant_id == current_user.tenant_id
+     ).group_by(Producto.id, Producto.nombre, Producto.sku)\
      .having(func.sum(Inventario.cantidad_stock) < 10)\
      .order_by(func.sum(Inventario.cantidad_stock))\
      .limit(5)\
@@ -129,15 +143,16 @@ def obtener_estadisticas_dashboard(db: Session = Depends(get_db)):
     
     # --- Clientes nuevos (últimos 7 días) ---
     # Nota: Cliente no tiene campo fecha_creacion, se usa conteo total por ahora
-    total_clientes = db.query(func.count(Cliente.id)).scalar() or 0
+    total_clientes = db.query(func.count(Cliente.id)).filter(Cliente.tenant_id == current_user.tenant_id).scalar() or 0
     
-    # --- Ventas por día (últimos 7 días) ---
+    # --- Ventas por día (últimos 7 días, filtrado por tenant) ---
     # --- Ventas por día (últimos 7 días) ---
     ventas_por_dia = []
     for i in range(7):
         fecha = hoy - timedelta(days=6-i)
-        ventas_dia = db.query(func.sum(Pedido.monto_total)).filter(
-            func.date(Pedido.fecha_pedido) == fecha
+        ventas_dia = db.query(func.sum(Pedido.monto_total)).join(Cliente).filter(
+            func.date(Pedido.fecha_pedido) == fecha,
+            Cliente.tenant_id == current_user.tenant_id
         ).scalar() or 0
         
         ventas_por_dia.append({
@@ -146,8 +161,10 @@ def obtener_estadisticas_dashboard(db: Session = Depends(get_db)):
             'ventas': float(ventas_dia)
         })
     
-    # --- Últimos pedidos (5 más recientes) ---
-    ultimos_pedidos = db.query(Pedido).order_by(Pedido.fecha_pedido.desc()).limit(5).all()
+    # --- Últimos pedidos (5 más recientes, filtrado por tenant) ---
+    ultimos_pedidos = db.query(Pedido).join(Cliente).filter(
+        Cliente.tenant_id == current_user.tenant_id
+    ).order_by(Pedido.fecha_pedido.desc()).limit(5).all()
     
     pedidos_recientes = [
         {
@@ -155,16 +172,17 @@ def obtener_estadisticas_dashboard(db: Session = Depends(get_db)):
             'numero_pedido': f"PED-{p.id:05d}",
             'cliente': p.cliente.nombre if p.cliente else 'N/A',
             'monto': float(p.monto_total),
-            'estado': p.estado,
+            'estado': p.estado_pedido.codigo if p.estado_pedido else 'N/A',
             'fecha': p.fecha_pedido.astimezone(CHILE_TZ).strftime('%Y-%m-%d %H:%M')
         }
         for p in ultimos_pedidos
     ]
     
-    # --- MÉTRICAS DE CAJA (RESUMEN) ---
-    # Turnos abiertos actualmente
-    turnos_abiertos_count = db.query(func.count(TurnoCaja.id)).filter(
-        TurnoCaja.estado == EstadoTurnoCaja.ABIERTO
+    # --- MÉTRICAS DE CAJA (RESUMEN, filtrado por tenant) ---
+    # Turnos abiertos actualmente (filtrar por locales del tenant)
+    turnos_abiertos_count = db.query(func.count(TurnoCaja.id)).join(Local).filter(
+        TurnoCaja.estado == EstadoTurnoCaja.ABIERTO,
+        Local.tenant_id == current_user.tenant_id
     ).scalar() or 0
     
     # Ventas de caja del día (desde operaciones de caja)
@@ -180,6 +198,118 @@ def obtener_estadisticas_dashboard(db: Session = Depends(get_db)):
         TurnoCaja.diferencia != 0
     ).scalar() or 0
     
+    # --- Pedidos por canal (Web vs Tiendas Físicas) ---
+    pedidos_por_canal = db.query(
+        case(
+            (Local.codigo == 'WEB', 'web'),
+            else_='tienda'
+        ).label('canal'),
+        func.count(Pedido.id).label('cantidad'),
+        func.sum(Pedido.monto_total).label('ventas')
+    ).join(Cliente, Pedido.cliente_id == Cliente.id)\
+     .join(Local, Pedido.local_id == Local.id)\
+     .filter(
+        Cliente.tenant_id == current_user.tenant_id,
+        Pedido.estado_id != estado_cancelado.id if estado_cancelado else True
+    ).group_by('canal').all()
+    
+    pedidos_web = 0
+    ventas_web = 0
+    pedidos_tienda = 0
+    ventas_tienda = 0
+    
+    for canal, cantidad, ventas in pedidos_por_canal:
+        if canal == 'web':
+            pedidos_web = cantidad
+            ventas_web = ventas or 0
+        else:
+            pedidos_tienda = cantidad
+            ventas_tienda = ventas or 0
+    
+    # --- Desglose por local físico (excluyendo WEB) ---
+    ventas_por_local = db.query(
+        Local.id,
+        Local.nombre,
+        Local.codigo,
+        func.count(Pedido.id).label('cantidad'),
+        func.sum(Pedido.monto_total).label('ventas')
+    ).join(Cliente, Pedido.cliente_id == Cliente.id)\
+     .join(Local, Pedido.local_id == Local.id)\
+     .filter(
+        Cliente.tenant_id == current_user.tenant_id,
+        Local.codigo != 'WEB',
+        Pedido.estado_id != estado_cancelado.id if estado_cancelado else True
+    ).group_by(Local.id, Local.nombre, Local.codigo)\
+     .order_by(func.sum(Pedido.monto_total).desc())\
+     .all()
+    
+    locales_detalle = [
+        {
+            'local_id': local.id,
+            'nombre': local.nombre,
+            'codigo': local.codigo,
+            'cantidad_pedidos': int(local.cantidad),
+            'total_ventas': float(local.ventas or 0)
+        }
+        for local in ventas_por_local
+    ]
+    
+    # --- Ventas por vendedor (usuario) ---
+    ventas_por_vendedor = db.query(
+        User.id,
+        User.nombre_completo,
+        User.email,
+        func.count(Pedido.id).label('cantidad'),
+        func.sum(Pedido.monto_total).label('ventas')
+    ).join(Pedido, User.id == Pedido.usuario_id)\
+     .join(Cliente, Pedido.cliente_id == Cliente.id)\
+     .filter(
+        Cliente.tenant_id == current_user.tenant_id,
+        Pedido.estado_id != estado_cancelado.id if estado_cancelado else True,
+        Pedido.usuario_id.isnot(None)  # Solo pedidos con usuario asignado
+    ).group_by(User.id, User.nombre_completo, User.email)\
+     .order_by(func.sum(Pedido.monto_total).desc())\
+     .all()
+    
+    vendedores_detalle = [
+        {
+            'usuario_id': vendedor.id,
+            'nombre': vendedor.nombre_completo,
+            'email': vendedor.email,
+            'cantidad_pedidos': int(vendedor.cantidad),
+            'total_ventas': float(vendedor.ventas or 0)
+        }
+        for vendedor in ventas_por_vendedor
+    ]
+    
+    # --- Ventas por medio de pago ---
+    from database.models import MedioPago
+    ventas_por_medio_pago = db.query(
+        MedioPago.id,
+        MedioPago.nombre,
+        MedioPago.codigo,
+        func.count(Pedido.id).label('cantidad'),
+        func.sum(Pedido.monto_total).label('ventas')
+    ).join(Pedido, MedioPago.id == Pedido.medio_pago_id)\
+     .join(Cliente, Pedido.cliente_id == Cliente.id)\
+     .filter(
+        Cliente.tenant_id == current_user.tenant_id,
+        Pedido.estado_id != estado_cancelado.id if estado_cancelado else True
+    ).group_by(MedioPago.id, MedioPago.nombre, MedioPago.codigo)\
+     .order_by(func.sum(Pedido.monto_total).desc())\
+     .all()
+    
+    medios_pago_detalle = [
+        {
+            'medio_pago_id': medio.id,
+            'nombre': medio.nombre,
+            'codigo': medio.codigo,
+            'cantidad_pedidos': int(medio.cantidad),
+            'total_ventas': float(medio.ventas or 0)
+        }
+        for medio in ventas_por_medio_pago
+    ]
+    
     return {
         'ventas': {
             'hoy': float(ventas_hoy),
@@ -187,7 +317,18 @@ def obtener_estadisticas_dashboard(db: Session = Depends(get_db)):
         },
         'pedidos': {
             'total': total_pedidos,
-            'por_estado': estados
+            'por_estado': estados,
+            'por_canal': {
+                'web': {
+                    'cantidad': pedidos_web,
+                    'ventas': float(ventas_web)
+                },
+                'tienda': {
+                    'cantidad': pedidos_tienda,
+                    'ventas': float(ventas_tienda),
+                    'locales_detalle': locales_detalle
+                }
+            }
         },
         'por_cobrar': {
             'monto': float(monto_por_cobrar),
@@ -198,6 +339,8 @@ def obtener_estadisticas_dashboard(db: Session = Depends(get_db)):
         'stock_bajo': productos_stock_bajo,
         'total_clientes': total_clientes,
         'ventas_por_dia': ventas_por_dia,
+        'ventas_por_vendedor': vendedores_detalle,
+        'ventas_por_medio_pago': medios_pago_detalle,
         'ultimos_pedidos': pedidos_recientes,
         'caja': {
             'turnos_abiertos': turnos_abiertos_count,
@@ -208,9 +351,9 @@ def obtener_estadisticas_dashboard(db: Session = Depends(get_db)):
 
 
 @router.get("/metricas-caja")
-def obtener_metricas_caja(db: Session = Depends(get_db)):
+def obtener_metricas_caja(db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
     """
-    Obtiene métricas específicas del sistema de caja.
+    Obtiene métricas específicas del sistema de caja del tenant.
     
     Retorna:
     - Turnos abiertos por local
@@ -222,7 +365,7 @@ def obtener_metricas_caja(db: Session = Depends(get_db)):
     ahora_chile = datetime.now(CHILE_TZ)
     hoy = ahora_chile.date()
     
-    # --- Turnos abiertos por local ---
+    # --- Turnos abiertos por local (filtrado por tenant) ---
     turnos_abiertos = db.query(
         TurnoCaja.id,
         TurnoCaja.local_id,
@@ -233,8 +376,10 @@ def obtener_metricas_caja(db: Session = Depends(get_db)):
         TurnoCaja.monto_inicial
     ).join(Local, TurnoCaja.local_id == Local.id)\
      .join(User, TurnoCaja.vendedor_id == User.id)\
-     .filter(TurnoCaja.estado == EstadoTurnoCaja.ABIERTO)\
-     .all()
+     .filter(
+         TurnoCaja.estado == EstadoTurnoCaja.ABIERTO,
+         Local.tenant_id == current_user.tenant_id
+     ).all()
     
     turnos_info = []
     for turno in turnos_abiertos:
@@ -264,9 +409,11 @@ def obtener_metricas_caja(db: Session = Depends(get_db)):
         func.sum(OperacionCaja.monto).label('total_ventas')
     ).join(TurnoCaja, User.id == TurnoCaja.vendedor_id)\
      .join(OperacionCaja, TurnoCaja.id == OperacionCaja.turno_caja_id)\
+     .join(Local, TurnoCaja.local_id == Local.id)\
      .filter(
          func.date(OperacionCaja.fecha_operacion) == hoy,
-         OperacionCaja.tipo_operacion == TipoOperacionCaja.VENTA
+         OperacionCaja.tipo_operacion == TipoOperacionCaja.VENTA,
+         Local.tenant_id == current_user.tenant_id
      ).group_by(User.id, User.nombre_completo)\
      .order_by(func.sum(OperacionCaja.monto).desc())\
      .limit(10)\
@@ -297,7 +444,8 @@ def obtener_metricas_caja(db: Session = Depends(get_db)):
      .filter(
          TurnoCaja.estado == EstadoTurnoCaja.CERRADO,
          func.date(TurnoCaja.fecha_cierre) >= hace_7_dias,
-         TurnoCaja.diferencia != 0
+         TurnoCaja.diferencia != 0,
+         Local.tenant_id == current_user.tenant_id
      ).order_by(TurnoCaja.fecha_cierre.desc())\
      .limit(15)\
      .all()
@@ -322,8 +470,11 @@ def obtener_metricas_caja(db: Session = Depends(get_db)):
         OperacionCaja.tipo_operacion,
         func.count(OperacionCaja.id).label('cantidad'),
         func.sum(OperacionCaja.monto).label('total_monto')
-    ).filter(
-        func.date(OperacionCaja.fecha_operacion) >= hace_30_dias
+    ).join(TurnoCaja, OperacionCaja.turno_caja_id == TurnoCaja.id)\
+     .join(Local, TurnoCaja.local_id == Local.id)\
+     .filter(
+        func.date(OperacionCaja.fecha_operacion) >= hace_30_dias,
+        Local.tenant_id == current_user.tenant_id
     ).group_by(OperacionCaja.tipo_operacion)\
      .all()
     

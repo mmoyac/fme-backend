@@ -153,7 +153,9 @@ def listar_usuarios(
     current_user: User = Depends(get_current_admin_user)
 ):
     """Listar usuarios del sistema."""
-    return db.query(User).offset(skip).limit(limit).all()
+    return db.query(User).filter(
+        User.tenant_id == current_user.tenant_id
+    ).offset(skip).limit(limit).all()
 
 @router.post("/users", response_model=UserSchema, status_code=status.HTTP_201_CREATED)
 def crear_usuario(
@@ -162,8 +164,11 @@ def crear_usuario(
     current_user: User = Depends(get_current_admin_user)
 ):
     """Crear un nuevo usuario y asignarle un rol."""
-    # Verificar email único
-    if db.query(User).filter(User.email == user.email).first():
+    # Verificar email único dentro del tenant
+    if db.query(User).filter(
+        User.email == user.email,
+        User.tenant_id == current_user.tenant_id
+    ).first():
         raise HTTPException(status_code=400, detail="El email ya está registrado")
     
     # Verificar que el rol exista
@@ -177,7 +182,8 @@ def crear_usuario(
         hashed_password=hashed_password,
         nombre_completo=user.nombre_completo,
         is_active=user.is_active,
-        role_id=user.role_id
+        role_id=user.role_id,
+        tenant_id=current_user.tenant_id
     )
     db.add(db_user)
     db.commit()
@@ -191,7 +197,10 @@ def obtener_usuario(
     current_user: User = Depends(get_current_admin_user)
 ):
     """Obtener un usuario por ID."""
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(
+        User.id == user_id,
+        User.tenant_id == current_user.tenant_id
+    ).first()
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     return user
@@ -204,7 +213,10 @@ def actualizar_usuario(
     current_user: User = Depends(get_current_admin_user)
 ):
     """Actualizar un usuario."""
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(
+        User.id == user_id,
+        User.tenant_id == current_user.tenant_id
+    ).first()
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     
@@ -215,12 +227,15 @@ def actualizar_usuario(
             raise HTTPException(status_code=400, detail="Rol no encontrado")
         user.role_id = user_update.role_id
     
-    # Validar local si se proporciona
+    # Validar local si se proporciona (debe pertenecer al tenant)
     if user_update.local_defecto_id is not None:
         from database.models import Local
-        local = db.query(Local).filter(Local.id == user_update.local_defecto_id).first()
+        local = db.query(Local).filter(
+            Local.id == user_update.local_defecto_id,
+            Local.tenant_id == current_user.tenant_id
+        ).first()
         if not local:
-            raise HTTPException(status_code=400, detail="Local no encontrado")
+            raise HTTPException(status_code=400, detail="Local no encontrado o no pertenece a tu organización")
         user.local_defecto_id = user_update.local_defecto_id
     
     # Actualizar otros campos
@@ -243,7 +258,10 @@ def eliminar_usuario(
     if user_id == current_user.id:
         raise HTTPException(status_code=400, detail="No puedes eliminar tu propio usuario")
         
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(
+        User.id == user_id,
+        User.tenant_id == current_user.tenant_id
+    ).first()
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     

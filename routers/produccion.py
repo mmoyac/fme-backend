@@ -7,6 +7,7 @@ from datetime import datetime
 from database.database import get_db
 from database import models
 from schemas import produccion as schemas_prod
+from routers.auth import get_current_active_user
 
 router = APIRouter(
     prefix="/produccion",
@@ -14,12 +15,17 @@ router = APIRouter(
 )
 
 @router.get("/ordenes", response_model=List[schemas_prod.OrdenProduccionRead])
-def listar_ordenes(db: Session = Depends(get_db)):
-    return db.query(models.OrdenProduccion).order_by(models.OrdenProduccion.id.desc()).all()
+def listar_ordenes(db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
+    return db.query(models.OrdenProduccion).join(models.Local).filter(
+        models.Local.tenant_id == current_user.tenant_id
+    ).order_by(models.OrdenProduccion.id.desc()).all()
 
 @router.delete("/ordenes/{orden_id}")
-def eliminar_orden(orden_id: int, db: Session = Depends(get_db)):
-    orden = db.query(models.OrdenProduccion).filter(models.OrdenProduccion.id == orden_id).first()
+def eliminar_orden(orden_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
+    orden = db.query(models.OrdenProduccion).join(models.Local).filter(
+        models.OrdenProduccion.id == orden_id,
+        models.Local.tenant_id == current_user.tenant_id
+    ).first()
     if not orden:
         raise HTTPException(status_code=404, detail="Orden no encontrada")
     
@@ -31,12 +37,15 @@ def eliminar_orden(orden_id: int, db: Session = Depends(get_db)):
     return {"message": "Orden eliminada"}
 
 @router.get("/ordenes/{orden_id}/requisitos")
-def calcular_requisitos_orden(orden_id: int, db: Session = Depends(get_db)):
+def calcular_requisitos_orden(orden_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
     """
     Calcula los insumos totales necesarios para una orden sin finalizarla.
     Útil para generar la hoja de producción.
     """
-    orden = db.query(models.OrdenProduccion).filter(models.OrdenProduccion.id == orden_id).first()
+    orden = db.query(models.OrdenProduccion).join(models.Local).filter(
+        models.OrdenProduccion.id == orden_id,
+        models.Local.tenant_id == current_user.tenant_id
+    ).first()
     if not orden:
         raise HTTPException(status_code=404, detail="Orden no encontrada")
         
@@ -71,7 +80,15 @@ def calcular_requisitos_orden(orden_id: int, db: Session = Depends(get_db)):
     return list(consumos_totales.values())
 
 @router.post("/ordenes", response_model=schemas_prod.OrdenProduccionRead)
-def crear_orden(orden: schemas_prod.OrdenProduccionCreate, db: Session = Depends(get_db)):
+def crear_orden(orden: schemas_prod.OrdenProduccionCreate, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
+    # Validar que el local pertenezca al tenant
+    local = db.query(models.Local).filter(
+        models.Local.id == orden.local_id,
+        models.Local.tenant_id == current_user.tenant_id
+    ).first()
+    if not local:
+        raise HTTPException(status_code=404, detail="Local no encontrado o no pertenece a tu organización")
+    
     nuevo_orden = models.OrdenProduccion(
         local_id=orden.local_id,
         fecha_programada=orden.fecha_programada,
@@ -96,8 +113,11 @@ def crear_orden(orden: schemas_prod.OrdenProduccionCreate, db: Session = Depends
     return nuevo_orden
 
 @router.post("/ordenes/{orden_id}/finalizar")
-def finalizar_orden(orden_id: int, confirmacion: schemas_prod.ConfirmacionFinalizacion = None, db: Session = Depends(get_db)):
-    orden = db.query(models.OrdenProduccion).filter(models.OrdenProduccion.id == orden_id).first()
+def finalizar_orden(orden_id: int, confirmacion: schemas_prod.ConfirmacionFinalizacion = None, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
+    orden = db.query(models.OrdenProduccion).join(models.Local).filter(
+        models.OrdenProduccion.id == orden_id,
+        models.Local.tenant_id == current_user.tenant_id
+    ).first()
     if not orden:
         raise HTTPException(status_code=404, detail="Orden no encontrada")
         

@@ -1,0 +1,158 @@
+PRESENTACIÓN: Sistema de Gestión de Despachos con Trazabilidad FIFO
+=====================================================================
+
+INFORMACIÓN DEL PROYECTO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Estudiante:     [Tu Nombre Completo]
+Diplomado:      [Nombre del Diplomado]
+Institución:    [Universidad/Instituto]
+Fecha:          Febrero 2026
+Estado:         ✅ Implementado y Operativo en Producción
+
+
+URL DE LA PRESENTACIÓN (Google Slides)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔗 Link de visualización (solo lectura):
+[PENDIENTE - Completar después de subir a Google Slides]
+
+Ejemplo: https://docs.google.com/presentation/d/1AbC123XyZ.../edit?usp=sharing
+
+
+INSTRUCCIONES PARA OBTENER LA URL:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Crear presentación en Google Slides siguiendo:
+   📘 GUIA_CREACION_SLIDES.md (16 pasos detallados)
+
+2. Una vez terminada, hacer click en "Compartir" (esquina superior derecha)
+
+3. Configurar permisos:
+   ☑️ "Cualquier persona con el enlace puede VER"
+   ☐ NO permitir edición
+   ☐ NO permitir comentarios
+
+4. Click en "Copiar enlace"
+
+5. Pegar el enlace aquí arriba (reemplazar [PENDIENTE...])
+
+6. Entregar este archivo junto con:
+   • Presentación exportada a PDF
+   • README_PROYECTO_DIPLOMADO.md
+   • Screenshots del sistema
+
+
+CONTENIDO DE LA PRESENTACIÓN (15 Slides)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Slide 1:  Portada del proyecto
+Slide 2:  Contexto del problema (industria e-commerce perecederos)
+Slide 3:  ¿Qué resuelve el sistema? (5 valores clave)
+Slide 4:  ¿Cómo funciona? (Flujo de 6 etapas)
+Slide 5:  Innovaciones tecnológicas (FIFO, QR, Automatización, Sync)
+Slide 6:  Arquitectura del sistema (diagrama multi-capa)
+Slide 7:  Caso de uso real (Pedido E-2026-00032 con timeline)
+Slide 8:  Resultados e impacto (métricas ANTES vs DESPUÉS)
+Slide 9:  Stack tecnológico (Frontend, Backend, Base de Datos, Infra)
+Slide 10: Aprendizajes y desafíos superados
+Slide 11: Escalabilidad y roadmap futuro (Q2-Q4 2026)
+Slide 12: Conclusiones (5 puntos clave)
+Slide 13: Referencias y recursos (GitHub, documentación)
+Slide 14: Preguntas y contacto
+
+Duración estimada: 15-20 minutos
+
+
+RECURSOS ADICIONALES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📄 Presentación (PDF):
+   [PENDIENTE - Exportar de Google Slides]
+   Archivo → Descargar → Documento PDF (.pdf)
+
+🎥 Video Demo (Opcional):
+   [Si grabaste video de 30 seg del picking con QR]
+
+📸 Screenshots:
+   • dashboard_principal.png
+   • mobile_picking.png
+   • qr_scan_success.png
+   • pedido_real_e2026_00032.png
+
+💻 Repositorios GitHub:
+   • Backend:     https://github.com/mmoyac/fme-backend
+   • Backoffice:  https://github.com/mmoyac/fme-backoffice
+   • Landing:     https://github.com/mmoyac/fme-landing
+
+🌐 Sistema en Vivo:
+   • API Docs:    http://api.masasestacion.cl/docs
+   • Backoffice:  http://admin.masasestacion.cl (credenciales bajo solicitud)
+   • Landing:     http://masasestacion.cl
+
+
+DATOS CLAVE PARA MEMORIZAR (Para Q&A)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Métricas de impacto:
+  • -95% reducción de errores (10% → 0.5%)
+  • -25% reducción de tiempo (60 min → 45 min)
+  • -71% reducción de mermas ($700K → $200K/año)
+  • +15% aumento de capacidad operativa
+
+Valor financiero:
+  • $1.85M ahorro anual proyectado
+  • ROI en 1.46 años
+
+Tecnologías principales:
+  • Next.js 14 (Frontend)
+  • FastAPI + Python 3.11 (Backend)
+  • PostgreSQL 14 (Base de Datos)
+  • Docker (Infraestructura)
+
+Caso real:
+  • Pedido E-2026-00032
+  • Cliente: Marcelo (Restaurant)
+  • 2 cajas Punta Picana
+  • 21 minutos desde orden hasta entrega
+  • Lotes C6 + C7 asignados por FIFO
+  • Precio ajustado: $185,500 (vs $190,000 estimado)
+
+
+CHECKLIST DE ENTREGA FINAL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Mínimo requerido:
+  [ ] URL_PRESENTACION.txt (este archivo completado)
+  [ ] Presentacion_Sistema_Despachos.pdf
+  [ ] README_PROYECTO_DIPLOMADO.md
+  [ ] 2-3 screenshots del sistema
+
+Recomendado:
+  [ ] Video demo de 30 segundos
+  [ ] Handout imprimible (RESUMEN_EJECUTIVO_1_PAGINA.md)
+  [ ] Link a repositorios GitHub
+
+Bonus:
+  [ ] Diagrama de arquitectura visual (Draw.io/Figma)
+  [ ] Testimonio en video de usuario real
+  [ ] Dashboard con métricas actualizadas
+
+
+CONTACTO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Estudiante:  [Tu Nombre]
+Email:       [tu-email@email.com]
+LinkedIn:    [Tu perfil LinkedIn]
+GitHub:      [Tu usuario GitHub]
+
+Para demo en vivo o consultas:
+📧 Enviar email con 24h de anticipación
+🎥 Video demo disponible bajo solicitud
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+NOTA: Completar los campos [PENDIENTE] antes de entregar este archivo.
+
+Última actualización: 18 Febrero 2026

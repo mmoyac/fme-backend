@@ -12,6 +12,7 @@ class ProductoBase(BaseModel):
     descripcion: Optional[str] = None
     sku: str = Field(..., min_length=1, max_length=100)
     imagen_url: Optional[str] = None
+    codigo_barra: Optional[str] = Field(None, max_length=50)
     categoria_id: int
     tipo_producto_id: int
     unidad_medida_id: int
@@ -37,6 +38,7 @@ class ProductoUpdate(BaseModel):
     descripcion: Optional[str] = None
     sku: Optional[str] = Field(None, min_length=1, max_length=100)
     imagen_url: Optional[str] = None
+    codigo_barra: Optional[str] = Field(None, max_length=50)
     categoria_id: Optional[int] = None
     tipo_producto_id: Optional[int] = None
     unidad_medida_id: Optional[int] = None

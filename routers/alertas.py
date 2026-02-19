@@ -49,7 +49,8 @@ class ProductoSinPrecio(BaseModel):
 
 @router.get("/productos-sin-precio", response_model=List[ProductoSinPrecio])
 def obtener_productos_sin_precio(
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     Obtener productos que existen en enrolamientos activos 
@@ -93,6 +94,8 @@ def obtener_productos_sin_precio(
         )
         .filter(productos_con_precio.c.proveedor_id.is_(None))  # NO tiene precio configurado
         .filter(EstadoEnrolamientoModel.codigo.in_(['PENDIENTE', 'EN_PROCESO', 'FINALIZADO']))  # Enrolamientos activos
+        .filter(ProductoModel.tenant_id == current_user.tenant_id)  # Filtro por tenant
+        .filter(ProveedorModel.tenant_id == current_user.tenant_id)  # Filtro por tenant
         .group_by(
             LoteModel.producto_id,
             ProductoModel.nombre,

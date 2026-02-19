@@ -1,0 +1,3 @@
+email,nombre_completo,password,role_id,local_defecto_codigo
+admin@minuevaempresa.cl,Administrador General,admin123,1,SUC01
+vendedor@minuevaempresa.cl,Vendedor Centro,vendedor123,2,SUC01

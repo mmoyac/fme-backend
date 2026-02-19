@@ -96,7 +96,7 @@ class GeneradorBoleta:
         elements = []
         
         # Encabezado de la empresa
-        elements.extend(self._crear_encabezado())
+        elements.extend(self._crear_encabezado(pedido))
         
         # Información de la boleta
         elements.extend(self._crear_info_boleta(pedido))
@@ -111,7 +111,7 @@ class GeneradorBoleta:
         elements.extend(self._crear_totales(pedido))
         
         # Pie de página
-        elements.extend(self._crear_pie_pagina())
+        elements.extend(self._crear_pie_pagina(pedido))
         
         # Construir PDF
         doc.build(elements)
@@ -120,13 +120,28 @@ class GeneradorBoleta:
         buffer.seek(0)
         return buffer
     
-    def _crear_encabezado(self):
+    def _crear_encabezado(self, pedido: Pedido):
         """Crear encabezado con información de la empresa."""
         elementos = []
         
+        # Obtener información del tenant desde el pedido
+        tenant = pedido.tenant
+        config_landing = tenant.configuracion_landing if tenant and hasattr(tenant, 'configuracion_landing') else None
+        
+        # Usar nombre del tenant o el nombre comercial de la configuración
+        nombre_empresa = tenant.nombre if tenant else "TIENDA"
+        if config_landing and config_landing.nombre_comercial:
+            nombre_empresa = config_landing.nombre_comercial.upper()
+        
+        # Usar dominio principal o descripción del footer
+        subtitulo = f"www.{tenant.dominio_principal}" if tenant and tenant.dominio_principal else ""
+        if config_landing and config_landing.texto_footer_descripcion:
+            subtitulo = config_landing.texto_footer_descripcion
+        
         # Título de la empresa
-        elementos.append(Paragraph("MASAS ESTACIÓN", self.styles['TituloEmpresa']))
-        elementos.append(Paragraph("Panadería y Pastelería Artesanal", self.styles['SubtituloEmpresa']))
+        elementos.append(Paragraph(nombre_empresa, self.styles['TituloEmpresa']))
+        if subtitulo:
+            elementos.append(Paragraph(subtitulo, self.styles['SubtituloEmpresa']))
         
         # Línea separadora
         elementos.append(Spacer(1, 10*mm))
@@ -153,7 +168,7 @@ class GeneradorBoleta:
         
         fecha_chile = fecha_utc.astimezone(chile_tz)
         fecha_formateada = fecha_chile.strftime("%d/%m/%Y %H:%M")
-        numero_pedido = f"PED-{pedido.id:05d}"
+        numero_pedido = pedido.numero_pedido
         
         info_data = [
             ["N° Pedido:", numero_pedido, "Fecha:", fecha_formateada],
@@ -392,13 +407,33 @@ class GeneradorBoleta:
         
         return elementos
     
-    def _crear_pie_pagina(self):
+    def _crear_pie_pagina(self, pedido: Pedido):
         """Crear pie de página."""
         elementos = []
         
+        # Obtener información del tenant desde el pedido
+        tenant = pedido.tenant
+        config_landing = tenant.configuracion_landing if tenant and hasattr(tenant, 'configuracion_landing') else None
+        
+        # Usar nombre del tenant
+        nombre_empresa = tenant.nombre if tenant else "Tienda"
+        if config_landing and config_landing.nombre_comercial:
+            nombre_empresa = config_landing.nombre_comercial
+        
+        # Usar descripción del footer o dominio
+        subtitulo = ""
+        if config_landing and config_landing.texto_footer_descripcion:
+            subtitulo = config_landing.texto_footer_descripcion
+        elif tenant and tenant.dominio_principal:
+            subtitulo = f"www.{tenant.dominio_principal}"
+        
         # Información adicional
+        texto_gracias = f"¡Gracias por su compra!<br/>{nombre_empresa}"
+        if subtitulo:
+            texto_gracias += f" - {subtitulo}"
+        
         elementos.append(Paragraph(
-            "¡Gracias por su compra!<br/>Masas Estación - Panadería Artesanal",
+            texto_gracias,
             self.styles['SubtituloEmpresa']
         ))
         

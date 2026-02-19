@@ -11,6 +11,7 @@ from database.models import Inventario, Producto, Local
 from schemas.inventario_consulta import InventarioResumen, InventarioDetalle
 from schemas.inventario import InventarioResponse, InventarioUpdate
 from services import inventario_service
+from routers.auth import get_current_active_user
 
 router = APIRouter()
 
@@ -69,14 +70,16 @@ def listar_inventario(
     limit: int = 100,
     producto_id: int = None,
     local_id: int = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
 ):
     """
-    Lista registros de inventario con filtros opcionales.
+    Lista registros de inventario del tenant con filtros opcionales.
     
     **Uso:** Backoffice - Tabla de inventario
     """
-    query = db.query(Inventario)
+    # Unir con Producto para filtrar por tenant_id
+    query = db.query(Inventario).join(Producto).filter(Producto.tenant_id == current_user.tenant_id)
     
     if producto_id:
         query = query.filter(Inventario.producto_id == producto_id)
@@ -120,14 +123,19 @@ def obtener_inventario_producto_local(
 def actualizar_inventario(
     inventario_id: int,
     inventario: InventarioUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
 ):
     """
-    Actualiza el stock de un registro de inventario.
+    Actualiza el stock de un registro de inventario del tenant.
     
     **Uso:** Backoffice - Ajustar stock
     """
-    db_inventario = db.query(Inventario).filter(Inventario.id == inventario_id).first()
+    # Validar que el inventario pertenece al tenant
+    db_inventario = db.query(Inventario).join(Producto).filter(
+        Inventario.id == inventario_id,
+        Producto.tenant_id == current_user.tenant_id
+    ).first()
     if not db_inventario:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -148,22 +156,23 @@ def actualizar_inventario_por_producto_local(
     producto_id: int,
     local_id: int,
     inventario_data: InventarioUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
 ):
     """
-    Actualiza o crea el stock de un producto en un local específico.
+    Actualiza o crea el stock de un producto en un local específico del tenant.
     
     **Uso:** Backoffice - Ajustar stock por producto/local
     """
-    # Verificar que producto y local existan
-    producto = db.query(Producto).filter(Producto.id == producto_id).first()
+    # Verificar que producto y local existan y pertenezcan al tenant
+    producto = db.query(Producto).filter(Producto.id == producto_id, Producto.tenant_id == current_user.tenant_id).first()
     if not producto:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Producto con ID {producto_id} no encontrado"
         )
     
-    local = db.query(Local).filter(Local.id == local_id).first()
+    local = db.query(Local).filter(Local.id == local_id, Local.tenant_id == current_user.tenant_id).first()
     if not local:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

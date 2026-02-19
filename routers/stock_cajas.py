@@ -2,7 +2,7 @@
 Router para gestión de stock de cajas por proveedor.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func, or_
 from typing import List, Optional
@@ -52,6 +52,8 @@ async def listar_stock_cajas(
         Producto, StockCajasProveedor.producto_id == Producto.id
     ).join(
         Proveedor, StockCajasProveedor.proveedor_id == Proveedor.id
+    ).filter(
+        Producto.tenant_id == current_user.tenant_id
     )
     
     # Aplicar filtros
@@ -96,11 +98,23 @@ async def obtener_resumen_stock(
     """Obtener resumen general del stock de cajas."""
     
     # Estadísticas generales
-    total_productos = db.query(func.count(func.distinct(StockCajasProveedor.producto_id))).scalar() or 0
-    total_proveedores = db.query(func.count(func.distinct(StockCajasProveedor.proveedor_id))).scalar() or 0
-    total_cajas_disponibles = db.query(func.sum(StockCajasProveedor.cajas_disponibles)).scalar() or 0
-    productos_sin_stock = db.query(func.count(StockCajasProveedor.id)).filter(
-        StockCajasProveedor.cajas_disponibles == 0
+    total_productos = db.query(func.count(func.distinct(StockCajasProveedor.producto_id))).join(
+        Producto, StockCajasProveedor.producto_id == Producto.id
+    ).filter(Producto.tenant_id == current_user.tenant_id).scalar() or 0
+    
+    total_proveedores = db.query(func.count(func.distinct(StockCajasProveedor.proveedor_id))).join(
+        Producto, StockCajasProveedor.producto_id == Producto.id
+    ).filter(Producto.tenant_id == current_user.tenant_id).scalar() or 0
+    
+    total_cajas_disponibles = db.query(func.sum(StockCajasProveedor.cajas_disponibles)).join(
+        Producto, StockCajasProveedor.producto_id == Producto.id
+    ).filter(Producto.tenant_id == current_user.tenant_id).scalar() or 0
+    
+    productos_sin_stock = db.query(func.count(StockCajasProveedor.id)).join(
+        Producto, StockCajasProveedor.producto_id == Producto.id
+    ).filter(
+        StockCajasProveedor.cajas_disponibles == 0,
+        Producto.tenant_id == current_user.tenant_id
     ).scalar() or 0
     
     # Productos con stock disponible
@@ -121,7 +135,8 @@ async def obtener_resumen_stock(
     ).join(
         Proveedor, StockCajasProveedor.proveedor_id == Proveedor.id
     ).filter(
-        StockCajasProveedor.cajas_disponibles > 0
+        StockCajasProveedor.cajas_disponibles > 0,
+        Producto.tenant_id == current_user.tenant_id
     ).order_by(
         StockCajasProveedor.cajas_disponibles.desc()
     ).limit(20)  # Top 20 con más stock
@@ -178,6 +193,8 @@ async def obtener_peso_promedio_por_producto(
             Producto, Lote.producto_id == Producto.id
         ).join(
             Proveedor, Enrolamiento.proveedor_id == Proveedor.id
+        ).filter(
+            Producto.tenant_id == current_user.tenant_id
         ).group_by(
             Lote.producto_id,
             Enrolamiento.proveedor_id,
@@ -229,7 +246,8 @@ async def obtener_stock_por_producto(
     ).join(
         Proveedor, StockCajasProveedor.proveedor_id == Proveedor.id
     ).filter(
-        StockCajasProveedor.producto_id == producto_id
+        StockCajasProveedor.producto_id == producto_id,
+        Producto.tenant_id == current_user.tenant_id
     )
     
     if solo_con_stock:
@@ -297,7 +315,8 @@ async def obtener_lotes_disponibles_producto(
         ).filter(
             Lote.producto_id == producto_id,
             Lote.disponible_venta == True,
-            Lote.vendido == False
+            Lote.vendido == False,
+            Producto.tenant_id == current_user.tenant_id
         ).order_by(
             Lote.fecha_vencimiento.asc()  # FIFO - primero en vencer
         )
@@ -506,6 +525,8 @@ async def listar_movimientos_stock(
         Producto, MovimientoStockCajas.producto_id == Producto.id
     ).join(
         Proveedor, MovimientoStockCajas.proveedor_id == Proveedor.id
+    ).filter(
+        Producto.tenant_id == current_user.tenant_id
     )
     
     # Aplicar filtros
@@ -596,4 +617,120 @@ async def ajustar_stock_manual(
         "stock_anterior": cajas_antes,
         "stock_nuevo": ajuste.cajas_disponibles,
         "diferencia": diferencia
+    }
+
+
+@router.get("/lotes-asignados-pedido/{pedido_id}")
+async def obtener_lotes_asignados_pedido(
+    pedido_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    """
+    Obtener los lotes específicos YA ASIGNADOS a un pedido.
+    Útil para confirmar pedidos PENDIENTES que ya tienen lotes reservados.
+    """
+    from database.models import Pedido
+    
+    # Verificar que el pedido existe y pertenece al tenant
+    pedido = db.query(Pedido).filter(
+        Pedido.id == pedido_id,
+        Pedido.tenant_id == current_user.tenant_id
+    ).first()
+    
+    if not pedido:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Pedido no encontrado"
+        )
+    
+    # Buscar movimientos de reserva o venta de lotes para este pedido
+    movimientos = db.query(MovimientoStockCajas).filter(
+        MovimientoStockCajas.referencia_tipo == "PEDIDO",
+        MovimientoStockCajas.referencia_id == pedido_id,
+        MovimientoStockCajas.tipo_movimiento.in_(["RESERVA_LOTE", "VENTA_LOTE"])
+    ).all()
+    
+    if not movimientos:
+        return {
+            "pedido_id": pedido_id,
+            "tiene_lotes_asignados": False,
+            "items": []
+        }
+    
+    # Agrupar por producto
+    items_por_producto = {}
+    
+    for mov in movimientos:
+        if mov.lote_codigo:
+            # Buscar el lote con su precio
+            lote_query = db.query(
+                Lote.codigo_lote,
+                Lote.peso_actual,
+                Lote.fecha_vencimiento,
+                Lote.lote_proveedor,
+                Lote.disponible_venta,
+                Lote.vendido,
+                Lote.producto_id,
+                Enrolamiento.proveedor_id,
+                PrecioProveedor.precio_kg
+            ).join(
+                Enrolamiento, Lote.enrolamiento_id == Enrolamiento.id
+            ).outerjoin(
+                PrecioProveedor, and_(
+                    PrecioProveedor.producto_id == Lote.producto_id,
+                    PrecioProveedor.proveedor_id == Enrolamiento.proveedor_id,
+                    PrecioProveedor.activo == True
+                )
+            ).filter(
+                Lote.codigo_lote == mov.lote_codigo
+            ).first()
+            
+            if lote_query:
+                producto_id = lote_query.producto_id
+                proveedor_id = lote_query.proveedor_id
+                
+                if producto_id not in items_por_producto:
+                    producto = db.query(Producto).filter(Producto.id == producto_id).first()
+                    proveedor = db.query(Proveedor).filter(Proveedor.id == proveedor_id).first()
+                    
+                    items_por_producto[producto_id] = {
+                        "producto_id": producto_id,
+                        "producto_nombre": producto.nombre if producto else f"Producto {producto_id}",
+                        "proveedor_id": proveedor_id,
+                        "proveedor_nombre": proveedor.nombre if proveedor else f"Proveedor {proveedor_id}",
+                        "lotes": []
+                    }
+                
+                # Calcular precio del lote
+                precio_kg = float(lote_query.precio_kg) if lote_query.precio_kg else 0.0
+                peso_kg = float(lote_query.peso_actual)
+                precio_total = peso_kg * precio_kg
+                
+                items_por_producto[producto_id]["lotes"].append({
+                    "lote_codigo": lote_query.codigo_lote,
+                    "peso_kg": peso_kg,
+                    "precio_kg": precio_kg,
+                    "precio_total": precio_total,
+                    "fecha_vencimiento": lote_query.fecha_vencimiento.isoformat() if lote_query.fecha_vencimiento else None,
+                    "lote_proveedor": lote_query.lote_proveedor,
+                    "disponible_venta": lote_query.disponible_venta,
+                    "vendido": lote_query.vendido,
+                    "tipo_movimiento": mov.tipo_movimiento
+                })
+    
+    # Calcular totales
+    items = list(items_por_producto.values())
+    total_precio_estimado = sum(
+        sum(l["precio_total"] for l in item["lotes"])
+        for item in items
+    )
+    
+    return {
+        "pedido_id": pedido_id,
+        "tiene_lotes_asignados": True,
+        "items": items,
+        "total_precio": total_precio_estimado,
+        "cantidad_items": len(items),
+        "total_cajas": sum(len(item["lotes"]) for item in items)
     }

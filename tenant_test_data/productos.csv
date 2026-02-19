@@ -1,0 +1,7 @@
+sku,nombre,descripcion,categoria_id,tipo_producto_id,unidad_medida_id,precio_compra,costo_fabricacion,stock_minimo,stock_critico,es_vendible,es_vendible_web,es_ingrediente
+PAN-AMASADO,Pan Amasado,Pan amasado artesanal recién horneado,1,1,1,300,250,50,20,true,true,false
+PAN-HALLULLA,Hallulla,Hallulla tradicional chilena,1,1,1,280,230,50,20,true,true,false
+PAN-MARR,Marraqueta,Marraqueta clásica,1,1,1,250,200,60,25,true,true,false
+EMPANADA-PINO,Empanada de Pino,Empanada de pino casera,2,1,1,800,600,30,15,true,true,false
+EMPANADA-QUESO,Empanada de Queso,Empanada de queso derretido,2,1,1,700,550,30,15,true,true,false
+TORTA-CHOC,Torta de Chocolate,Torta de chocolate 8 porciones,2,1,1,3000,2500,5,3,true,false,false

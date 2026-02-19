@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from routers.auth import get_current_active_user
 
 # Importar routers
-from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, payments, test_payments, maestras, recetas, produccion, compras, cheques, puntos, caja, enrolamiento, gemini_vision, precios_proveedor, stock_cajas, alertas, tipos_pedido, despachos, configuracion, debug_menu
+from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, payments, test_payments, maestras, recetas, produccion, compras, cheques, puntos, caja, enrolamiento, gemini_vision, precios_proveedor, stock_cajas, alertas, tipos_pedido, despachos, configuracion, debug_menu, admin_configuracion_landing, tenants, etiquetas
 
 app = FastAPI(
     title="FME Backend API",
@@ -18,21 +18,37 @@ app = FastAPI(
 
 # Configuración de CORS
 origins = [
+    # Producción
     "https://masasestacion.cl",
     "https://www.masasestacion.cl",
-    "https://backoffice.masasestacion.cl",
+    "https://elolivo.masasestacion.cl",
+    "https://api.masasestacion.cl",
     "https://admin.masasestacion.cl",
+    "https://backoffice.masasestacion.cl",
+    
+    # Desarrollo local (localhost)
     "http://localhost:3000",  # Landing en desarrollo
     "http://localhost:3001",  # Backoffice en desarrollo
     "http://localhost:8080",
     "http://localhost",       # POS App (Capacitor Android)
+    
+    # Desarrollo local (hosts file)
+    "http://masasestacion.local:3000",
+    "http://elolivo.local:3000",
+    "http://donajuanita.local:3000",
+    "http://api.masasestacion.local:8000",
+    "http://admin.masasestacion.local:3001",
+    "http://admin.elolivo.local:3001",
+    "http://admin.donajuanita.local:3001",
+    
+    # POS App (Capacitor)
     "capacitor://localhost",  # POS App (Capacitor iOS)
     "ionic://localhost",      # POS App (Capacitor alternativo)
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],  # Permitir todos los orígenes en desarrollo
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -69,6 +85,9 @@ app.include_router(stock_cajas.router, prefix="/api/stock-cajas", tags=["Stock C
 app.include_router(alertas.router, prefix="/api/alertas", tags=["Alertas"], dependencies=[Depends(get_current_active_user)])
 app.include_router(despachos.router, prefix="/api/despachos", tags=["Despachos"], dependencies=[Depends(get_current_active_user)])
 app.include_router(configuracion.router, prefix="/api/config", tags=["Configuración"])
+app.include_router(admin_configuracion_landing.router, prefix="/api/admin/configuracion-landing", tags=["Admin - Configuración Landing"], dependencies=[Depends(get_current_active_user)])
+app.include_router(tenants.router, prefix="/api/tenants", tags=["Tenants (Multi-tenant SaaS)"], dependencies=[Depends(get_current_active_user)])
+app.include_router(etiquetas.router, tags=["Etiquetas"], dependencies=[Depends(get_current_active_user)])
 app.include_router(debug_menu.router, prefix="/api/debug", tags=["Debug Menu"])
 
 @app.get("/")

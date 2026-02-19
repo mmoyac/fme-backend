@@ -2,7 +2,7 @@
 Router para endpoints de Pedidos.
 """
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
@@ -25,6 +25,7 @@ from routers.auth import get_current_active_user
 from services.boleta_service import generar_boleta_pedido
 from services.credito_service import CreditoService
 from services.puntos_service import PuntosService
+from services.tenant_service import obtener_siguiente_numero_pedido, get_tenant_from_request
 
 router = APIRouter()
 
@@ -129,33 +130,84 @@ def _descontar_inventario_cajas(pedido: Pedido, local_despacho_id: int, db: Sess
     nuevo_monto_total = Decimal('0')
     items_actualizados = []
     
+    # 🔍 DETECTAR SI LOS LOTES YA FUERON RESERVADOS AL CREAR EL PEDIDO
+    # Buscar si hay lotes con disponible_venta=False y vendido=False para este pedido
+    # (esto indica que fueron reservados en la creación)
+    lotes_reservados_count = db.query(Lote).join(
+        MovimientoStockCajas, Lote.codigo_lote == MovimientoStockCajas.lote_codigo
+    ).filter(
+        MovimientoStockCajas.referencia_tipo == "PEDIDO",
+        MovimientoStockCajas.referencia_id == pedido.id,
+        MovimientoStockCajas.tipo_movimiento == "RESERVA_LOTE",
+        Lote.disponible_venta == False,
+        Lote.vendido == False
+    ).count()
+    
+    lotes_ya_asignados = lotes_reservados_count > 0
+    
+    if lotes_ya_asignados:
+        print(f"✅ Pedido #{pedido.id}: Lotes ya asignados. Solo marcando como vendidos...")
+    
     # Obtener lotes específicos para cada item y calcular precio real
     for item in pedido.items:
-        # Obtener lotes disponibles para este producto (FIFO - primero en vencer)
-        lotes_query = db.query(
-            Lote.id,
-            Lote.codigo_lote,
-            Lote.peso_actual,
-            Lote.fecha_vencimiento,
-            Lote.lote_proveedor,
-            Lote.producto_id,
-            PrecioProveedor.precio_kg,
-            Enrolamiento.proveedor_id
-        ).join(
-            Enrolamiento, Lote.enrolamiento_id == Enrolamiento.id
-        ).outerjoin(
-            PrecioProveedor, and_(
-                PrecioProveedor.producto_id == Lote.producto_id,
-                PrecioProveedor.proveedor_id == Enrolamiento.proveedor_id,
-                PrecioProveedor.activo == True
-            )
-        ).filter(
-            Lote.producto_id == item.producto_id,
-            Lote.disponible_venta == True,
-            Lote.vendido == False
-        ).order_by(
-            Lote.fecha_vencimiento.asc()  # FIFO - primero en vencer
-        ).limit(item.cantidad)
+        # Si los lotes ya están asignados, buscarlos por los movimientos de reserva
+        if lotes_ya_asignados:
+            # Buscar lotes reservados para este pedido y producto
+            lotes_query = db.query(
+                Lote.id,
+                Lote.codigo_lote,
+                Lote.peso_actual,
+                Lote.fecha_vencimiento,
+                Lote.lote_proveedor,
+                Lote.producto_id,
+                PrecioProveedor.precio_kg,
+                Enrolamiento.proveedor_id
+            ).join(
+                Enrolamiento, Lote.enrolamiento_id == Enrolamiento.id
+            ).outerjoin(
+                PrecioProveedor, and_(
+                    PrecioProveedor.producto_id == Lote.producto_id,
+                    PrecioProveedor.proveedor_id == Enrolamiento.proveedor_id,
+                    PrecioProveedor.activo == True
+                )
+            ).join(
+                MovimientoStockCajas, Lote.codigo_lote == MovimientoStockCajas.lote_codigo
+            ).filter(
+                Lote.producto_id == item.producto_id,
+                MovimientoStockCajas.referencia_tipo == "PEDIDO",
+                MovimientoStockCajas.referencia_id == pedido.id,
+                MovimientoStockCajas.tipo_movimiento == "RESERVA_LOTE",
+                Lote.disponible_venta == False,
+                Lote.vendido == False
+            ).order_by(
+                Lote.fecha_vencimiento.asc()
+            ).limit(item.cantidad)
+        else:
+            # Flujo original: buscar lotes disponibles (FIFO)
+            lotes_query = db.query(
+                Lote.id,
+                Lote.codigo_lote,
+                Lote.peso_actual,
+                Lote.fecha_vencimiento,
+                Lote.lote_proveedor,
+                Lote.producto_id,
+                PrecioProveedor.precio_kg,
+                Enrolamiento.proveedor_id
+            ).join(
+                Enrolamiento, Lote.enrolamiento_id == Enrolamiento.id
+            ).outerjoin(
+                PrecioProveedor, and_(
+                    PrecioProveedor.producto_id == Lote.producto_id,
+                    PrecioProveedor.proveedor_id == Enrolamiento.proveedor_id,
+                    PrecioProveedor.activo == True
+                )
+            ).filter(
+                Lote.producto_id == item.producto_id,
+                Lote.disponible_venta == True,
+                Lote.vendido == False
+            ).order_by(
+                Lote.fecha_vencimiento.asc()  # FIFO - primero en vencer
+            ).limit(item.cantidad)
         
         lotes_disponibles = lotes_query.all()
         
@@ -168,12 +220,17 @@ def _descontar_inventario_cajas(pedido: Pedido, local_despacho_id: int, db: Sess
         # Calcular precio real basado en lotes específicos
         precio_total_item = Decimal('0')
         peso_total_item = Decimal('0')
+        lote_id_principal = None  # Para asignar al item (primer lote)
         
-        for lote in lotes_disponibles:
+        for idx, lote in enumerate(lotes_disponibles):
             # Marcar lote como vendido
             lote_obj = db.query(Lote).filter(Lote.id == lote.id).first()
             lote_obj.vendido = True
             lote_obj.disponible_venta = False
+            
+            # Guardar el primer lote como lote_id del item
+            if idx == 0:
+                lote_id_principal = lote.id
             
             # Calcular precio de este lote
             precio_por_kg = Decimal(str(lote.precio_kg)) if lote.precio_kg else Decimal('0')
@@ -198,15 +255,25 @@ def _descontar_inventario_cajas(pedido: Pedido, local_despacho_id: int, db: Sess
             )
             db.add(movimiento_cajas)
         
-        # Actualizar precio unitario del item al precio real
-        item.precio_unitario = precio_total_item / item.cantidad
+        # ✅ ASIGNAR LOTE_ID AL ITEM (para trazabilidad y despacho)
+        if lote_id_principal:
+            item.lote_id = lote_id_principal
+        
+        # Si lotes ya asignados, NO actualizar precio (ya está correcto)
+        # Si son nuevos lotes, actualizar precio unitario al precio real
+        if not lotes_ya_asignados:
+            item.precio_unitario_venta = float(precio_total_item / Decimal(str(item.cantidad)))
+        else:
+            # Para lotes ya asignados, el precio_total_item es el mismo que ya estaba calculado
+            precio_total_item = Decimal(str(item.precio_unitario_venta)) * Decimal(str(item.cantidad))
+        
         nuevo_monto_total += precio_total_item
         
-        # **AGREGAR: Actualizar stock de cajas por proveedor**
-        # Obtener proveedor del primer lote (todos deberían ser del mismo proveedor)
+        # **Actualizar stock de cajas por proveedor**
+        # IMPORTANTE: Solo actualizar stock si los lotes NO estaban previamente asignados
+        # Si ya estaban reservados, el stock ya fue descontado al crear el pedido
         proveedor_id = lotes_disponibles[0].proveedor_id
         
-        # Buscar o crear entrada en stock_cajas_proveedor
         from database.models import StockCajasProveedor
         stock_cajas = db.query(StockCajasProveedor).filter(
             StockCajasProveedor.producto_id == item.producto_id,
@@ -214,13 +281,18 @@ def _descontar_inventario_cajas(pedido: Pedido, local_despacho_id: int, db: Sess
         ).first()
         
         if stock_cajas:
-            # Reducir el stock de cajas disponibles
-            stock_cajas.cajas_disponibles -= item.cantidad
+            if not lotes_ya_asignados:
+                # Solo descontar stock si NO estaba previamente asignado
+                stock_cajas.cajas_disponibles -= item.cantidad
+                print(f"📦 Stock descontado: {stock_cajas.cajas_disponibles} cajas disponibles")
+            
+            # Siempre incrementar cajas_totales_vendidas al confirmar
             stock_cajas.cajas_totales_vendidas += item.cantidad
+            print(f"✅ Cajas vendidas: {stock_cajas.cajas_totales_vendidas} total")
         
         items_actualizados.append({
             'item_id': item.id,
-            'precio_original': float(item.precio_unitario * item.cantidad),
+            'precio_original': float(item.precio_unitario_venta * item.cantidad),
             'precio_real': float(precio_total_item),
             'peso_total': float(peso_total_item),
             'stock_reducido': item.cantidad,
@@ -228,11 +300,15 @@ def _descontar_inventario_cajas(pedido: Pedido, local_despacho_id: int, db: Sess
         })
     
     # Actualizar monto total del pedido con precio real
-    monto_original = pedido.monto_total
-    pedido.monto_total = nuevo_monto_total
+    # (solo si los lotes NO estaban pre-asignados, ya que el precio ya sería el correcto)
+    if not lotes_ya_asignados:
+        monto_original = pedido.monto_total
+        pedido.monto_total = nuevo_monto_total
+        print(f"Pedido #{pedido.id}: Precio actualizado de ${monto_original} a ${nuevo_monto_total}")
+    else:
+        print(f"Pedido #{pedido.id}: Precio ya correcto (lotes pre-asignados): ${pedido.monto_total}")
     
     # Log para auditoría
-    print(f"Pedido #{pedido.id}: Precio actualizado de ${monto_original} a ${nuevo_monto_total}")
     print(f"Items actualizados: {items_actualizados}")
 
 
@@ -247,24 +323,26 @@ def devolver_inventario(pedido: Pedido, db: Session):
         pedido: El pedido del cual devolver inventario
         db: Sesión de base de datos
     """
-    if not pedido.inventario_descontado or not pedido.local_despacho_id:
-        return  # No hay nada que devolver
-    
     # Obtener el tipo de pedido
     if not pedido.tipo_pedido:
         return  # No se puede procesar sin tipo
     
     tipo_codigo = pedido.tipo_pedido.codigo
     
+    # Para PRODUCTOS: validar que haya inventario descontado y local de despacho
     if tipo_codigo == "PRODUCTOS":
-        # Lógica para productos regulares
+        if not pedido.inventario_descontado or not pedido.local_despacho_id:
+            return  # No hay nada que devolver
         _devolver_inventario_productos(pedido, db)
+    
+    # Para CAJAS_VARIABLES: no requiere validación de inventario_descontado ni local_despacho_id
+    # porque los lotes se reservan inmediatamente al crear el pedido (estado PENDIENTE)
     elif tipo_codigo == "CAJAS_VARIABLES":
-        # Lógica para cajas de carne
         _devolver_inventario_cajas(pedido, db)
     
-    # Marcar como no descontado (común para ambos tipos)
-    pedido.inventario_descontado = False
+    # Marcar como no descontado (solo para productos que requieren descuento)
+    if pedido.inventario_descontado:
+        pedido.inventario_descontado = False
 
 
 def _devolver_inventario_productos(pedido: Pedido, db: Session):
@@ -296,14 +374,14 @@ def _devolver_inventario_cajas(pedido: Pedido, db: Session):
     """Devuelve lotes específicos de cajas al estado original para pedidos de carne."""
     from database.models import MovimientoStockCajas, Lote
     
-    # Buscar movimientos de venta de lotes específicos para este pedido
-    movimientos_venta = db.query(MovimientoStockCajas).filter(
+    # Buscar movimientos de lotes para este pedido (tanto RESERVA como VENTA)
+    movimientos_lotes = db.query(MovimientoStockCajas).filter(
         MovimientoStockCajas.referencia_tipo == "PEDIDO",
         MovimientoStockCajas.referencia_id == pedido.id,
-        MovimientoStockCajas.tipo_movimiento == "VENTA_LOTE"
+        MovimientoStockCajas.tipo_movimiento.in_(["VENTA_LOTE", "RESERVA_LOTE"])
     ).all()
     
-    if not movimientos_venta:
+    if not movimientos_lotes:
         # Fallback al método anterior si no hay movimientos de lote específico
         for item in pedido.items:
             # Buscar el stock de cajas para devolver
@@ -331,7 +409,7 @@ def _devolver_inventario_cajas(pedido: Pedido, db: Session):
         return
     
     # Devolver lotes específicos a su estado original
-    for movimiento in movimientos_venta:
+    for movimiento in movimientos_lotes:
         if movimiento.lote_codigo:
             # Buscar el lote específico
             lote = db.query(Lote).filter(
@@ -343,28 +421,36 @@ def _devolver_inventario_cajas(pedido: Pedido, db: Session):
                 lote.vendido = False
                 lote.disponible_venta = True
                 
-                # **AGREGAR: Restaurar stock de cajas por proveedor**
-                from database.models import StockCajasProveedor
-                stock_cajas = db.query(StockCajasProveedor).filter(
-                    StockCajasProveedor.producto_id == movimiento.producto_id,
-                    StockCajasProveedor.proveedor_id == movimiento.proveedor_id
-                ).first()
+                # **Restaurar stock de cajas (tanto VENTA como RESERVA)**
+                es_venta = movimiento.tipo_movimiento == "VENTA_LOTE"
+                es_reserva = movimiento.tipo_movimiento == "RESERVA_LOTE"
                 
-                if stock_cajas:
-                    # Aumentar el stock de cajas disponibles
-                    stock_cajas.cajas_disponibles += 1
-                    # Solo decrementar si hay ventas registradas (evitar negativos)
-                    if stock_cajas.cajas_totales_vendidas > 0:
-                        stock_cajas.cajas_totales_vendidas -= 1
+                if es_venta or es_reserva:
+                    from database.models import StockCajasProveedor
+                    stock_cajas = db.query(StockCajasProveedor).filter(
+                        StockCajasProveedor.producto_id == movimiento.producto_id,
+                        StockCajasProveedor.proveedor_id == movimiento.proveedor_id
+                    ).first()
+                    
+                    if stock_cajas:
+                        # Aumentar el stock de cajas disponibles (común para ambos)
+                        stock_cajas.cajas_disponibles += 1
+                        
+                        # Solo si era venta, decrementar cajas_totales_vendidas
+                        if es_venta and stock_cajas.cajas_totales_vendidas > 0:
+                            stock_cajas.cajas_totales_vendidas -= 1
+                        
+                        print(f"📦 Stock restaurado: {stock_cajas.cajas_disponibles} cajas disponibles")
                 
                 # Registrar movimiento de devolución del lote
+                tipo_devolucion = "DEVOLUCION_LOTE" if es_venta else "LIBERACION_RESERVA"
                 movimiento_devolucion = MovimientoStockCajas(
                     producto_id=movimiento.producto_id,
                     proveedor_id=movimiento.proveedor_id,
-                    tipo_movimiento="DEVOLUCION_LOTE",
+                    tipo_movimiento=tipo_devolucion,
                     cajas_movimiento=1,  # 1 lote = 1 caja
                     peso_total_kg=movimiento.peso_total_kg,
-                    descripcion=f"Devolución lote {movimiento.lote_codigo} por cancelación de pedido #{pedido.id}",
+                    descripcion=f"{'Devolución' if es_venta else 'Liberación'} lote {movimiento.lote_codigo} por cancelación de pedido #{pedido.id}",
                     referencia_tipo="PEDIDO",
                     referencia_id=pedido.id,
                     lote_codigo=movimiento.lote_codigo,
@@ -372,7 +458,7 @@ def _devolver_inventario_cajas(pedido: Pedido, db: Session):
                 )
                 db.add(movimiento_devolucion)
                 
-                print(f"Lote {movimiento.lote_codigo} devuelto al estado disponible y stock incrementado")
+                print(f"Lote {movimiento.lote_codigo} devuelto al estado disponible y stock restaurado")
 
 
 def registrar_venta_en_caja(pedido: Pedido, usuario_actual_id: int, db: Session):
@@ -423,44 +509,70 @@ def registrar_venta_en_caja(pedido: Pedido, usuario_actual_id: int, db: Session)
 
 
 @router.post("/", response_model=PedidoConfirmacion, status_code=status.HTTP_201_CREATED)
-def crear_pedido_frontend(pedido_data: PedidoCreateFrontend, db: Session = Depends(get_db)):
+def crear_pedido_frontend(
+    request: Request,
+    pedido_data: PedidoCreateFrontend, 
+    db: Session = Depends(get_db)
+):
     """
     Crea un nuevo pedido desde el frontend (sin autenticación).
     
     **Flujo:**
-    1. Busca o crea el cliente con el email
-    2. Valida que los productos existan y tengan precio en local WEB
-    3. Crea el pedido con estado PENDIENTE
-    4. Crea los items del pedido
-    5. Calcula el monto total
+    1. Detecta el tenant desde el dominio de la petición
+    2. Busca o crea el cliente con el email (en el tenant correspondiente)
+    3. Valida que los productos existan y tengan precio en local WEB del tenant
+    4. Crea el pedido con estado PENDIENTE
+    5. Crea los items del pedido
+    6. Calcula el monto total
     
     **Uso:** Landing - Checkout del carrito
     """
-    # 1. Buscar local WEB
-    local_web = db.query(Local).filter(Local.codigo == 'WEB').first()
+    # 0. Detectar tenant desde el dominio
+    tenant = get_tenant_from_request(request, db)
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No se pudo detectar el tenant desde el dominio"
+        )
+    
+    tenant_id = tenant.id
+    print(f"🎯 Pedido frontend - Tenant detectado: {tenant.nombre} (ID: {tenant_id})")
+    
+    # 1. Buscar local WEB del tenant
+    local_web = db.query(Local).filter(
+        Local.codigo == 'WEB',
+        Local.tenant_id == tenant_id
+    ).first()
+    
     if not local_web:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Local WEB no configurado en el sistema"
+            detail=f"Local WEB no configurado para {tenant.nombre}"
         )
 
-    # 1.5. Buscar medio de pago por código
+    # 1.5. Buscar medio de pago por código (dato maestro global)
     from database.models import MedioPago
     medio_pago = None
     if pedido_data.medio_pago_codigo:
-        medio_pago = db.query(MedioPago).filter(MedioPago.codigo == pedido_data.medio_pago_codigo).first()
+        medio_pago = db.query(MedioPago).filter(
+            MedioPago.codigo == pedido_data.medio_pago_codigo
+        ).first()
         if not medio_pago:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Medio de pago '{pedido_data.medio_pago_codigo}' no encontrado"
             )
     
-    # 2. Buscar o crear cliente
-    cliente = db.query(Cliente).filter(Cliente.email == pedido_data.cliente_email).first()
+    # 2. Buscar o crear cliente (en el tenant correspondiente)
+    cliente = db.query(Cliente).filter(
+        Cliente.email == pedido_data.cliente_email,
+        Cliente.tenant_id == tenant_id
+    ).first()
     
     if not cliente:
-        # Crear nuevo cliente
+        # Crear nuevo cliente en el tenant detectado
         cliente = Cliente(
+            tenant_id=tenant_id,
             nombre=pedido_data.cliente_nombre,
             apellido=pedido_data.cliente_apellido,
             email=pedido_data.cliente_email,
@@ -478,20 +590,23 @@ def crear_pedido_frontend(pedido_data: PedidoCreateFrontend, db: Session = Depen
         cliente.direccion = pedido_data.direccion_entrega
         cliente.comuna = pedido_data.comuna
     
-    # 3. Validar productos y calcular total
+    # 3. Validar productos y calcular total (en el tenant correspondiente)
     items_a_crear = []
     monto_total = 0.0
     
     for item_data in pedido_data.items:
-        # Buscar producto por SKU
-        producto = db.query(Producto).filter(Producto.sku == item_data.sku).first()
+        # Buscar producto por SKU en el tenant
+        producto = db.query(Producto).filter(
+            Producto.sku == item_data.sku,
+            Producto.tenant_id == tenant_id
+        ).first()
         if not producto:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Producto con SKU {item_data.sku} no encontrado"
             )
         
-        # Obtener precio del producto para el local WEB
+        # Obtener precio del producto para el local WEB del tenant
         from database.models import Precio
         precio = db.query(Precio).filter(
             Precio.producto_id == producto.id,
@@ -501,7 +616,7 @@ def crear_pedido_frontend(pedido_data: PedidoCreateFrontend, db: Session = Depen
         if not precio:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Producto {producto.nombre} no tiene precio configurado"
+                detail=f"Producto {producto.nombre} no tiene precio configurado en {tenant.nombre}"
             )
         
         # Preparar item
@@ -511,7 +626,11 @@ def crear_pedido_frontend(pedido_data: PedidoCreateFrontend, db: Session = Depen
             'precio_unitario_venta': precio.monto_precio
         })
         
-        monto_total += precio.monto_precio * item_data.cantidad
+        # Redondear subtotal individual para evitar centavos
+        subtotal = round(precio.monto_precio * item_data.cantidad)
+        monto_total += subtotal
+    
+    # El total ya está redondeado gracias a la suma de subtotales redondeados
     
     # 3.5. Procesar uso de puntos si se especificó
     descuento_puntos = 0.0
@@ -539,13 +658,27 @@ def crear_pedido_frontend(pedido_data: PedidoCreateFrontend, db: Session = Depen
         if monto_total < 0:
             monto_total = 0
     
-    # 4. Crear pedido
+    # 4. Generar numero_pedido único para el tenant
+    numero_pedido = obtener_siguiente_numero_pedido(db, tenant_id)
+    
+    # 4.5. Obtener estado PENDIENTE
+    from database.models import EstadoPedido as EstadoPedidoModel
+    estado_pendiente = db.query(EstadoPedidoModel).filter(EstadoPedidoModel.codigo == 'PENDIENTE').first()
+    if not estado_pendiente:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Estado PENDIENTE no configurado en el sistema"
+        )
+    
+    # 5. Crear pedido
     db_pedido = Pedido(
+        tenant_id=tenant_id,
+        numero_pedido=numero_pedido,
         cliente_id=cliente.id,
         local_id=local_web.id,
         medio_pago_id=medio_pago.id if medio_pago else None,
         monto_total=monto_total,
-        estado="PENDIENTE",
+        estado_id=estado_pendiente.id,
         es_pagado=False,
         notas=pedido_data.notas,
         puntos_usados=puntos_usar,
@@ -586,9 +719,9 @@ def crear_pedido_frontend(pedido_data: PedidoCreateFrontend, db: Session = Depen
     # 6. Retornar confirmación
     return PedidoConfirmacion(
         pedido_id=db_pedido.id,
-        numero_pedido=f"PED-{db_pedido.id:05d}",
+        numero_pedido=db_pedido.numero_pedido,
         monto_total=monto_total,
-        estado=db_pedido.estado,
+        estado=db_pedido.estado_pedido.codigo if db_pedido.estado_pedido else 'PENDIENTE',
         mensaje="¡Pedido recibido! Te contactaremos pronto para coordinar el pago y entrega.",
         puntos_ganados=puntos_ganados,
         puntos_usados=puntos_usar,
@@ -606,24 +739,24 @@ def crear_pedido_backoffice(
     Crea un nuevo pedido desde el backoffice.
     
     **Flujo:**
-    1. Valida que el cliente, local y medio de pago existan
-    2. Valida que todos los productos existan
+    1. Valida que el cliente, local y medio de pago existan y pertenezcan al tenant
+    2. Valida que todos los productos existan y pertenezcan al tenant
     3. Crea el pedido con estado PENDIENTE
     4. Crea los items del pedido con los precios especificados
     5. Calcula el monto total
     
     **Uso:** Backoffice - Crear pedido manual
     """
-    # 1. Validar que el cliente exista
-    cliente = db.query(Cliente).filter(Cliente.id == pedido_data.cliente_id).first()
+    # 1. Validar que el cliente exista y pertenezca al tenant
+    cliente = db.query(Cliente).filter(Cliente.id == pedido_data.cliente_id, Cliente.tenant_id == current_user.tenant_id).first()
     if not cliente:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Cliente con ID {pedido_data.cliente_id} no encontrado"
         )
     
-    # 2. Validar que el local exista
-    local = db.query(Local).filter(Local.id == pedido_data.local_id).first()
+    # 2. Validar que el local exista y pertenezca al tenant
+    local = db.query(Local).filter(Local.id == pedido_data.local_id, Local.tenant_id == current_user.tenant_id).first()
     if not local:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -666,7 +799,11 @@ def crear_pedido_backoffice(
             'precio_unitario_venta': item_data.precio_unitario_venta
         })
         
-        monto_total += item_data.precio_unitario_venta * item_data.cantidad
+        # Redondear subtotal individual para evitar centavos
+        subtotal = round(item_data.precio_unitario_venta * item_data.cantidad)
+        monto_total += subtotal
+    
+    # El total ya está redondeado gracias a la suma de subtotales redondeados
     
     # 4.3. Procesar uso de puntos si se especificó
     descuento_puntos = 0.0
@@ -705,13 +842,30 @@ def crear_pedido_backoffice(
                 detail=mensaje
             )
     
-    # 5. Crear pedido
+    # 5. Generar numero_pedido único para el tenant
+    numero_pedido = obtener_siguiente_numero_pedido(db, current_user.tenant_id)
+    
+    # 5.5. Obtener estado PENDIENTE
+    from database.models import EstadoPedido as EstadoPedidoModel
+    estado_pendiente = db.query(EstadoPedidoModel).filter(EstadoPedidoModel.codigo == 'PENDIENTE').first()
+    if not estado_pendiente:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Estado PENDIENTE no configurado en el sistema"
+        )
+    
+    # 6. Crear pedido
     db_pedido = Pedido(
+        tenant_id=current_user.tenant_id,
+        numero_pedido=numero_pedido,
         cliente_id=cliente.id,
         local_id=local.id,
         medio_pago_id=medio_pago.id,
+        tipo_pedido_id=pedido_data.tipo_pedido_id,
+        tipo_documento_tributario_id=pedido_data.tipo_documento_tributario_id,
+        usuario_id=current_user.id,  # Usuario que creó el pedido
         monto_total=monto_total,
-        estado="PENDIENTE",
+        estado_id=estado_pendiente.id,
         es_pagado=False,
         notas=pedido_data.notas,
         puntos_usados=puntos_usar,
@@ -720,7 +874,7 @@ def crear_pedido_backoffice(
     db.add(db_pedido)
     db.flush()  # Para obtener el ID
     
-    # 6. Crear items del pedido PRIMERO
+    # 7. Crear items del pedido PRIMERO
     for item_info in items_a_crear:
         item = ItemPedido(
             pedido_id=db_pedido.id,
@@ -728,32 +882,252 @@ def crear_pedido_backoffice(
         )
         db.add(item)
     
-    # 6.5. DESPUÉS calcular puntos que se ganarían (ahora que los items existen)
+    # 7.5. Hacer flush y refresh para cargar relaciones
+    db.flush()
+    db.refresh(db_pedido)
+    
+    # 7.6. DESPUÉS calcular puntos que se ganarían (ahora que los items existen)
     puntos_ganados = PuntosService.calcular_puntos_por_pedido(db, db_pedido.id)
     db_pedido.puntos_ganados = puntos_ganados
     
-    # NOTA: Los puntos NO se usan aquí, solo cuando se confirma el pedido
-    # Esto garantiza que los pedidos PENDIENTE no descuenten puntos del cliente
-    # Los puntos se usarán en el endpoint de actualizar_estado_pedido cuando estado = 'CONFIRMADO'
+    # 🥩 LÓGICA DE ASIGNACIÓN INMEDIATA PARA CAJAS VARIABLES
+    # Para pedidos tipo CAJAS_VARIABLES, asignamos lotes específicos inmediatamente
+    # (no esperamos a confirmación) para bloquear inventario y calcular precio real
+    if pedido_data.tipo_pedido_id == 2:  # CAJAS_VARIABLES
+        from database.models import MovimientoStockCajas, Lote, Enrolamiento, PrecioProveedor
+        from decimal import Decimal
+        
+        nuevo_monto_total = Decimal('0')
+        
+        # Asignar lotes para cada item del pedido
+        for item in db_pedido.items:
+            # Buscar lotes disponibles (FIFO por fecha de vencimiento)
+            lotes_query = db.query(
+                Lote.id,
+                Lote.codigo_lote,
+                Lote.peso_actual,
+                Lote.fecha_vencimiento,
+                Lote.lote_proveedor,
+                Lote.producto_id,
+                PrecioProveedor.precio_kg,
+                Enrolamiento.proveedor_id
+            ).join(
+                Enrolamiento, Lote.enrolamiento_id == Enrolamiento.id
+            ).outerjoin(
+                PrecioProveedor, and_(
+                    PrecioProveedor.producto_id == Lote.producto_id,
+                    PrecioProveedor.proveedor_id == Enrolamiento.proveedor_id,
+                    PrecioProveedor.activo == True
+                )
+            ).filter(
+                Lote.producto_id == item.producto_id,
+                Lote.disponible_venta == True,
+                Lote.vendido == False
+            ).order_by(
+                Lote.fecha_vencimiento.asc()  # FIFO - primero en vencer
+            ).limit(item.cantidad)
+            
+            lotes_disponibles = lotes_query.all()
+            
+            # Validar que hay suficientes lotes
+            if len(lotes_disponibles) < item.cantidad:
+                db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"No hay suficientes lotes disponibles de {item.producto.nombre}. Requerido: {item.cantidad}, disponible: {len(lotes_disponibles)}"
+                )
+            
+            # Calcular precio real basado en peso de lotes específicos
+            precio_total_item = Decimal('0')
+            peso_total_item = Decimal('0')
+            
+            for lote in lotes_disponibles:
+                # Marcar lote como NO disponible para venta (reservado)
+                lote_obj = db.query(Lote).filter(Lote.id == lote.id).first()
+                lote_obj.disponible_venta = False  # Bloquear para otros pedidos
+                # NOTA: vendido=False todavía (se marca True al confirmar)
+                
+                # Calcular precio de este lote específico
+                precio_por_kg = Decimal(str(lote.precio_kg)) if lote.precio_kg else Decimal('0')
+                peso_lote = Decimal(str(lote.peso_actual))
+                precio_lote = peso_lote * precio_por_kg
+                
+                precio_total_item += precio_lote
+                peso_total_item += peso_lote
+                
+                # Registrar movimiento informativo (no afecta stock aún)
+                movimiento_cajas = MovimientoStockCajas(
+                    producto_id=item.producto_id,
+                    proveedor_id=lote.proveedor_id,
+                    tipo_movimiento="RESERVA_LOTE",
+                    cajas_movimiento=1,
+                    peso_total_kg=float(peso_lote),
+                    descripcion=f"Reserva lote {lote.codigo_lote} para pedido #{db_pedido.id}",
+                    referencia_tipo="PEDIDO",
+                    referencia_id=db_pedido.id,
+                    lote_codigo=lote.codigo_lote,
+                    usuario=current_user.email
+                )
+                db.add(movimiento_cajas)
+            
+            # **ACTUALIZAR: Reducir stock de cajas disponibles**
+            # Obtener proveedor del primer lote (todos deberían ser del mismo)
+            proveedor_id = lotes_disponibles[0].proveedor_id
+            
+            from database.models import StockCajasProveedor
+            stock_cajas = db.query(StockCajasProveedor).filter(
+                StockCajasProveedor.producto_id == item.producto_id,
+                StockCajasProveedor.proveedor_id == proveedor_id
+            ).first()
+            
+            if stock_cajas:
+                # Reducir el stock de cajas disponibles (reservadas)
+                stock_cajas.cajas_disponibles -= item.cantidad
+                print(f"📦 Stock actualizado: {stock_cajas.cajas_disponibles} cajas disponibles de {item.producto.nombre}")
+            
+            # Actualizar precio unitario del item con precio real
+            item.precio_unitario = precio_total_item / Decimal(str(item.cantidad))
+            nuevo_monto_total += precio_total_item
+        
+        # Actualizar monto total del pedido con precio real
+        monto_total = nuevo_monto_total  # Variable local para retorno
+        db_pedido.monto_total = nuevo_monto_total
+        
+        print(f"✅ Pedido CAJAS_VARIABLES #{db_pedido.id}: Lotes asignados. Precio real: ${nuevo_monto_total}")
+    
+    # 🏪 LÓGICA DE AUTO-CONFIRMACIÓN PARA PEDIDOS DE TIENDA (POS)
+    # Si el pedido es de un local físico (no WEB) y no es CAJAS_VARIABLES,
+    # se confirma y entrega automáticamente (flujo directo de venta en mostrador)
+    
+    # Verificar tipo de pedido (ahora la relación está cargada)
+    tipo_codigo = db_pedido.tipo_pedido.codigo if db_pedido.tipo_pedido else None
+    
+    es_pedido_pos_directo = (
+        local.codigo != 'WEB' and 
+        tipo_codigo == 'PRODUCTOS'  # Solo productos regulares, no cajas variables
+    )
+    
+    estado_final_id = estado_pendiente.id
+    mensaje_final = f"Pedido creado exitosamente con medio de pago: {medio_pago.nombre}"
+    
+    if es_pedido_pos_directo:
+        # 🎯 PEDIDO POS: Confirmar y entregar automáticamente
+        estado_confirmado = db.query(EstadoPedidoModel).filter(EstadoPedidoModel.codigo == 'CONFIRMADO').first()
+        estado_entregado = db.query(EstadoPedidoModel).filter(EstadoPedidoModel.codigo == 'ENTREGADO').first()
+        
+        if not estado_confirmado or not estado_entregado:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Estados CONFIRMADO/ENTREGADO no configurados"
+            )
+        
+        # Asignar local de despacho (mismo local donde se creó)
+        db_pedido.local_despacho_id = local.id
+        
+        # Validar que haya caja abierta
+        turno_abierto = db.query(TurnoCaja).filter(
+            and_(
+                TurnoCaja.local_id == local.id,
+                TurnoCaja.estado == EstadoTurnoCaja.ABIERTO
+            )
+        ).first()
+        
+        if not turno_abierto:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"No hay caja abierta en el local '{local.nombre}'. Debe abrir un turno de caja antes de crear pedidos."
+            )
+        
+        # Descontar inventario
+        descontar_inventario(db_pedido, local.id, db)
+        
+        # Usar puntos si aplica
+        if puntos_usar > 0:
+            from decimal import Decimal
+            exito, mensaje_puntos, movimiento = PuntosService.usar_puntos_en_pedido(
+                db, cliente.id, db_pedido.id, puntos_usar, Decimal(str(descuento_puntos))
+            )
+            if not exito:
+                db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Error al usar puntos: {mensaje_puntos}"
+                )
+        
+        # Otorgar puntos ganados
+        if puntos_ganados > 0:
+            PuntosService.otorgar_puntos_por_pedido(
+                db, cliente.id, db_pedido.id, puntos_ganados,
+                f"Puntos ganados por compra directa en {local.nombre}"
+            )
+        
+        # Registrar venta en caja
+        registrar_venta_en_caja(db_pedido, current_user.id, db)
+        
+        # Marcar como ENTREGADO (saltea EN_PREPARACION)
+        db_pedido.estado_id = estado_entregado.id
+        estado_final_id = estado_entregado.id
+        
+        # Marcar como pagado según medio de pago
+        if medio_pago.permite_cheque:
+            db_pedido.es_pagado = False
+            mensaje_final = f"Pedido creado y entregado. Pendiente de pago con cheque."
+        else:
+            db_pedido.es_pagado = True
+            mensaje_final = f"Pedido creado, entregado y pagado con {medio_pago.nombre}"
+    
+    # NOTA: Para pedidos WEB o CAJAS_VARIABLES, quedan en PENDIENTE
+    # Los puntos NO se usan aquí, solo cuando se confirma manualmente
     
     db.commit()
     db.refresh(db_pedido)
     
-    # 6.5. Ocupar crédito si el medio de pago permite cheques
-    if medio_pago.permite_cheque:
+    # 7.5. Ocupar crédito si el medio de pago permite cheques
+    if medio_pago.permite_cheque and not es_pedido_pos_directo:
         CreditoService.ocupar_credito(cliente.id, monto_total, db)
     
-    # 7. Retornar respuesta
+    # 8. Retornar respuesta
     return {
         "pedido_id": db_pedido.id,
-        "numero_pedido": f"PED-{db_pedido.id:05d}",
+        "numero_pedido": db_pedido.numero_pedido,
         "monto_total": monto_total,
-        "estado": db_pedido.estado,
-        "mensaje": f"Pedido creado exitosamente con medio de pago: {medio_pago.nombre}",
+        "estado": db_pedido.estado_pedido.codigo if db_pedido.estado_pedido else 'PENDIENTE',
+        "mensaje": mensaje_final,
         "puntos_ganados": puntos_ganados,
         "puntos_usados": puntos_usar,
-        "descuento_puntos": descuento_puntos
+        "descuento_puntos": descuento_puntos,
+        "auto_confirmado": es_pedido_pos_directo  # Indicador de confirmación automática
     }
+
+
+@router.get("/estados", response_model=List[dict])
+def obtener_estados_pedido(db: Session = Depends(get_db)):
+    """
+    Obtiene la lista de todos los estados de pedido configurados.
+    
+    **Retorna:**
+    - Lista de estados con sus propiedades (codigo, nombre, color, orden, es_final)
+    
+    **Uso:** Frontend (Landing/Backoffice) - Filtros dinámicos, badges, selectores
+    """
+    from database.models import EstadoPedido as EstadoPedidoModel
+    
+    estados = db.query(EstadoPedidoModel).filter(
+        EstadoPedidoModel.activo == True
+    ).order_by(EstadoPedidoModel.orden).all()
+    
+    return [
+        {
+            "id": estado.id,
+            "codigo": estado.codigo,
+            "nombre": estado.nombre,
+            "descripcion": estado.descripcion,
+            "color": estado.color,
+            "orden": estado.orden,
+            "es_final": estado.es_final
+        }
+        for estado in estados
+    ]
 
 
 @router.get("/", response_model=List[PedidoConRelaciones])
@@ -765,41 +1139,61 @@ def listar_pedidos(
     current_user = Depends(get_current_active_user)
 ):
     """
-    Lista todos los pedidos con filtros opcionales.
+    Lista todos los pedidos del tenant con filtros opcionales.
     
     **Uso:** Backoffice - Tabla de pedidos
     """
     from sqlalchemy.orm import joinedload
+    from database.models import EstadoPedido as EstadoPedidoModel, Despacho
     
-    query = db.query(Pedido).options(
+    # Filtrar por tenant mediante join con Cliente
+    query = db.query(Pedido).join(Cliente).filter(
+        Cliente.tenant_id == current_user.tenant_id
+    ).options(
         joinedload(Pedido.cliente),
         joinedload(Pedido.items),
         joinedload(Pedido.medio_pago),
         joinedload(Pedido.tipo_pedido),
-        joinedload(Pedido.tipo_documento_tributario)
+        joinedload(Pedido.tipo_documento_tributario),
+        joinedload(Pedido.usuario),
+        joinedload(Pedido.estado_pedido)  # Cargar relación de estado
     )
     
     if estado:
-        query = query.filter(Pedido.estado == estado)
+        # Filtrar por código de estado
+        query = query.join(EstadoPedidoModel, Pedido.estado_id == EstadoPedidoModel.id).filter(
+            EstadoPedidoModel.codigo == estado
+        )
     
     pedidos = query.order_by(Pedido.fecha_pedido.desc()).offset(skip).limit(limit).all()
     
     # Mapear a schema de respuesta
     result = []
     for pedido in pedidos:
+        # Verificar si el pedido tiene despacho asignado
+        despacho = db.query(Despacho).filter(Despacho.pedido_id == pedido.id).first()
+        
         pedido_dict = {
             'id': pedido.id,
             'cliente_id': pedido.cliente_id,
+            'cliente_nombre': pedido.cliente.nombre if pedido.cliente else None,  # Para frontend
             'local_id': pedido.local_id,
             'local_despacho_id': pedido.local_despacho_id,
-            'numero_pedido': f"PED-{pedido.id:05d}",
+            'numero_pedido': pedido.numero_pedido,
             'fecha_pedido': pedido.fecha_pedido,
             'total': pedido.monto_total,
-            'estado': pedido.estado,
+            'monto_total': pedido.monto_total,  # Alias para compatibilidad
+            'estado': pedido.estado_pedido.codigo if pedido.estado_pedido else None,
             'pagado': pedido.es_pagado,
             'inventario_descontado': pedido.inventario_descontado,
             'notas': pedido.notas,
             'notas_admin': pedido.notas_admin,
+            # Información del despacho (NUEVO)
+            'despacho': {
+                'id': despacho.id,
+                'estado': despacho.estado_despacho.value if despacho.estado_despacho else None,
+                'fecha_asignacion': despacho.fecha_asignacion
+            } if despacho else None,
             # Información del medio de pago
             'medio_pago_id': pedido.medio_pago_id,
             'medio_pago_codigo': pedido.medio_pago.codigo if pedido.medio_pago else None,
@@ -823,8 +1217,32 @@ def listar_pedidos(
             'puntos_ganados': pedido.puntos_ganados,
             'puntos_usados': pedido.puntos_usados,
             'descuento_puntos': float(pedido.descuento_puntos) if pedido.descuento_puntos else None,
-            'cliente': pedido.cliente,
-            'items': pedido.items
+            # Información del usuario que creó el pedido
+            'usuario_id': pedido.usuario_id,
+            'usuario_nombre': pedido.usuario.nombre_completo if pedido.usuario else None,
+            'usuario_email': pedido.usuario.email if pedido.usuario else None,
+            # Serializar cliente correctamente
+            'cliente': {
+                'id': pedido.cliente.id,
+                'nombre': pedido.cliente.nombre,
+                'email': pedido.cliente.email,
+                'telefono': pedido.cliente.telefono,
+                'rut': pedido.cliente.rut,
+                'direccion': pedido.cliente.direccion,
+                'comuna': pedido.cliente.comuna,
+                'limite_credito': float(pedido.cliente.limite_credito) if pedido.cliente.limite_credito else 0,
+                'credito_usado': float(pedido.cliente.credito_usado) if pedido.cliente.credito_usado else 0
+            } if pedido.cliente else None,
+            # Serializar items correctamente
+            'items': [{
+                'id': item.id,
+                'pedido_id': item.pedido_id,
+                'producto_id': item.producto_id,
+                'producto_nombre': item.producto.nombre if item.producto else None,
+                'cantidad': item.cantidad,
+                'precio_unitario_venta': float(item.precio_unitario_venta) if item.precio_unitario_venta else 0,
+                'subtotal': float(item.cantidad * item.precio_unitario_venta) if item.cantidad and item.precio_unitario_venta else 0
+            } for item in pedido.items] if pedido.items else []
         }
         result.append(pedido_dict)
     
@@ -834,11 +1252,15 @@ def listar_pedidos(
 @router.get("/{pedido_id}", response_model=PedidoConRelaciones)
 def obtener_pedido(pedido_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
     """
-    Obtiene un pedido por ID.
+    Obtiene un pedido por ID del tenant.
     
     **Uso:** Backoffice - Detalle de pedido
     """
-    pedido = db.query(Pedido).filter(Pedido.id == pedido_id).first()
+    # Filtrar por tenant mediante join con Cliente
+    pedido = db.query(Pedido).join(Cliente).filter(
+        Pedido.id == pedido_id,
+        Cliente.tenant_id == current_user.tenant_id
+    ).first()
     if not pedido:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -852,10 +1274,10 @@ def obtener_pedido(pedido_id: int, db: Session = Depends(get_db), current_user =
         'local_id': pedido.local_id,
         'local_despacho_id': pedido.local_despacho_id,
         'tipo_pedido_id': pedido.tipo_pedido_id,
-        'numero_pedido': f"PED-{pedido.id:05d}",
+        'numero_pedido': pedido.numero_pedido,
         'fecha_pedido': pedido.fecha_pedido,
         'total': pedido.monto_total,
-        'estado': pedido.estado,
+        'estado': pedido.estado_pedido.codigo if pedido.estado_pedido else None,
         'pagado': pedido.es_pagado,
         'inventario_descontado': pedido.inventario_descontado,
         'notas': pedido.notas,
@@ -872,6 +1294,10 @@ def obtener_pedido(pedido_id: int, db: Session = Depends(get_db), current_user =
         'puntos_ganados': pedido.puntos_ganados,
         'puntos_usados': pedido.puntos_usados,
         'descuento_puntos': float(pedido.descuento_puntos) if pedido.descuento_puntos else None,
+        # Información del usuario que creó el pedido
+        'usuario_id': pedido.usuario_id,
+        'usuario_nombre': pedido.usuario.nombre_completo if pedido.usuario else None,
+        'usuario_email': pedido.usuario.email if pedido.usuario else None,
         'cliente': pedido.cliente,
         'items': pedido.items
     }
@@ -885,7 +1311,7 @@ def actualizar_pedido(
     current_user = Depends(get_current_active_user)
 ):
     """
-    Actualiza el estado de un pedido y gestiona el inventario.
+    Actualiza el estado de un pedido del tenant y gestiona el inventario.
     
     **Lógica de inventario:**
     - Si cambia a CONFIRMADO y se proporciona local_despacho_id → Descuenta inventario
@@ -893,14 +1319,34 @@ def actualizar_pedido(
     
     **Uso:** Backoffice - Cambiar estado del pedido
     """
-    pedido = db.query(Pedido).filter(Pedido.id == pedido_id).first()
+    # Cargar estados desde BD para trabajar con IDs
+    from database.models import EstadoPedido as EstadoPedidoModel
+    estados_dict = {}
+    estados_bd = db.query(EstadoPedidoModel).all()
+    for est in estados_bd:
+        estados_dict[est.codigo] = est.id
+    
+    # Obtener IDs de estados clave
+    ID_PENDIENTE = estados_dict.get('PENDIENTE')
+    ID_CONFIRMADO = estados_dict.get('CONFIRMADO')
+    ID_EN_PREPARACION = estados_dict.get('EN_PREPARACION')
+    ID_ENTREGADO = estados_dict.get('ENTREGADO')
+    ID_CANCELADO = estados_dict.get('CANCELADO')
+    
+    # Filtrar por tenant mediante join con Cliente
+    pedido = db.query(Pedido).join(Cliente).filter(
+        Pedido.id == pedido_id,
+        Cliente.tenant_id == current_user.tenant_id
+    ).first()
     if not pedido:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Pedido con ID {pedido_id} no encontrado"
         )
     
-    estado_anterior = pedido.estado
+    estado_anterior_id = pedido.estado_id
+    estado_anterior_obj = db.query(EstadoPedidoModel).filter(EstadoPedidoModel.id == estado_anterior_id).first()
+    estado_anterior_codigo = estado_anterior_obj.codigo if estado_anterior_obj else None
     
     # Actualizar campos básicos
     if pedido_update.pagado is not None:
@@ -908,12 +1354,31 @@ def actualizar_pedido(
     if pedido_update.notas_admin is not None:
         pedido.notas_admin = pedido_update.notas_admin
     
+    # Actualizar medio de pago (permite asignar cuando estaba NULL)
+    if pedido_update.medio_pago_id is not None:
+        # Verificar que el medio de pago exista
+        from database.models import MedioPago
+        medio_pago = db.query(MedioPago).filter(MedioPago.id == pedido_update.medio_pago_id).first()
+        if not medio_pago:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Medio de pago con ID {pedido_update.medio_pago_id} no encontrado"
+            )
+        pedido.medio_pago_id = pedido_update.medio_pago_id
+    
     # Gestión de inventario según cambio de estado
     if pedido_update.estado:
-        nuevo_estado = pedido_update.estado.value
+        nuevo_estado_codigo = pedido_update.estado.value
+        nuevo_estado_id = estados_dict.get(nuevo_estado_codigo)
+        
+        if not nuevo_estado_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Estado '{nuevo_estado_codigo}' no válido"
+            )
         
         # Si cambia a CONFIRMADO
-        if nuevo_estado == "CONFIRMADO" and estado_anterior != "CONFIRMADO":
+        if nuevo_estado_id == ID_CONFIRMADO and estado_anterior_id != ID_CONFIRMADO:
             # Auto-asignar local de despacho basado en el tipo de pedido
             local_despacho_final = pedido_update.local_despacho_id
             
@@ -933,12 +1398,22 @@ def actualizar_pedido(
                     detail="Debe seleccionar un local de despacho para confirmar el pedido"
                 )
             
-            # Verificar que haya un turno de caja abierto en el local de despacho
-            # EXCEPCIÓN: El local WEB (Tienda Online) no requiere caja abierta
+            # Verificar que haya un turno de caja abierto SOLO para pedidos POS directos
+            # EXCEPCIÓN 1: El local WEB (Tienda Online) no requiere caja abierta
+            # EXCEPCIÓN 2: Pedidos creados desde Backoffice/Web (local_id = WEB) no requieren caja
             local_despacho_obj = db.query(Local).filter(Local.id == local_despacho_final).first()
+            local_origen_obj = db.query(Local).filter(Local.id == pedido.local_id).first()
             
-            # Solo validar caja abierta para locales físicos (no para tienda online)
-            if local_despacho_obj and local_despacho_obj.codigo != 'WEB':
+            # Solo validar caja abierta si:
+            # 1. El local de DESPACHO es físico (no WEB)
+            # 2. Y el local ORIGEN también es físico (no WEB)
+            # Esto excluye pedidos web/backoffice que se confirman posteriormente
+            es_pedido_pos_directo = (
+                local_despacho_obj and local_despacho_obj.codigo != 'WEB' and
+                local_origen_obj and local_origen_obj.codigo != 'WEB'
+            )
+            
+            if es_pedido_pos_directo:
                 turno_abierto = db.query(TurnoCaja).filter(
                     and_(
                         TurnoCaja.local_id == local_despacho_final,
@@ -986,14 +1461,64 @@ def actualizar_pedido(
             
             # Registrar venta en caja si hay turno activo del vendedor
             registrar_venta_en_caja(pedido, current_user.id, db)
+            
+            # 🏪 LÓGICA DE FLUJO SEGÚN ORIGEN/TIPO DEL PEDIDO
+            # - WEB: Flujo normal (PENDIENTE → CONFIRMADO → EN_PREPARACION → ENTREGADO)
+            # - CAJAS: Flujo normal (PENDIENTE → CONFIRMADO → EN_PREPARACION → ENTREGADO)
+            # - POS/Tienda (productos regulares): Flujo directo (CONFIRMADO + ENTREGADO automático)
+            
+            # Obtener el local original del pedido para identificar origen
+            local_origen = db.query(Local).filter(Local.id == pedido.local_id).first()
+            
+            # Aplicar flujo directo SOLO si:
+            # 1. NO es pedido WEB (local.codigo != 'WEB')
+            # 2. NO es pedido de CAJAS_VARIABLES (debe seguir flujo normal de preparación)
+            es_pedido_pos_directo = (
+                local_origen and 
+                local_origen.codigo != 'WEB' and 
+                pedido.tipo_pedido and 
+                pedido.tipo_pedido.codigo != 'CAJAS_VARIABLES'
+            )
+            
+            if es_pedido_pos_directo:
+                # Es un pedido POS de venta directa (productos regulares en tienda física)
+                # Marcar como ENTREGADO automáticamente (se saltea EN_PREPARACION)
+                nuevo_estado_id = ID_ENTREGADO  # Cambiar el estado final
+                
+                # Marcar como pagado automáticamente según medio de pago
+                if pedido.medio_pago:
+                    if pedido.medio_pago.permite_cheque:
+                        # Si es cheque, NO marcar como pagado (se paga después al cobrar)
+                        pedido.es_pagado = False
+                    else:
+                        # Para efectivo, tarjeta, etc: marcar como pagado
+                        pedido.es_pagado = True
+                else:
+                    # Si no tiene medio de pago definido, asumir pagado
+                    pedido.es_pagado = True
         
         # Si cambia a CANCELADO
-        elif nuevo_estado == "CANCELADO" and estado_anterior != "CANCELADO":
+        elif nuevo_estado_id == ID_CANCELADO and estado_anterior_id != ID_CANCELADO:
+            # 🚫 VALIDACIÓN: No se puede cancelar pedidos en preparación o ya entregados
+            if estado_anterior_id == ID_EN_PREPARACION:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No se puede cancelar un pedido que ya está en preparación. Para cancelar, debe revertir primero a CONFIRMADO."
+                )
+            
+            if estado_anterior_id == ID_ENTREGADO:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No se puede cancelar un pedido que ya fue entregado. Los pedidos entregados son definitivos."
+                )
+            
             # Devolver inventario si había sido descontado
             devolver_inventario(pedido, db)
             
-            # Devolver puntos ganados si habían sido otorgados y el pedido estaba confirmado
-            if estado_anterior == "CONFIRMADO" and pedido.puntos_ganados and pedido.puntos_ganados > 0:
+            # Devolver puntos ganados si habían sido otorgados y el pedido estaba confirmado/entregado
+            # Estados que implican confirmación: CONFIRMADO, EN_PREPARACION, ENTREGADO
+            estados_confirmados_ids = [ID_CONFIRMADO, ID_EN_PREPARACION, ID_ENTREGADO]
+            if estado_anterior_id in estados_confirmados_ids and pedido.puntos_ganados and pedido.puntos_ganados > 0:
                 # Crear movimiento de ajuste para devolver puntos ganados
                 from database.models import MovimientoPuntos, TipoMovimientoPuntos
                 from datetime import datetime
@@ -1022,8 +1547,8 @@ def actualizar_pedido(
                 if puntos_cliente.puntos_totales_ganados < 0:
                     puntos_cliente.puntos_totales_ganados = 0
             
-            # Devolver puntos usados si habían sido usados y el pedido estaba confirmado
-            if estado_anterior == "CONFIRMADO" and pedido.puntos_usados and pedido.puntos_usados > 0:
+            # Devolver puntos usados si habían sido usados y el pedido estaba confirmado/entregado
+            if estado_anterior_id in estados_confirmados_ids and pedido.puntos_usados and pedido.puntos_usados > 0:
                 from database.models import MovimientoPuntos, TipoMovimientoPuntos
                 from datetime import datetime
                 
@@ -1049,10 +1574,10 @@ def actualizar_pedido(
                 if puntos_cliente.puntos_totales_usados < 0:
                     puntos_cliente.puntos_totales_usados = 0
         
-        pedido.estado = nuevo_estado
+        pedido.estado_id = nuevo_estado_id
     
     # Si solo se actualiza el local de despacho sin cambiar estado (caso raro pero posible)
-    elif pedido_update.local_despacho_id and pedido.estado == "CONFIRMADO" and not pedido.inventario_descontado:
+    elif pedido_update.local_despacho_id and pedido.estado_id == ID_CONFIRMADO and not pedido.inventario_descontado:
         descontar_inventario(pedido, pedido_update.local_despacho_id, db)
     
     # Actualizar local de despacho si se proporciona explícitamente (no auto-asignado)
@@ -1069,10 +1594,10 @@ def actualizar_pedido(
         'local_id': pedido.local_id,
         'local_despacho_id': pedido.local_despacho_id,
         'tipo_pedido_id': pedido.tipo_pedido_id,
-        'numero_pedido': f"PED-{pedido.id:05d}",
+        'numero_pedido': pedido.numero_pedido,
         'fecha_pedido': pedido.fecha_pedido,
         'total': pedido.monto_total,
-        'estado': pedido.estado,
+        'estado': pedido.estado_pedido.codigo if pedido.estado_pedido else None,
         'pagado': pedido.es_pagado,
         'inventario_descontado': pedido.inventario_descontado,
         'notas': pedido.notas,
@@ -1116,7 +1641,7 @@ def generar_boleta(
         pdf_buffer = generar_boleta_pedido(pedido)
         
         # Configurar nombre del archivo
-        numero_pedido = f"PED-{pedido.id:05d}"
+        numero_pedido = pedido.numero_pedido
         nombre_archivo = f"Boleta_{numero_pedido}.pdf"
         
         # Retornar como streaming response

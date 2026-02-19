@@ -43,14 +43,18 @@ def get_current_user_with_wms_access(current_user: User = Depends(get_current_ac
 # ============================================
 
 @router.get("/proveedores-carne", response_model=List[ProveedoresCarne])
-def listar_proveedores_carne(db: Session = Depends(get_db)):
+def listar_proveedores_carne(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
     """Listar solo los proveedores de tipo CARNES para enrolamiento."""
     return (
         db.query(ProveedorModel)
         .join(TipoProveedorModel)
         .filter(
             TipoProveedorModel.codigo == "CARNES",
-            ProveedorModel.activo == True
+            ProveedorModel.activo == True,
+            ProveedorModel.tenant_id == current_user.tenant_id
         )
         .all()
     )
@@ -71,6 +75,8 @@ def listar_enrolamientos(
     """Listar enrolamientos con filtros opcionales."""
     query = (
         db.query(EnrolamientoModel)
+        .join(ProveedorModel, EnrolamientoModel.proveedor_id == ProveedorModel.id)
+        .filter(ProveedorModel.tenant_id == current_user.tenant_id)
         .options(
             joinedload(EnrolamientoModel.tipo_vehiculo),
             joinedload(EnrolamientoModel.proveedor),
@@ -129,13 +135,17 @@ def obtener_enrolamiento(
     """Obtener un enrolamiento específico con todos sus detalles."""
     enrolamiento = (
         db.query(EnrolamientoModel)
+        .join(ProveedorModel, EnrolamientoModel.proveedor_id == ProveedorModel.id)
+        .filter(
+            EnrolamientoModel.id == enrolamiento_id,
+            ProveedorModel.tenant_id == current_user.tenant_id
+        )
         .options(
             joinedload(EnrolamientoModel.tipo_vehiculo),
             joinedload(EnrolamientoModel.proveedor),
             joinedload(EnrolamientoModel.estado),
             joinedload(EnrolamientoModel.usuario_registro)
         )
-        .filter(EnrolamientoModel.id == enrolamiento_id)
         .first()
     )
     
@@ -152,13 +162,14 @@ def crear_enrolamiento(
     current_user: User = Depends(get_current_user_with_wms_access)
 ):
     """Crear un nuevo enrolamiento de vehículo."""
-    # Verificar que el proveedor es de tipo CARNES
+    # Verificar que el proveedor es de tipo CARNES y pertenece al tenant
     proveedor = (
         db.query(ProveedorModel)
         .join(TipoProveedorModel)
         .filter(
             ProveedorModel.id == enrolamiento.proveedor_id,
-            TipoProveedorModel.codigo == "CARNES"
+            TipoProveedorModel.codigo == "CARNES",
+            ProveedorModel.tenant_id == current_user.tenant_id
         )
         .first()
     )
@@ -166,7 +177,7 @@ def crear_enrolamiento(
     if not proveedor:
         raise HTTPException(
             status_code=400,
-            detail="El proveedor debe ser de tipo CARNES para el enrolamiento"
+            detail="El proveedor debe ser de tipo CARNES y pertenecer a su organización"
         )
     
     # Crear el enrolamiento
@@ -199,7 +210,15 @@ def actualizar_enrolamiento(
     current_user: User = Depends(get_current_user_with_wms_access)
 ):
     """Actualizar un enrolamiento (cambio de estado, fecha término, etc)."""
-    db_enrolamiento = db.query(EnrolamientoModel).filter(EnrolamientoModel.id == enrolamiento_id).first()
+    db_enrolamiento = (
+        db.query(EnrolamientoModel)
+        .join(ProveedorModel, EnrolamientoModel.proveedor_id == ProveedorModel.id)
+        .filter(
+            EnrolamientoModel.id == enrolamiento_id,
+            ProveedorModel.tenant_id == current_user.tenant_id
+        )
+        .first()
+    )
     if not db_enrolamiento:
         raise HTTPException(status_code=404, detail="Enrolamiento no encontrado")
     
@@ -250,7 +269,15 @@ def eliminar_enrolamiento(
     current_user: User = Depends(get_current_user_with_wms_access)
 ):
     """Eliminar un enrolamiento (solo si no tiene lotes asociados)."""
-    db_enrolamiento = db.query(EnrolamientoModel).filter(EnrolamientoModel.id == enrolamiento_id).first()
+    db_enrolamiento = (
+        db.query(EnrolamientoModel)
+        .join(ProveedorModel, EnrolamientoModel.proveedor_id == ProveedorModel.id)
+        .filter(
+            EnrolamientoModel.id == enrolamiento_id,
+            ProveedorModel.tenant_id == current_user.tenant_id
+        )
+        .first()
+    )
     if not db_enrolamiento:
         raise HTTPException(status_code=404, detail="Enrolamiento no encontrado")
     
@@ -281,6 +308,8 @@ def listar_lotes(
     """Listar lotes con filtros opcionales."""
     query = (
         db.query(LoteModel)
+        .join(ProductoModel, LoteModel.producto_id == ProductoModel.id)
+        .filter(ProductoModel.tenant_id == current_user.tenant_id)
         .options(
             joinedload(LoteModel.producto),
             joinedload(LoteModel.ubicacion),
@@ -340,12 +369,16 @@ def obtener_lote(
     """Obtener un lote específico con todos sus detalles."""
     lote = (
         db.query(LoteModel)
+        .join(ProductoModel, LoteModel.producto_id == ProductoModel.id)
+        .filter(
+            LoteModel.id == lote_id,
+            ProductoModel.tenant_id == current_user.tenant_id
+        )
         .options(
             joinedload(LoteModel.producto),
             joinedload(LoteModel.ubicacion),
             joinedload(LoteModel.enrolamiento)
         )
-        .filter(LoteModel.id == lote_id)
         .first()
     )
     
@@ -362,18 +395,54 @@ def crear_lote(
     current_user: User = Depends(get_current_user_with_wms_access)
 ):
     """Crear un nuevo lote individual."""
-    # Verificar código único
-    existing_lote = db.query(LoteModel).filter(LoteModel.codigo_lote == lote.codigo_lote).first()
+    # Verificar código único dentro del tenant
+    existing_lote = (
+        db.query(LoteModel)
+        .join(ProductoModel, LoteModel.producto_id == ProductoModel.id)
+        .filter(
+            LoteModel.codigo_lote == lote.codigo_lote,
+            ProductoModel.tenant_id == current_user.tenant_id
+        )
+        .first()
+    )
     if existing_lote:
         raise HTTPException(status_code=400, detail="Ya existe un lote con este código")
     
-    # Verificar QR único
-    existing_qr = db.query(LoteModel).filter(LoteModel.qr_propio == lote.qr_propio).first()
+    # Verificar QR único dentro del tenant
+    existing_qr = (
+        db.query(LoteModel)
+        .join(ProductoModel, LoteModel.producto_id == ProductoModel.id)
+        .filter(
+            LoteModel.qr_propio == lote.qr_propio,
+            ProductoModel.tenant_id == current_user.tenant_id
+        )
+        .first()
+    )
     if existing_qr:
         raise HTTPException(status_code=400, detail="Ya existe un lote con este QR")
     
+    # Verificar que el producto pertenece al tenant
+    producto = (
+        db.query(ProductoModel)
+        .filter(
+            ProductoModel.id == lote.producto_id,
+            ProductoModel.tenant_id == current_user.tenant_id
+        )
+        .first()
+    )
+    if not producto:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+    
     # El lote se marca como disponible solo si el enrolamiento está FINALIZADO
-    enrolamiento = db.query(EnrolamientoModel).filter(EnrolamientoModel.id == lote.enrolamiento_id).first()
+    enrolamiento = (
+        db.query(EnrolamientoModel)
+        .join(ProveedorModel, EnrolamientoModel.proveedor_id == ProveedorModel.id)
+        .filter(
+            EnrolamientoModel.id == lote.enrolamiento_id,
+            ProveedorModel.tenant_id == current_user.tenant_id
+        )
+        .first()
+    )
     disponible_venta = False
     if enrolamiento and enrolamiento.estado.codigo == "FINALIZADO":
         disponible_venta = True
@@ -406,7 +475,15 @@ def actualizar_lote(
     current_user: User = Depends(get_current_user_with_wms_access)
 ):
     """Actualizar un lote (peso, ubicación, estado, etc)."""
-    db_lote = db.query(LoteModel).filter(LoteModel.id == lote_id).first()
+    db_lote = (
+        db.query(LoteModel)
+        .join(ProductoModel, LoteModel.producto_id == ProductoModel.id)
+        .filter(
+            LoteModel.id == lote_id,
+            ProductoModel.tenant_id == current_user.tenant_id
+        )
+        .first()
+    )
     if not db_lote:
         raise HTTPException(status_code=404, detail="Lote no encontrado")
     
@@ -440,7 +517,15 @@ def eliminar_lote(
     current_user: User = Depends(get_current_user_with_wms_access)
 ):
     """Eliminar un lote (solo si no está vendido)."""
-    db_lote = db.query(LoteModel).filter(LoteModel.id == lote_id).first()
+    db_lote = (
+        db.query(LoteModel)
+        .join(ProductoModel, LoteModel.producto_id == ProductoModel.id)
+        .filter(
+            LoteModel.id == lote_id,
+            ProductoModel.tenant_id == current_user.tenant_id
+        )
+        .first()
+    )
     if not db_lote:
         raise HTTPException(status_code=404, detail="Lote no encontrado")
     
@@ -473,12 +558,16 @@ def generar_etiqueta_pdf(
     # Obtener el lote con relaciones
     lote = (
         db.query(LoteModel)
+        .join(ProductoModel, LoteModel.producto_id == ProductoModel.id)
+        .filter(
+            LoteModel.id == lote_id,
+            ProductoModel.tenant_id == current_user.tenant_id
+        )
         .options(
             joinedload(LoteModel.producto),
             joinedload(LoteModel.ubicacion),
             joinedload(LoteModel.enrolamiento)
         )
-        .filter(LoteModel.id == lote_id)
         .first()
     )
     
@@ -565,12 +654,16 @@ def generar_etiquetas_multiples_pdf(
     # Obtener lotes
     lotes = (
         db.query(LoteModel)
+        .join(ProductoModel, LoteModel.producto_id == ProductoModel.id)
+        .filter(
+            LoteModel.id.in_(lote_ids),
+            ProductoModel.tenant_id == current_user.tenant_id
+        )
         .options(
             joinedload(LoteModel.producto),
             joinedload(LoteModel.ubicacion),
             joinedload(LoteModel.enrolamiento)
         )
-        .filter(LoteModel.id.in_(lote_ids))
         .all()
     )
     
@@ -673,34 +766,73 @@ def generar_etiquetas_multiples_pdf(
 # ============================================
 
 @router.get("/estadisticas", response_model=EstadisticasEnrolamiento)
-def obtener_estadisticas_enrolamiento(db: Session = Depends(get_db)):
+def obtener_estadisticas_enrolamiento(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
     """Obtener estadísticas generales del sistema de enrolamiento."""
     from database.models import EstadoEnrolamiento as EstadoEnrolamientoModel
     from sqlalchemy import func
     
-    total_enrolamientos = db.query(EnrolamientoModel).count()
+    # Total enrolamientos del tenant
+    total_enrolamientos = (
+        db.query(EnrolamientoModel)
+        .join(ProveedorModel, EnrolamientoModel.proveedor_id == ProveedorModel.id)
+        .filter(ProveedorModel.tenant_id == current_user.tenant_id)
+        .count()
+    )
     
-    # Contar por estado
+    # Contar por estado (solo del tenant)
     estados = (
         db.query(EstadoEnrolamientoModel.codigo, func.count(EnrolamientoModel.id))
         .outerjoin(EnrolamientoModel)
+        .outerjoin(ProveedorModel, EnrolamientoModel.proveedor_id == ProveedorModel.id)
+        .filter(
+            (ProveedorModel.tenant_id == current_user.tenant_id) | (EnrolamientoModel.id == None)
+        )
         .group_by(EstadoEnrolamientoModel.codigo)
         .all()
     )
     
     estados_dict = {estado: count for estado, count in estados}
     
-    # Estadísticas de lotes
-    total_lotes = db.query(LoteModel).count()
-    lotes_disponibles = db.query(LoteModel).filter(LoteModel.disponible_venta == True, LoteModel.vendido == False).count()
-    lotes_vendidos = db.query(LoteModel).filter(LoteModel.vendido == True).count()
+    # Estadísticas de lotes (solo del tenant)
+    total_lotes = (
+        db.query(LoteModel)
+        .join(ProductoModel, LoteModel.producto_id == ProductoModel.id)
+        .filter(ProductoModel.tenant_id == current_user.tenant_id)
+        .count()
+    )
+    lotes_disponibles = (
+        db.query(LoteModel)
+        .join(ProductoModel, LoteModel.producto_id == ProductoModel.id)
+        .filter(
+            LoteModel.disponible_venta == True,
+            LoteModel.vendido == False,
+            ProductoModel.tenant_id == current_user.tenant_id
+        )
+        .count()
+    )
+    lotes_vendidos = (
+        db.query(LoteModel)
+        .join(ProductoModel, LoteModel.producto_id == ProductoModel.id)
+        .filter(
+            LoteModel.vendido == True,
+            ProductoModel.tenant_id == current_user.tenant_id
+        )
+        .count()
+    )
     
-    # Cajas del mes actual
+    # Cajas del mes actual (solo del tenant)
     from datetime import datetime
     inicio_mes = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     cajas_por_mes = (
         db.query(LoteModel)
-        .filter(LoteModel.fecha_registro >= inicio_mes)
+        .join(ProductoModel, LoteModel.producto_id == ProductoModel.id)
+        .filter(
+            LoteModel.fecha_registro >= inicio_mes,
+            ProductoModel.tenant_id == current_user.tenant_id
+        )
         .count()
     )
     

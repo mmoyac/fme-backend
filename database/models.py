@@ -4,8 +4,94 @@ Modelos de la base de datos con SQLAlchemy ORM.
 from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, UniqueConstraint, Index, Text, Table, Numeric, Enum
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+from sqlalchemy.dialects.postgresql import JSON
 from .database import Base
 import enum
+
+
+# --------------------------------------------------
+# 0. MULTI-TENANT
+# --------------------------------------------------
+
+class Tenant(Base):
+    """
+    Tenants del sistema (Multi-tenant SaaS).
+    Cada cliente tiene su propio tenant con configuración independiente.
+    """
+    __tablename__ = "tenants"
+
+    id = Column(Integer, primary_key=True, index=True)
+    codigo = Column(String(50), unique=True, nullable=False, index=True)  # 'masas-estacion', 'los-alpes'
+    nombre = Column(String(100), nullable=False, index=True)  # 'Masas Estación'
+    dominio_principal = Column(String(100), unique=True, nullable=True)  # 'masasestacion.cl'
+    subdomain = Column(String(50), unique=True, nullable=True)  # 'masasestacion' para *.tuapp.cl
+    activo = Column(Boolean, default=True, nullable=False)
+    correlativo_pedido = Column(Integer, default=0, nullable=False)  # Correlativo para numero_pedido por tenant
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relaciones
+    configuracion_landing = relationship("ConfiguracionLanding", back_populates="tenant", uselist=False)
+    productos = relationship("Producto", back_populates="tenant")
+    locales = relationship("Local", back_populates="tenant")
+    clientes = relationship("Cliente", back_populates="tenant")
+    pedidos = relationship("Pedido", back_populates="tenant")
+    usuarios = relationship("User", back_populates="tenant")
+    proveedores = relationship("Proveedor", back_populates="tenant")
+
+
+class ConfiguracionLanding(Base):
+    """
+    Configuración dinámica de la landing page por tenant (White-label).
+    Permite personalizar colores, textos, logo y contenido sin cambiar código.
+    """
+    __tablename__ = "configuracion_landing"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), unique=True, nullable=False)
+    
+    # Branding
+    logo_url = Column(String(255), nullable=True)
+    favicon_url = Column(String(255), nullable=True)
+    nombre_comercial = Column(String(100), nullable=True)
+    
+    # Colores (JSON: {primario, secundario, fondo_hero_inicio, etc.})
+    colores = Column(JSON, nullable=False, server_default='{}')
+    
+    # Hero Section
+    hero_titulo = Column(Text, nullable=True)
+    hero_subtitulo = Column(Text, nullable=True)
+    hero_imagen_url = Column(String(255), nullable=True)
+    hero_cta_texto = Column(String(50), nullable=True)
+    hero_cta_link = Column(String(100), nullable=True)
+    hero_badges = Column(JSON, nullable=False, server_default='[]')  # [{icono, texto}]
+    
+    # Beneficios (JSON array: [{icono, titulo, descripcion}])
+    beneficios = Column(JSON, nullable=False, server_default='[]')
+    
+    # Footer / Contacto
+    redes_sociales = Column(JSON, nullable=False, server_default='{}')  # {facebook, instagram, whatsapp}
+    telefono = Column(String(20), nullable=True)
+    email = Column(String(100), nullable=True)
+    direccion = Column(Text, nullable=True)
+    texto_footer_descripcion = Column(Text, nullable=True)
+    texto_copyright = Column(String(200), nullable=True)
+    
+    # SEO Metadata
+    meta_title = Column(String(100), nullable=True)
+    meta_description = Column(Text, nullable=True)
+    
+    # Configuración de visualización (E-commerce vs Catálogo)
+    mostrar_precios = Column(Boolean, nullable=False, server_default='true')
+    mostrar_stock = Column(Boolean, nullable=False, server_default='true')
+    habilitar_carrito = Column(Boolean, nullable=False, server_default='true')
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relaciones
+    tenant = relationship("Tenant", back_populates="configuracion_landing")
 
 
 # --------------------------------------------------
@@ -234,10 +320,12 @@ class Producto(Base):
     __tablename__ = "productos"
 
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     nombre = Column(String, nullable=False, index=True)
     descripcion = Column(Text)
     sku = Column(String, unique=True, nullable=False, index=True)
     imagen_url = Column(String, nullable=True)
+    codigo_barra = Column(String(50), nullable=True, index=True)  # Número para generar códigos de barra
     
     # Referencias a tablas maestras
     categoria_id = Column(Integer, ForeignKey("categorias_producto.id", ondelete="RESTRICT"), nullable=False)
@@ -264,6 +352,7 @@ class Producto(Base):
     categoria = relationship("CategoriaProducto", back_populates="productos")
     tipo_producto = relationship("TipoProducto", back_populates="productos")
     unidad_medida = relationship("UnidadMedida", back_populates="productos")
+    tenant = relationship("Tenant", back_populates="productos")
     
     inventarios = relationship("Inventario", back_populates="producto", cascade="all, delete-orphan")
     precios = relationship("Precio", back_populates="producto", cascade="all, delete-orphan")
@@ -276,6 +365,78 @@ class Producto(Base):
     
     # Relaciones de compras
     detalles_compra = relationship("DetalleCompra", back_populates="producto")
+    
+    # Relaciones de etiquetado
+    informacion_nutricional = relationship("InformacionNutricional", back_populates="producto", uselist=False, cascade="all, delete-orphan")
+    sellos = relationship("ProductoSello", back_populates="producto", cascade="all, delete-orphan")
+
+
+class SelloAdvertencia(Base):
+    """Sellos de advertencia para productos (Alto en azúcares, Alto en sodio, etc.)."""
+    __tablename__ = "sellos_advertencia"
+
+    id = Column(Integer, primary_key=True, index=True)
+    codigo = Column(String, unique=True, nullable=False, index=True)
+    nombre = Column(String, nullable=False)
+    descripcion = Column(String)
+    color = Column(String, default="#000000")  # Color hexadecimal para el diseño
+    icono = Column(String)  # Emoji o código de icono
+    orden = Column(Integer, default=0)  # Para ordenar en la UI
+    activo = Column(Boolean, default=True)
+
+    # Relaciones
+    productos = relationship("ProductoSello", back_populates="sello")
+
+
+class ProductoSello(Base):
+    """Relación many-to-many entre productos y sellos de advertencia."""
+    __tablename__ = "producto_sellos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    producto_id = Column(Integer, ForeignKey("productos.id", ondelete="CASCADE"), nullable=False)
+    sello_id = Column(Integer, ForeignKey("sellos_advertencia.id", ondelete="CASCADE"), nullable=False)
+
+    # Relaciones
+    producto = relationship("Producto", back_populates="sellos")
+    sello = relationship("SelloAdvertencia", back_populates="productos")
+
+    __table_args__ = (
+        # Un producto no puede tener el mismo sello dos veces
+        UniqueConstraint('producto_id', 'sello_id', name='uk_producto_sello'),
+    )
+
+
+class InformacionNutricional(Base):
+    """Información nutricional por cada 100g/100ml de producto."""
+    __tablename__ = "informacion_nutricional"
+
+    id = Column(Integer, primary_key=True, index=True)
+    producto_id = Column(Integer, ForeignKey("productos.id", ondelete="CASCADE"), nullable=False, unique=True)
+    
+    # Valores por 100g o 100ml
+    porcion_referencia = Column(String, default="100g")  # "100g", "100ml", "1 unidad", etc.
+    energia_kcal = Column(Numeric(10, 2))  # Energía en kcal
+    proteinas_g = Column(Numeric(10, 2))  # Proteínas en gramos
+    carbohidratos_g = Column(Numeric(10, 2))  # Carbohidratos totales en gramos
+    azucares_g = Column(Numeric(10, 2))  # Azúcares en gramos
+    grasas_totales_g = Column(Numeric(10, 2))  # Grasas totales en gramos
+    grasas_saturadas_g = Column(Numeric(10, 2))  # Grasas saturadas en gramos
+    grasas_trans_g = Column(Numeric(10, 2))  # Grasas trans en gramos
+    fibra_g = Column(Numeric(10, 2))  # Fibra dietética en gramos
+    sodio_mg = Column(Numeric(10, 2))  # Sodio en miligramos
+    
+    # Campos adicionales opcionales
+    colesterol_mg = Column(Numeric(10, 2))  # Colesterol en miligramos
+    calcio_mg = Column(Numeric(10, 2))  # Calcio en miligramos
+    hierro_mg = Column(Numeric(10, 2))  # Hierro en miligramos
+    vitamina_a_mcg = Column(Numeric(10, 2))  # Vitamina A en microgramos
+    vitamina_c_mg = Column(Numeric(10, 2))  # Vitamina C en miligramos
+    
+    # Metadata
+    fecha_actualizacion = Column(DateTime, default=func.now(), onupdate=func.now())
+    
+    # Relaciones
+    producto = relationship("Producto", back_populates="informacion_nutricional")
 
 
 class Local(Base):
@@ -283,6 +444,7 @@ class Local(Base):
     __tablename__ = "locales"
 
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     codigo = Column(String, unique=True, nullable=False, index=True)
     nombre = Column(String, unique=True, nullable=False, index=True)
     direccion = Column(String)
@@ -290,6 +452,7 @@ class Local(Base):
     tipo_local_id = Column(Integer, ForeignKey("tipos_local.id", ondelete="SET NULL"), nullable=True)
     
     # Relaciones
+    tenant = relationship("Tenant", back_populates="locales")
     tipo_local = relationship("TipoLocal", back_populates="locales")
     inventarios = relationship("Inventario", back_populates="local", cascade="all, delete-orphan")
     precios = relationship("Precio", back_populates="local", cascade="all, delete-orphan")
@@ -303,6 +466,7 @@ class Cliente(Base):
     __tablename__ = "clientes"
 
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     nombre = Column(String, nullable=False)
     apellido = Column(String)
     email = Column(String, unique=True)
@@ -321,6 +485,7 @@ class Cliente(Base):
     credito_usado = Column(Numeric(10, 2), nullable=False, default=0.00)
     
     # Relaciones
+    tenant = relationship("Tenant", back_populates="clientes")
     pedidos = relationship("Pedido", back_populates="cliente")
     puntos_cliente = relationship("PuntosCliente", back_populates="cliente")
     movimientos_puntos = relationship("MovimientoPuntos", back_populates="cliente")
@@ -437,22 +602,24 @@ class MovimientoInventario(Base):
 
 
 class Precio(Base):
-    """Precios de productos por local."""
+    """Precios de productos por local y unidad de medida."""
     __tablename__ = "precios"
 
     id = Column(Integer, primary_key=True, index=True)
     producto_id = Column(Integer, ForeignKey("productos.id", ondelete="CASCADE"), nullable=False)
     local_id = Column(Integer, ForeignKey("locales.id", ondelete="CASCADE"), nullable=False)
+    unidad_medida_id = Column(Integer, ForeignKey("unidades_medida.id", ondelete="RESTRICT"), nullable=False)
     monto_precio = Column(Float, nullable=False)
     fecha_vigencia = Column(DateTime(timezone=True), server_default=func.now())
     
     # Relaciones
     producto = relationship("Producto", back_populates="precios")
     local = relationship("Local", back_populates="precios")
+    unidad_medida = relationship("UnidadMedida")
     
-    # Constraint: Un producto solo puede tener un precio activo por local
+    # Constraint: Un producto solo puede tener un precio activo por local y unidad de medida
     __table_args__ = (
-        UniqueConstraint('producto_id', 'local_id', name='uix_precio_producto_local'),
+        UniqueConstraint('producto_id', 'local_id', 'unidad_medida_id', name='uix_precio_producto_local_unidad'),
     )
 
 
@@ -482,20 +649,41 @@ class PrecioProveedor(Base):
 # 3. Tablas de Venta (Transaccionales)
 # --------------------------------------------------
 
+class EstadoPedido(Base):
+    """Estados configurables para pedidos."""
+    __tablename__ = "estados_pedido"
+
+    id = Column(Integer, primary_key=True, index=True)
+    codigo = Column(String(50), unique=True, nullable=False, index=True)  # 'PENDIENTE', 'CONFIRMADO'
+    nombre = Column(String(100), nullable=False)  # 'Pendiente de Pago'
+    descripcion = Column(Text, nullable=True)
+    color = Column(String(20), nullable=False, default='gray-500')  # 'yellow-500', 'blue-500'
+    orden = Column(Integer, nullable=False, default=0)  # Para ordenar en filtros/UI
+    es_final = Column(Boolean, default=False)  # True para ENTREGADO, CANCELADO
+    activo = Column(Boolean, default=True)
+    fecha_creacion = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Relaciones
+    pedidos = relationship("Pedido", back_populates="estado_pedido")
+
+
 class Pedido(Base):
     """Encabezado de pedidos/ventas."""
     __tablename__ = "pedidos"
 
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    numero_pedido = Column(String(50), unique=True, nullable=False, index=True)  # ME-2026-00001, EO-2026-00042
     cliente_id = Column(Integer, ForeignKey("clientes.id", ondelete="RESTRICT"), nullable=False)
     local_id = Column(Integer, ForeignKey("locales.id", ondelete="RESTRICT"), nullable=False)
     local_despacho_id = Column(Integer, ForeignKey("locales.id", ondelete="RESTRICT"), nullable=True)  # Local de donde se despacha
     medio_pago_id = Column(Integer, ForeignKey("medios_pago.id", ondelete="RESTRICT"), nullable=True)  # Medio de pago utilizado
     tipo_pedido_id = Column(Integer, ForeignKey("tipos_pedido.id", ondelete="RESTRICT"), nullable=False, default=1)  # Tipo de inventario a usar
-    tipo_documento_tributario_id = Column(Integer, ForeignKey("tipos_documento_tributario.id", ondelete="RESTRICT"), nullable=True, default=1)  # BOLETA por defecto
+    tipo_documento_tributario_id = Column(Integer, ForeignKey("tipos_documento_tributario.id", ondelete="RESTRICT"), nullable=True, default=2)  # BOLETA por defecto (ID 2 = BOL)
+    usuario_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)  # Usuario que creó el pedido
     fecha_pedido = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
     monto_total = Column(Float, default=0.00)
-    estado = Column(String, nullable=False, default="PENDIENTE")  # PENDIENTE, CONFIRMADO, EN_PREPARACION, ENTREGADO, CANCELADO
+    estado_id = Column(Integer, ForeignKey("estados_pedido.id", ondelete="RESTRICT"), nullable=False, default=1)  # FK a estados_pedido
     es_pagado = Column(Boolean, default=False)
     inventario_descontado = Column(Boolean, default=False)  # Flag para evitar doble descuento
     notas = Column(Text, nullable=True)
@@ -523,7 +711,10 @@ class Pedido(Base):
     observaciones_sii = Column(Text, nullable=True)  # Notas sobre el proceso SII
 
     # Relaciones
+    tenant = relationship("Tenant", back_populates="pedidos")
     cliente = relationship("Cliente", back_populates="pedidos")
+    usuario = relationship("User", foreign_keys=[usuario_id])
+    estado_pedido = relationship("EstadoPedido", back_populates="pedidos")
     local = relationship("Local", back_populates="pedidos", foreign_keys=[local_id])
     local_despacho = relationship("Local", foreign_keys=[local_despacho_id])
     medio_pago = relationship("MedioPago", back_populates="pedidos")
@@ -634,6 +825,7 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     email = Column(String, unique=True, nullable=False, index=True)
     hashed_password = Column(String, nullable=False)
     nombre_completo = Column(String)
@@ -642,6 +834,7 @@ class User(Base):
     local_defecto_id = Column(Integer, ForeignKey("locales.id", ondelete="SET NULL"), nullable=True)
 
     # Relaciones
+    tenant = relationship("Tenant", back_populates="usuarios")
     role = relationship("Role", back_populates="users")
     local_defecto = relationship("Local", foreign_keys=[local_defecto_id])
     turnos_caja = relationship("TurnoCaja", back_populates="vendedor", cascade="all, delete-orphan")
@@ -756,6 +949,7 @@ class Proveedor(Base):
     __tablename__ = "proveedores"
 
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     nombre = Column(String, nullable=False, index=True)
     rut = Column(String, unique=True, index=True)
     contacto = Column(String)
@@ -766,6 +960,7 @@ class Proveedor(Base):
     activo = Column(Boolean, default=True)
 
     # Relaciones
+    tenant = relationship("Tenant", back_populates="proveedores")
     tipo_proveedor = relationship("TipoProveedor", back_populates="proveedores")
     compras = relationship("Compra", back_populates="proveedor")
     enrolamientos = relationship("Enrolamiento", back_populates="proveedor")

@@ -62,8 +62,8 @@ class PedidoCreateFrontend(BaseModel):
     # Notas adicionales
     notas: Optional[str] = Field(None, max_length=500)
     
-    # Medio de pago (opcional, por defecto MERCADOPAGO para frontend)
-    medio_pago_codigo: Optional[str] = Field(default="MERCADOPAGO", description="Código del medio de pago")
+    # Medio de pago (opcional, se asigna solo si paga con pasarela o en tienda)
+    medio_pago_codigo: Optional[str] = Field(default=None, description="Código del medio de pago")
     
     # Puntos a usar (opcional)
     puntos_usar: Optional[int] = Field(default=0, ge=0, description="Puntos a usar para descuento")
@@ -122,6 +122,7 @@ class PedidoUpdate(BaseModel):
     pagado: Optional[bool] = None
     notas_admin: Optional[str] = None
     local_despacho_id: Optional[int] = None
+    medio_pago_id: Optional[int] = Field(None, description="ID del medio de pago (se puede asignar si estaba NULL)")
 
 
 class PedidoResponse(BaseModel):
@@ -183,12 +184,14 @@ class PedidoConRelaciones(BaseModel):
     """Schema de Pedido con cliente e items."""
     id: int
     cliente_id: int
+    cliente_nombre: Optional[str] = Field(None, description="Nombre del cliente (campo conveniente para frontend)")
     local_id: int
     local_despacho_id: Optional[int] = None
     tipo_pedido_id: Optional[int] = None
     numero_pedido: Optional[str] = None
     fecha_pedido: datetime
     total: float
+    monto_total: Optional[float] = Field(None, description="Alias de total para compatibilidad")
     estado: str
     pagado: bool
     inventario_descontado: bool = False
@@ -218,6 +221,15 @@ class PedidoConRelaciones(BaseModel):
     # Información de tipo de pedido
     tipo_pedido_codigo: Optional[str] = Field(None, description="Código del tipo de pedido")
     tipo_pedido_nombre: Optional[str] = Field(None, description="Nombre del tipo de pedido")
+    
+    # Información del usuario que creó el pedido
+    usuario_id: Optional[int] = None
+    usuario_nombre: Optional[str] = Field(None, description="Nombre del usuario que creó el pedido")
+    usuario_email: Optional[str] = Field(None, description="Email del usuario que creó el pedido")
+    
+    # Información del despacho (opcional)
+    despacho: Optional[dict] = Field(None, description="Información del despacho asignado (si existe)")
+    
     cliente: Optional["ClienteResponse"] = None
     items: List["ItemPedidoResponse"] = []
 

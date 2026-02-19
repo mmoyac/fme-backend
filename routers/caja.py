@@ -58,6 +58,55 @@ def calcular_efectivo_esperado(turno: TurnoCaja, db: Session) -> Decimal:
 # GESTIÓN DE TURNOS DE CAJA
 # ============================================
 
+@router.get("/local/{local_id}/caja-abierta")
+def verificar_caja_abierta(
+    local_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Verifica si hay alguna caja abierta en el local especificado.
+    
+    **Retorna:**
+    - `tiene_caja_abierta`: boolean
+    - `turno`: información del turno abierto (si existe)
+    """
+    # Verificar que el local exista y pertenezca al tenant
+    local = db.query(Local).filter(Local.id == local_id, Local.tenant_id == current_user.tenant_id).first()
+    if not local:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Local con ID {local_id} no encontrado"
+        )
+    
+    # Buscar turno abierto en el local
+    turno_abierto = db.query(TurnoCaja).filter(
+        and_(
+            TurnoCaja.local_id == local_id,
+            TurnoCaja.estado == EstadoTurnoCaja.ABIERTO
+        )
+    ).first()
+    
+    if turno_abierto:
+        vendedor = db.query(User).filter(User.id == turno_abierto.vendedor_id).first()
+        return {
+            "tiene_caja_abierta": True,
+            "turno": {
+                "id": turno_abierto.id,
+                "vendedor_nombre": vendedor.nombre_completo if vendedor else "Desconocido",
+                "fecha_apertura": turno_abierto.fecha_apertura,
+                "monto_inicial": float(turno_abierto.monto_inicial)
+            },
+            "local_nombre": local.nombre
+        }
+    
+    return {
+        "tiene_caja_abierta": False,
+        "turno": None,
+        "local_nombre": local.nombre,
+        "mensaje": f"No hay caja abierta en '{local.nombre}'. Se debe abrir un turno antes de confirmar pedidos."
+    }
+
 @router.post("/turno/abrir", response_model=TurnoCajaResponse, status_code=status.HTTP_201_CREATED)
 def abrir_caja(
     turno_data: TurnoCajaCreate,
@@ -93,8 +142,8 @@ def abrir_caja(
                 detail=f"No tienes permisos para abrir caja en este local. Tu local asignado es: {current_user.local_defecto_id}"
             )
     
-    # Verificar que el local exista
-    local = db.query(Local).filter(Local.id == turno_data.local_id).first()
+    # Verificar que el local exista y pertenezca al tenant
+    local = db.query(Local).filter(Local.id == turno_data.local_id, Local.tenant_id == current_user.tenant_id).first()
     if not local:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -274,10 +323,11 @@ def obtener_turno_detalle(
         joinedload(TurnoCaja.local),
         joinedload(TurnoCaja.vendedor),
         joinedload(TurnoCaja.operaciones)
-    ).filter(
+    ).join(Local).filter(
         and_(
             TurnoCaja.id == turno_id,
-            TurnoCaja.vendedor_id == current_user.id
+            TurnoCaja.vendedor_id == current_user.id,
+            Local.tenant_id == current_user.tenant_id
         )
     ).first()
     
@@ -490,7 +540,10 @@ def obtener_historial_turnos(
     """
     query = db.query(TurnoCaja).options(
         joinedload(TurnoCaja.local)
-    ).filter(TurnoCaja.vendedor_id == current_user.id)
+    ).join(Local).filter(
+        TurnoCaja.vendedor_id == current_user.id,
+        Local.tenant_id == current_user.tenant_id
+    )
     
     if fecha_desde:
         query = query.filter(TurnoCaja.fecha_apertura >= fecha_desde)
