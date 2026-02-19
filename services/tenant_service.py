@@ -32,8 +32,9 @@ def get_tenant_from_request(request: Request, db: Session) -> Optional[Tenant]:
     Detecta el tenant actual basándose en el dominio de la petición.
     
     Soporta:
-    - Dominios completos: masasestacion.cl, elolivo.masasestacion.cl
-    - Subdominios: masasestacion.effitech.cl, elolivo.effitech.cl
+    - Dominios completos: masasestacion.cl, www.masasestacion.cl
+    - Subdominios: elolivo.masasestacion.cl, admin.masasestacion.cl
+    - Subdominios SaaS: masasestacion.effitech.cl, elolivo.effitech.cl
     - Desarrollo local: masasestacion.local, elolivo.local
     - Header X-Forwarded-Host para proxies/desarrollo
     - Fallback: localhost → tenant_id=1
@@ -59,6 +60,17 @@ def get_tenant_from_request(request: Request, db: Session) -> Optional[Tenant]:
     if tenant:
         print(f"✅ Tenant encontrado por dominio exacto: {tenant.nombre} (ID: {tenant.id})")
         return tenant
+    
+    # 1b. Si tiene www, intentar sin www (www.masasestacion.cl → masasestacion.cl)
+    if hostname.startswith('www.'):
+        hostname_sin_www = hostname[4:]  # Remover 'www.'
+        tenant = db.query(Tenant).filter(
+            Tenant.dominio_principal == hostname_sin_www
+        ).first()
+        
+        if tenant:
+            print(f"✅ Tenant encontrado por dominio sin www: {tenant.nombre} (ID: {tenant.id})")
+            return tenant
     
     # 2. Si es localhost, retornar tenant por defecto (Masas Estación)
     if hostname in ['localhost', '127.0.0.1', '0.0.0.0']:
