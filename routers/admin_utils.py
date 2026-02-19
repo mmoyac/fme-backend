@@ -59,11 +59,11 @@ def resetear_secuencias(
         try:
             sql = text(f"ALTER SEQUENCE {secuencia} RESTART WITH 1")
             db.execute(sql)
+            db.commit()  # Commit inmediato después de cada secuencia exitosa
             resetadas += 1
         except Exception as e:
-            errores.append(f"{secuencia}: {str(e)}")
-    
-    db.commit()
+            db.rollback()  # Rollback para limpiar la transacción fallida
+            errores.append(f"{secuencia}: {str(e)[:100]}")
     
     return {
         "message": f"Secuencias reseteadas: {resetadas}/{len(secuencias)}",
