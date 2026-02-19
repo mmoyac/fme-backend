@@ -1716,3 +1716,51 @@ def actualizar_estado_sii(
         "fecha_respuesta_sii": pedido.fecha_respuesta_sii,
         "mensaje": f"Estado SII actualizado a {estado_sii}"
     }
+
+
+@router.delete("/{pedido_id}", status_code=status.HTTP_204_NO_CONTENT)
+def eliminar_pedido(
+    pedido_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    """
+    Elimina un pedido completamente.
+    
+    **Importante:** 
+    - Si el pedido tiene inventario descontado, lo devuelve automáticamente
+    - Elimina items del pedido y movimientos de puntos asociados
+    - Operación IRREVERSIBLE
+    
+    **Uso:** Backoffice - Eliminar pedidos (admin)
+    """
+    # Buscar el pedido
+    pedido = db.query(Pedido).filter(Pedido.id == pedido_id).first()
+    if not pedido:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido con ID {pedido_id} no encontrado"
+        )
+    
+    # Si tiene inventario descontado, devolverlo
+    if pedido.inventario_descontado and pedido.local_despacho_id:
+        try:
+            devolver_inventario(pedido, db)
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error al devolver inventario: {str(e)}"
+            )
+    
+    # Eliminar movimientos de puntos asociados
+    from database.models import MovimientoPuntos
+    db.query(MovimientoPuntos).filter(MovimientoPuntos.pedido_id == pedido_id).delete(synchronize_session=False)
+    
+    # Eliminar items del pedido (cascade debería hacerlo, pero por seguridad)
+    db.query(ItemPedido).filter(ItemPedido.pedido_id == pedido_id).delete(synchronize_session=False)
+    
+    # Eliminar el pedido
+    db.delete(pedido)
+    db.commit()
+    
+    return None
