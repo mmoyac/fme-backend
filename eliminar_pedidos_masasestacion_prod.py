@@ -1,10 +1,15 @@
 #!/usr/bin/env python
 """
-Script automatizado para eliminar todos los pedidos de El Olivo.
-Ejecuta la eliminación sin confirmaciones interactivas.
+Script automatizado para eliminar todos los datos de Masas Estación (Tenant 1) en PRODUCCIÓN.
+⚠️ USAR CON EXTREMA PRECAUCIÓN - PRODUCCIÓN
 """
 
 import sys
+import os
+
+# Agregar el directorio raíz al path para imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from database.database import SessionLocal
 from database.models import (
     Tenant, 
@@ -32,15 +37,15 @@ from database.models import (
 )
 
 
-def eliminar_pedidos_elolivo():
-    """Elimina todos los pedidos del tenant El Olivo."""
+def eliminar_datos_masasestacion():
+    """Elimina todos los datos del tenant Masas Estación en PRODUCCIÓN."""
     db = SessionLocal()
     
     try:
-        # 1. Buscar el tenant El Olivo
-        tenant = db.query(Tenant).filter(Tenant.nombre == "El Olivo").first()
+        # 1. Buscar el tenant Masas Estación
+        tenant = db.query(Tenant).filter(Tenant.nombre == "Masas Estación").first()
         if not tenant:
-            print('❌ Error: Tenant "El Olivo" no encontrado')
+            print('❌ Error: Tenant "Masas Estación" no encontrado')
             print('\nTenants disponibles:')
             tenants = db.query(Tenant).all()
             for t in tenants:
@@ -50,7 +55,7 @@ def eliminar_pedidos_elolivo():
         print(f'✅ Tenant encontrado: {tenant.nombre} (ID: {tenant.id})')
         print('=' * 60)
         
-        # Obtener locales del tenant (para filtrar compras, inventario, movimientos)
+        # Obtener locales del tenant
         locales_tenant = db.query(Local).filter(Local.tenant_id == tenant.id).all()
         locales_ids = [local.id for local in locales_tenant]
         print(f'\n🏪 Locales del tenant: {len(locales_ids)}')
@@ -164,7 +169,25 @@ def eliminar_pedidos_elolivo():
         
         if total_pedidos == 0 and todos_enrolamientos_count == 0 and todos_lotes_count == 0 and todos_stock_cajas_count == 0 and todos_movs_stock_cajas_count == 0 and compras_tenant_count == 0 and inventario_tenant_count == 0 and todos_movs_inv_tenant_count == 0 and productos_count == 0 and clientes_count == 0 and turnos_caja_count == 0:
             print('ℹ️  No hay datos para eliminar')
-            print('✅ Base de datos ya está limpia para El Olivo')
+            print('✅ Base de datos ya está limpia para Masas Estación')
+            return
+        
+        # Resumen antes de eliminar
+        print(f'\n⚠️  RESUMEN DE ELIMINACIÓN:')
+        print(f'   💀 {pedidos_count} pedidos')
+        print(f'   💀 {productos_count} productos')
+        print(f'   💀 {precios_count} precios')
+        print(f'   💀 {clientes_count} clientes')
+        print(f'   💀 {compras_tenant_count} compras')
+        print(f'   💀 {inventario_tenant_count} inventario')
+        print(f'   💀 {turnos_caja_count} turnos de caja')
+        print(f'   💀 {operaciones_caja_count} operaciones de caja')
+        print('=' * 60)
+        
+        confirmacion = input('\n⚠️⚠️⚠️ ESTO ES PRODUCCIÓN ⚠️⚠️⚠️\n¿Estás ABSOLUTAMENTE SEGURO? Escribe "DELETE PRODUCTION" para continuar: ')
+        
+        if confirmacion != "DELETE PRODUCTION":
+            print('\n❌ Operación cancelada (confirmación incorrecta)')
             return
         
         # Si hay datos pero no pedidos, eliminar todo
@@ -222,7 +245,8 @@ def eliminar_pedidos_elolivo():
                     Producto.tenant_id == tenant.id
                 ).delete(synchronize_session=False)
                 print(f'   ✓ {productos_elim} productos eliminados')
-                        # Eliminar operaciones de caja (antes de eliminar turnos)
+            
+            # Eliminar operaciones de caja (antes de eliminar turnos)
             if locales_ids and operaciones_caja_count > 0:
                 turnos = db.query(TurnoCaja).filter(TurnoCaja.local_id.in_(locales_ids)).all()
                 if turnos:
@@ -238,7 +262,8 @@ def eliminar_pedidos_elolivo():
                     TurnoCaja.local_id.in_(locales_ids)
                 ).delete(synchronize_session=False)
                 print(f'   ✓ {turnos_elim} turnos de caja eliminados')
-                        # Obtener IDs de TODOS los movimientos de stock cajas del tenant (con y sin lote)
+            
+            # Obtener IDs de TODOS los movimientos de stock cajas del tenant (con y sin lote)
             movs_stock_ids = []
             
             # Movimientos con lote_id
@@ -310,7 +335,7 @@ def eliminar_pedidos_elolivo():
                 print(f'   ✓ {stock_eliminados} registros de StockCajasProveedor eliminados')
             
             db.commit()
-            print('✅ Base de datos limpiada exitosamente:')
+            print('✅ Base de datos limpiada exitosamente en PRODUCCIÓN:')
             print('   • Compras eliminadas')
             print('   • Inventario reseteado')
             print('   • Movimientos de inventario eliminados')
@@ -445,7 +470,7 @@ def eliminar_pedidos_elolivo():
         print(f'   - Operaciones de caja: {operaciones_caja_count}')
         print('=' * 60)
         
-        print('\n🔄 Eliminando registros...')
+        print('\n🔄 Eliminando registros en PRODUCCIÓN...')
         
         # 4. Eliminar en orden (respetando integridad referencial)
         
@@ -631,7 +656,7 @@ def eliminar_pedidos_elolivo():
         
         # 5. Commit
         db.commit()
-        print('\n✅ Todos los datos de El Olivo han sido eliminados exitosamente')
+        print('\n✅ Todos los datos de Masas Estación han sido eliminados exitosamente en PRODUCCIÓN')
         print('✅ Registros eliminados:')
         print('   • Pedidos, despachos y picking items')
         print('   • Compras y detalles de compras')
@@ -671,28 +696,29 @@ def eliminar_pedidos_elolivo():
 
 if __name__ == '__main__':
     print('=' * 60)
-    print('🗑️  RESET COMPLETO DE BASE DE DATOS - EL OLIVO')
+    print('🗑️  RESET COMPLETO - MASAS ESTACIÓN (PRODUCCIÓN)')
     print('=' * 60)
-    print('\n⚠️  Este script eliminará TODO de El Olivo:')
+    print('\n💀💀💀 PELIGRO: ESTO ES PRODUCCIÓN 💀💀💀')
+    print('\n⚠️  Este script eliminará TODO de Masas Estación:')
     print('   📦 Todos los PRODUCTOS')
     print('   💰 Todos los PRECIOS')
     print('   👥 Todos los CLIENTES y puntos')
     print('   🛒 Todas las COMPRAS')
     print('   📊 Todo el INVENTARIO (stock)')
-    print('   🔄 Todos los MOVIMIENTOS (transferencias e historial)')
+    print('   🔄 Todos los MOVIMIENTOS')
     print('   📋 Todos los PEDIDOS y despachos')
     print('   🏭 Todos los LOTES y enrolamientos')
     print('   💵 Todos los TURNOS y OPERACIONES de CAJA')
     print('\n✅ Se mantienen (maestras):')
     print('   • Locales')
     print('   • Proveedores')
-    print('   • Categorías, Unidades de Medida, Tipos')
+    print('   • Categorías, Unidades, Tipos')
     print('   • Usuarios y Roles')
-    print('\n⚠️  La operación es IRREVERSIBLE - Reset completo\n')
+    print('\n⚠️⚠️⚠️ ESTO ES PRODUCCIÓN - NO HAY VUELTA ATRÁS ⚠️⚠️⚠️\n')
     
-    respuesta = input('¿Confirmas que deseas RESETEAR TODO? (SI/NO): ').strip().upper()
+    respuesta = input('¿Confirmas que deseas RESETEAR PRODUCCIÓN? (SI/NO): ').strip().upper()
     
     if respuesta == 'SI':
-        eliminar_pedidos_elolivo()
+        eliminar_datos_masasestacion()
     else:
         print('\n❌ Operación cancelada')

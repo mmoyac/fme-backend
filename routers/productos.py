@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from sqlalchemy.orm import Session
 
 from database.database import get_db
-from database.models import Producto, CategoriaProducto
+from database.models import Producto, CategoriaProducto, MovimientoInventario, DetalleCompra
 from schemas.catalogo import ProductoCatalogo
 from schemas.producto import ProductoResponse, ProductoCreate, ProductoUpdate
 from services import inventario_service, tenant_service
@@ -274,8 +274,11 @@ def eliminar_producto(producto_id: int, db: Session = Depends(get_db), current_u
     Elimina un producto.
     
     **Nota:** Esto también eliminará todos los registros relacionados:
+    - Movimientos de inventario (historial)
+    - Detalles de compras asociados
     - Inventario del producto en todos los locales
     - Precios del producto en todos los locales
+    - Recetas, información nutricional, sellos (via cascade)
     
     **Uso:** Backoffice - Eliminar producto
     """
@@ -286,6 +289,19 @@ def eliminar_producto(producto_id: int, db: Session = Depends(get_db), current_u
             detail=f"Producto con ID {producto_id} no encontrado"
         )
     
+    # Eliminar dependencias que tienen RESTRICT en la FK
+    
+    # 1. Eliminar movimientos de inventario (historial)
+    db.query(MovimientoInventario).filter(
+        MovimientoInventario.producto_id == producto_id
+    ).delete(synchronize_session=False)
+    
+    # 2. Eliminar detalles de compras
+    db.query(DetalleCompra).filter(
+        DetalleCompra.producto_id == producto_id
+    ).delete(synchronize_session=False)
+    
+    # 3. Ahora sí eliminar el producto (cascades se encargan del resto)
     db.delete(db_producto)
     db.commit()
     return None

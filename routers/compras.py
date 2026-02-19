@@ -177,7 +177,18 @@ def update_compra(compra_id: int, compra_data: schemas.CompraCreate, db: Session
     return db_compra
 
 @router.delete("/{compra_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_compra(compra_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
+def delete_compra(
+    compra_id: int, 
+    force: bool = False,  # Parámetro para forzar eliminación
+    db: Session = Depends(get_db), 
+    current_user = Depends(get_current_active_user)
+):
+    """
+    Elimina una compra.
+    
+    Por defecto, no permite eliminar compras RECIBIDAS (que ya afectaron stock).
+    Use force=true para eliminar cualquier compra (útil para resets completos).
+    """
     db_compra = db.query(models.Compra).join(models.Local).filter(
         models.Compra.id == compra_id,
         models.Local.tenant_id == current_user.tenant_id
@@ -185,8 +196,12 @@ def delete_compra(compra_id: int, db: Session = Depends(get_db), current_user = 
     if not db_compra:
         raise HTTPException(status_code=404, detail="Compra no encontrada")
     
-    if db_compra.estado == "RECIBIDA":
-        raise HTTPException(status_code=400, detail="No se puede eliminar una compra ya recibida (afectó stock)")
+    # Validar si es RECIBIDA y no se está forzando
+    if db_compra.estado == "RECIBIDA" and not force:
+        raise HTTPException(
+            status_code=400, 
+            detail="No se puede eliminar una compra ya recibida (afectó stock). Use force=true para eliminar de todos modos."
+        )
 
     db.delete(db_compra)
     db.commit()

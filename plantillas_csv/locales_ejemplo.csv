@@ -1,0 +1,5 @@
+codigo,nombre,direccion,telefono,tipo
+LOC_001,Lampa,Barros Luco #1980 Lampa,+56912345678,sucursal
+LOC_002,TilTil,El Atajo 01 esquina Arturo Prat Tiltil,+56912345679,sucursal
+LOC_003,boulevard,boulevard Santa Sara,+56912345680,sucursal
+WEB,Tienda Online,Comercio Electronico,+56912345681,online

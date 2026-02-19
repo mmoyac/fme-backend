@@ -1,0 +1,11 @@
+id,codigo,nombre,simbolo,tipo,factor_conversion,unidad_base_id,activo
+1,UNIDAD,Unidad,un,CANTIDAD,1.0000,,true
+2,KILOGRAMO,Kilogramo,kg,PESO,1.0000,,true
+3,GRAMO,Gramo,g,PESO,1000.0000,2,true
+4,LITRO,Litro,L,VOLUMEN,1.0000,,true
+5,MILILITRO,Mililitro,ml,VOLUMEN,1000.0000,4,true
+6,DOCENA,Docena,doc,CANTIDAD,12.0000,1,true
+7,MEDIA_DOCENA,Media Docena,1/2 doc,CANTIDAD,6.0000,1,true
+8,CAJA,Caja,caja,CANTIDAD,1.0000,,true
+9,PAQUETE,Paquete,paq,CANTIDAD,1.0000,,true
+10,bandeja,bandeja,b,CANTIDAD,30.0000,1,true

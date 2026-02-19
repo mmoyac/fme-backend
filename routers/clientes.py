@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from database.database import get_db
-from database.models import Cliente
+from database.models import Cliente, Pedido
 from schemas.cliente import ClienteCreate, ClienteUpdate, ClienteResponse
 from services.puntos_service import PuntosService
 from routers.auth import get_current_active_user
@@ -209,6 +209,7 @@ def actualizar_cliente(
 @router.delete("/{cliente_id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_cliente(
     cliente_id: int,
+    force: bool = False,  # Parámetro para forzar eliminación
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
 ):
@@ -216,7 +217,8 @@ def eliminar_cliente(
     Elimina un cliente del tenant.
     
     **Uso:** Backoffice - Borrar cliente
-    **Nota:** No se puede eliminar si tiene pedidos asociados.
+    **Nota:** Por defecto, no se puede eliminar si tiene pedidos asociados.
+    Use force=true para eliminar de todos modos (útil para resets completos).
     """
     db_cliente = db.query(Cliente).filter(Cliente.id == cliente_id, Cliente.tenant_id == current_user.tenant_id).first()
     if not db_cliente:
@@ -225,12 +227,14 @@ def eliminar_cliente(
             detail=f"Cliente con ID {cliente_id} no encontrado"
         )
     
-    # Verificar si tiene pedidos
-    if db_cliente.pedidos:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"No se puede eliminar el cliente porque tiene {len(db_cliente.pedidos)} pedido(s) asociado(s)"
-        )
+    # Verificar si tiene pedidos (solo si no se está forzando)
+    if not force:
+        pedidos_count = db.query(Pedido).filter(Pedido.cliente_id == cliente_id).count()
+        if pedidos_count > 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"No se puede eliminar el cliente porque tiene {pedidos_count} pedido(s) asociado(s). Use force=true para eliminar de todos modos."
+            )
     
     db.delete(db_cliente)
     db.commit()

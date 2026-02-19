@@ -1,0 +1,8 @@
+sku,nombre,descripcion,categoria_id,tipo_producto_id,unidad_medida_id,imagen_url
+PAN-001,Pan Amasado,Pan tradicional chileno hecho con masa madre,2,2,1,/productos/pan-amasado.jpg
+HAL-001,Hallulla,Hallulla tradicional horneada del día,2,2,1,/productos/hallulla.jpg
+MAR-001,Marraqueta,Marraqueta crujiente recién horneada,2,2,1,/productos/marraqueta.jpg
+DOB-001,Dobladitas,Dobladitas tradicionales,2,2,1,/productos/dobladitas.jpg
+EMP-001,Empanada de Pino,Empanada de pino tradicional,4,2,1,/productos/empanada-pino.jpg
+EMP-002,Empanada de Queso,Empanada de queso derretido,4,2,1,/productos/empanada-queso.jpg
+

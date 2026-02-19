@@ -1,0 +1,13 @@
+id,codigo,nombre,descripcion,puntos_ganados,activo
+1,GENERAL,General,Categoría general por defecto,0,true
+2,PANADERIA,Panadería,Productos de panadería,10,true
+3,PASTELERIA,Pastelería,Productos de pastelería,15,true
+4,EMPANADAS,Empanadas,Empanadas y productos salados,12,true
+5,LACTEOS,Lácteos,Quesos mantequilla etc,8,true
+6,ABARROTES,Abarrotes,Productos de abarrotes,5,true
+7,CARNES,CARNES,Ventas por caja,0,true
+8,QUESOS,QUESOS,,0,true
+9,PIZZA,pizza,,0,true
+10,QUESOS_Unidad,QUESOS_Unidad,,0,true
+11,ACEITE,ACEITE,,0,true
+12,PAPAS,PAPAS,,0,true

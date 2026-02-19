@@ -1,0 +1,5 @@
+id,codigo,nombre,descripcion,activo
+1,MATERIA_PRIMA,Materia Prima,Productos comprados para uso/venta,true
+2,PRODUCTO_ELABORADO,Producto Elaborado,Productos fabricados internamente,true
+3,INSUMO,Insumo,Materiales no vendibles (envases bolsas),true
+4,SERVICIO,Servicio,Servicios ofrecidos,true
