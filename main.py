@@ -57,6 +57,16 @@ app.add_middleware(
 # Servir archivos estáticos (imágenes de productos)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# Endpoint de health check ligero (sin dependencias pesadas)
+@app.get("/health", tags=["Health"])
+async def health_check():
+    """
+    Endpoint ultra ligero para health checks.
+    No requiere autenticación ni consultas a BD.
+    Responde en < 5ms.
+    """
+    return {"status": "ok", "service": "fme-backend"}
+
 # Registrar routers
 app.include_router(inventario.router, prefix="/api/inventario", tags=["Inventario"], dependencies=[Depends(get_current_active_user)])
 app.include_router(productos.router, prefix="/api/productos", tags=["Productos"])

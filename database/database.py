@@ -14,11 +14,13 @@ load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://fme:fme@db:5432/fme_database")
 
 # Crear el engine de SQLAlchemy
+# Configuración optimizada para soportar cargas masivas
 engine = create_engine(
     DATABASE_URL,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20
+    pool_pre_ping=True,      # Validar conexiones antes de usar
+    pool_size=10,            # Aumentado de 5 (default) a 10
+    max_overflow=20,         # Aumentado de 10 (default) a 20
+    pool_recycle=3600        # Reciclar conexiones cada 1 hora (prevenir leaks)
 )
 
 # Crear la sesión local
