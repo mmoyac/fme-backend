@@ -109,6 +109,21 @@ def actualizar_item_menu(
     db.refresh(db_menu_item)
     return db_menu_item
 
+@router.delete("/menu_items/{menu_item_id}", status_code=status.HTTP_204_NO_CONTENT)
+def eliminar_item_menu(
+    menu_item_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """Eliminar un item de menú."""
+    db_menu_item = db.query(MenuItemModel).filter(MenuItemModel.id == menu_item_id).first()
+    if not db_menu_item:
+        raise HTTPException(status_code=404, detail="Menu item no encontrado")
+    
+    db.delete(db_menu_item)
+    db.commit()
+    return None
+
 @router.get("/roles/{role_id}/menu", response_model=List[MenuItemSchema])
 def obtener_menu_rol(
     role_id: int,
