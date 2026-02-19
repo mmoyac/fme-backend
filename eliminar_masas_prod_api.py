@@ -91,7 +91,7 @@ def eliminar_pedidos(headers):
 def eliminar_compras(headers):
     """Eliminar todas las compras del tenant (incluidas las RECIBIDAS)."""
     try:
-        response = requests.get(f"{BASE_URL}/api/compras/", headers=headers, timeout=30)
+        response = requests.get(f"{API_URL}/api/compras/", headers=headers, timeout=30)
         if response.status_code != 200:
             print(f"❌ Error obteniendo compras: {response.status_code}")
             return 0
@@ -114,7 +114,7 @@ def eliminar_compras(headers):
             try:
                 # Usar force=true para eliminar incluso compras RECIBIDAS
                 resp = requests.delete(
-                    f"{BASE_URL}/api/compras/{compra_id}?force=true", 
+                    f"{API_URL}/api/compras/{compra_id}?force=true", 
                     headers=headers, 
                     timeout=30
                 )

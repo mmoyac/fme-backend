@@ -487,8 +487,8 @@ class Cliente(Base):
     # Relaciones
     tenant = relationship("Tenant", back_populates="clientes")
     pedidos = relationship("Pedido", back_populates="cliente")
-    puntos_cliente = relationship("PuntosCliente", back_populates="cliente")
-    movimientos_puntos = relationship("MovimientoPuntos", back_populates="cliente")
+    puntos_cliente = relationship("PuntosCliente", back_populates="cliente", cascade="all, delete-orphan")
+    movimientos_puntos = relationship("MovimientoPuntos", back_populates="cliente", cascade="all, delete-orphan")
 
 
 class TipoMovimientoPuntos(enum.Enum):

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File,
 from sqlalchemy.orm import Session
 
 from database.database import get_db
-from database.models import Producto, CategoriaProducto, MovimientoInventario, DetalleCompra
+from database.models import Producto, CategoriaProducto, MovimientoInventario, DetalleCompra, ItemPedido, IngredienteReceta
 from schemas.catalogo import ProductoCatalogo
 from schemas.producto import ProductoResponse, ProductoCreate, ProductoUpdate
 from services import inventario_service, tenant_service
@@ -301,7 +301,17 @@ def eliminar_producto(producto_id: int, db: Session = Depends(get_db), current_u
         DetalleCompra.producto_id == producto_id
     ).delete(synchronize_session=False)
     
-    # 3. Ahora sí eliminar el producto (cascades se encargan del resto)
+    # 3. Eliminar items de pedido (por si quedaron huérfanos)
+    db.query(ItemPedido).filter(
+        ItemPedido.producto_id == producto_id
+    ).delete(synchronize_session=False)
+    
+    # 4. Eliminar referencias como ingrediente en recetas (usado_en_recetas)
+    db.query(IngredienteReceta).filter(
+        IngredienteReceta.producto_ingrediente_id == producto_id
+    ).delete(synchronize_session=False)
+    
+    # 5. Ahora sí eliminar el producto (cascades se encargan del resto)
     db.delete(db_producto)
     db.commit()
     return None
