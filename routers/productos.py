@@ -56,6 +56,132 @@ def obtener_catalogo_web(
     return catalogo
 
 
+@router.get("/catalogo-local/{local_id}")
+def obtener_catalogo_local(
+    local_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    """
+    Obtiene el catálogo de productos con precios y stock de un local específico.
+    
+    **OPTIMIZADO para POS:** Devuelve TODO en una sola consulta SQL para evitar N+1 queries.
+    
+    Retorna para cada producto:
+    - Datos básicos (id, sku, nombre, descripción, imagen_url)
+    - Categoría (id, nombre, puntos_fidelidad)
+    - Precio del local específico (precio_base en unidad mínima)
+    - Stock del local específico
+    - Unidad de medida
+    
+    **Uso:** POS / Backoffice - Crear pedidos desde local físico
+    """
+    from sqlalchemy import func
+    from sqlalchemy.orm import joinedload
+    from database.models import Precio, Inventario, UnidadMedida, CategoriaProducto
+    
+    # Query optimizada con JOINs para traer todo en una sola consulta
+    query = (
+        db.query(
+            Producto.id,
+            Producto.sku,
+            Producto.nombre,
+            Producto.descripcion,
+            Producto.imagen_url,
+            Producto.codigo_barra,
+            Producto.categoria_id,
+            Producto.tipo_producto_id,
+            Producto.unidad_medida_id,
+            Producto.es_vendible,
+            Producto.activo,
+            CategoriaProducto.nombre.label('categoria_nombre'),
+            CategoriaProducto.puntos_fidelidad.label('categoria_puntos'),
+            Precio.monto_precio.label('precio_base'),
+            Precio.unidad_medida_id.label('precio_unidad_medida_id'),
+            Inventario.cantidad_stock.label('stock_local'),
+            UnidadMedida.nombre.label('unidad_medida_nombre'),
+            UnidadMedida.abreviatura.label('unidad_medida_abrev'),
+            UnidadMedida.factor_conversion
+        )
+        .outerjoin(CategoriaProducto, Producto.categoria_id == CategoriaProducto.id)
+        .outerjoin(
+            Precio,
+            (Precio.producto_id == Producto.id) & (Precio.local_id == local_id)
+        )
+        .outerjoin(
+            Inventario,
+            (Inventario.producto_id == Producto.id) & (Inventario.local_id == local_id)
+        )
+        .outerjoin(
+            UnidadMedida,
+            UnidadMedida.id == Precio.unidad_medida_id
+        )
+        .filter(
+            Producto.tenant_id == current_user.tenant_id,
+            Producto.es_vendible == True,
+            Producto.activo == True
+        )
+        .order_by(Producto.nombre)
+        .all()
+    )
+    
+    # Agrupar por producto (puede haber múltiples precios por unidad de medida)
+    productos_dict = {}
+    for row in query:
+        producto_id = row.id
+        
+        if producto_id not in productos_dict:
+            productos_dict[producto_id] = {
+                'id': row.id,
+                'sku': row.sku,
+                'nombre': row.nombre,
+                'descripcion': row.descripcion,
+                'imagen_url': row.imagen_url,
+                'codigo_barra': row.codigo_barra,
+                'categoria_id': row.categoria_id,
+                'categoria_nombre': row.categoria_nombre,
+                'categoria_puntos_fidelidad': row.categoria_puntos or 0,
+                'tipo_producto_id': row.tipo_producto_id,
+                'unidad_medida_id': row.unidad_medida_id,
+                'es_vendible': row.es_vendible,
+                'activo': row.activo,
+                'stock_local': row.stock_local or 0,
+                'precios': []
+            }
+        
+        # Agregar precio si existe (puede haber múltiples por unidad de medida)
+        if row.precio_base is not None:
+            productos_dict[producto_id]['precios'].append({
+                'monto_precio': row.precio_base,
+                'unidad_medida_id': row.precio_unidad_medida_id,
+                'unidad_medida_nombre': row.unidad_medida_nombre,
+                'unidad_medida_abrev': row.unidad_medida_abrev,
+                'factor_conversion': row.factor_conversion or 1
+            })
+    
+    # Encontrar precio base (menor factor de conversión) para cada producto
+    result = []
+    for producto in productos_dict.values():
+        # Ordenar precios por factor de conversión (menor = unitario)
+        if producto['precios']:
+            precios_ordenados = sorted(
+                producto['precios'],
+                key=lambda p: p['factor_conversion']
+            )
+            precio_base = precios_ordenados[0]
+            producto['precio_local'] = precio_base['monto_precio']
+            producto['precio_unidad_medida'] = precio_base['unidad_medida_nombre']
+        else:
+            producto['precio_local'] = 0
+            producto['precio_unidad_medida'] = None
+        
+        # Mantener todos los precios disponibles para el frontend
+        # (útil si se quiere vender por otra unidad)
+        result.append(producto)
+    
+    return result
+
+
 # --------------------------------------------------
 # CRUD Endpoints para Backoffice
 # --------------------------------------------------
