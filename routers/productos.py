@@ -100,7 +100,7 @@ def obtener_catalogo_local(
             Precio.unidad_medida_id.label('precio_unidad_medida_id'),
             Inventario.cantidad_stock.label('stock_local'),
             UnidadMedida.nombre.label('unidad_medida_nombre'),
-            UnidadMedida.abreviatura.label('unidad_medida_abrev'),
+            UnidadMedida.simbolo.label('unidad_medida_abrev'),
             UnidadMedida.factor_conversion
         )
         .outerjoin(CategoriaProducto, Producto.categoria_id == CategoriaProducto.id)
