@@ -68,7 +68,7 @@ def listar_proveedores_carne(
 def listar_enrolamientos(
     filtro: FiltroEnrolamiento = Depends(),
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
+    limit: int = Query(5000, ge=1, le=10000),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user_with_wms_access)
 ):

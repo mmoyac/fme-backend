@@ -16,7 +16,7 @@ router = APIRouter()
 @router.get("/", response_model=List[PrecioResponse])
 def listar_precios(
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 5000,
     producto_id: int = None,
     local_id: int = None,
     db: Session = Depends(get_db),

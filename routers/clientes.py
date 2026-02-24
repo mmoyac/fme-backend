@@ -18,7 +18,7 @@ router = APIRouter()
 @router.get("/", response_model=List[ClienteResponse])
 def listar_clientes(
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 5000,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
 ):

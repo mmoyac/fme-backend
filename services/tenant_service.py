@@ -111,10 +111,10 @@ def get_tenant_from_request(request: Request, db: Session) -> Optional[Tenant]:
             print(f"✅ Tenant encontrado por subdominio: {tenant.nombre} (ID: {tenant.id})")
             return tenant
     
-    # 5. Fallback: retornar tenant por defecto
-    tenant = db.query(Tenant).filter(Tenant.id == 1).first()
-    print(f"⚠️ Usando tenant por defecto (fallback): {tenant.nombre if tenant else 'None'}")
-    return tenant
+    # 5. Si no se encontró tenant, lanzar error explícito
+    from fastapi import HTTPException
+    print(f"❌ Dominio no registrado: {hostname}. Lanzando error 404.")
+    raise HTTPException(status_code=404, detail=f"Dominio '{hostname}' no registrado como tenant.")
 
 
 def get_tenant_id_from_request(request: Request, db: Session) -> int:

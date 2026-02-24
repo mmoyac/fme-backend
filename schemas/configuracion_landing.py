@@ -49,6 +49,9 @@ class ConfiguracionLandingBase(BaseModel):
     favicon_url: Optional[str] = Field(None, max_length=255)
     nombre_comercial: Optional[str] = Field(None, max_length=100)
     
+    # Paleta de colores
+    paleta_id: Optional[int] = Field(None, description="ID de paleta de colores reutilizable")
+    
     # Colores
     colores: Dict[str, Any] = Field(default_factory=dict)
     
@@ -93,6 +96,9 @@ class ConfiguracionLandingUpdate(BaseModel):
     favicon_url: Optional[str] = Field(None, max_length=255)
     nombre_comercial: Optional[str] = Field(None, max_length=100)
     
+    # Paleta de colores
+    paleta_id: Optional[int] = Field(None, description="ID de paleta de colores reutilizable")
+    
     # Colores
     colores: Optional[Dict[str, Any]] = None
     
@@ -129,6 +135,7 @@ class ConfiguracionLandingResponse(ConfiguracionLandingBase):
     """Schema de respuesta de ConfiguracionLanding."""
     id: int
     tenant_id: int
+    paleta_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 

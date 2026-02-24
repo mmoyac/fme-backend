@@ -14,6 +14,49 @@ router = APIRouter(
     tags=["Produccion"]
 )
 
+# Endpoint para chequeo de insumos en tiempo real
+@router.get("/chequear-insumos")
+def chequear_insumos_producto(
+    producto_id: int,
+    cantidad: float,
+    local_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    """
+    Chequea si hay stock suficiente de insumos para elaborar una cantidad de un producto en un local.
+    Retorna lista de insumos requeridos y faltantes.
+    """
+    producto = db.query(models.Producto).filter(models.Producto.id == producto_id).first()
+    if not producto or not producto.tiene_receta or not producto.recetas:
+        return {"ok": True, "insumos": [], "errores": []}
+    receta = producto.recetas[0]
+    rendimiento = float(receta.rendimiento)
+    if rendimiento == 0:
+        return {"ok": True, "insumos": [], "errores": []}
+    factor = cantidad / rendimiento
+    insumos = []
+    errores = []
+    for ingrediente in receta.ingredientes:
+        pid = ingrediente.producto_ingrediente_id
+        consumo = float(ingrediente.cantidad) * factor
+        prod_ing = db.query(models.Producto).filter(models.Producto.id == pid).first()
+        inv = db.query(models.Inventario).filter(
+            models.Inventario.producto_id == pid,
+            models.Inventario.local_id == local_id
+        ).first()
+        stock_actual = float(inv.cantidad_stock) if inv else 0.0
+        insumos.append({
+            "producto_id": pid,
+            "nombre": prod_ing.nombre if prod_ing else "Desconocido",
+            "cantidad_requerida": consumo,
+            "stock_actual": stock_actual,
+            "unidad": prod_ing.unidad_medida.simbolo if prod_ing and prod_ing.unidad_medida else ""
+        })
+        if stock_actual < consumo:
+            errores.append(f"Falta {prod_ing.nombre if prod_ing else 'Desconocido'}: Requiere {consumo:.2f}, Disponible {stock_actual:.2f}")
+    return {"ok": len(errores) == 0, "insumos": insumos, "errores": errores}
+
 @router.get("/ordenes", response_model=List[schemas_prod.OrdenProduccionRead])
 def listar_ordenes(db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
     return db.query(models.OrdenProduccion).join(models.Local).filter(
@@ -89,6 +132,44 @@ def crear_orden(orden: schemas_prod.OrdenProduccionCreate, db: Session = Depends
     if not local:
         raise HTTPException(status_code=404, detail="Local no encontrado o no pertenece a tu organización")
     
+    # --- VALIDACIÓN DE STOCK DE INSUMOS ANTES DE GUARDAR ---
+    consumos_totales = {}  # {producto_id: cantidad_necesaria}
+    for det in orden.detalles:
+        producto = db.query(models.Producto).filter(models.Producto.id == det.producto_id).first()
+        if producto and producto.tiene_receta and producto.recetas:
+            receta = producto.recetas[0]  # Usar primera receta activa
+            rendimiento = float(receta.rendimiento)
+            if rendimiento == 0:
+                continue
+            factor = float(det.cantidad) / rendimiento
+            for ingrediente in receta.ingredientes:
+                pid = ingrediente.producto_ingrediente_id
+                consumo = float(ingrediente.cantidad) * factor
+                if pid in consumos_totales:
+                    consumos_totales[pid] += consumo
+                else:
+                    consumos_totales[pid] = consumo
+
+    # Verificar disponibilidad en Base de Datos
+    errores_stock = []
+    for pid, cantidad_requerida in consumos_totales.items():
+        if cantidad_requerida <= 0.001:
+            continue
+        inv = db.query(models.Inventario).filter(
+            models.Inventario.producto_id == pid,
+            models.Inventario.local_id == orden.local_id
+        ).first()
+        stock_actual = float(inv.cantidad_stock) if inv else 0.0
+        if stock_actual < cantidad_requerida:
+            producto_nombre = db.query(models.Producto.nombre).filter(models.Producto.id == pid).scalar()
+            errores_stock.append(f"Falta {producto_nombre}: Requiere {cantidad_requerida:.2f}, Disponible {stock_actual:.2f}")
+    if errores_stock:
+        raise HTTPException(
+            status_code=400,
+            detail="Stock insuficiente de insumos: " + "; ".join(errores_stock)
+        )
+
+    # --- GUARDAR ORDEN SI HAY STOCK SUFICIENTE ---
     nuevo_orden = models.OrdenProduccion(
         local_id=orden.local_id,
         fecha_programada=orden.fecha_programada,
@@ -98,16 +179,14 @@ def crear_orden(orden: schemas_prod.OrdenProduccionCreate, db: Session = Depends
     db.add(nuevo_orden)
     db.commit()
     db.refresh(nuevo_orden)
-    
     for det in orden.detalles:
         nuevo_detalle = models.DetalleOrdenProduccion(
             orden_id=nuevo_orden.id,
             producto_id=det.producto_id,
             unidad_medida_id=det.unidad_medida_id,
-            cantidad_programada=det.cantidad # SQLAlchemy Numeric handles Decimal typically, but lets see
+            cantidad_programada=det.cantidad
         )
         db.add(nuevo_detalle)
-    
     db.commit()
     db.refresh(nuevo_orden)
     return nuevo_orden

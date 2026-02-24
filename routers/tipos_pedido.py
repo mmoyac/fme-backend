@@ -20,7 +20,7 @@ router = APIRouter()
 @router.get("/", response_model=List[TipoPedidoResponse])
 def listar_tipos_pedido(
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 5000,
     activo: bool = None,
     db: Session = Depends(get_db)
 ):

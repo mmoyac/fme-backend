@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from routers.auth import get_current_active_user
 
 # Importar routers
-from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, admin_utils, payments, test_payments, maestras, recetas, produccion, compras, cheques, puntos, caja, enrolamiento, gemini_vision, precios_proveedor, stock_cajas, alertas, tipos_pedido, despachos, configuracion, debug_menu, admin_configuracion_landing, tenants, etiquetas
+from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, admin_utils, payments, test_payments, maestras, recetas, produccion, compras, cheques, puntos, caja, enrolamiento, gemini_vision, precios_proveedor, stock_cajas, alertas, tipos_pedido, despachos, configuracion, debug_menu, admin_configuracion_landing, tenants, etiquetas, paleta_colores
 
 app = FastAPI(
     title="FME Backend API",
@@ -97,8 +97,9 @@ app.include_router(alertas.router, prefix="/api/alertas", tags=["Alertas"], depe
 app.include_router(despachos.router, prefix="/api/despachos", tags=["Despachos"], dependencies=[Depends(get_current_active_user)])
 app.include_router(configuracion.router, prefix="/api/config", tags=["Configuración"])
 app.include_router(admin_configuracion_landing.router, prefix="/api/admin/configuracion-landing", tags=["Admin - Configuración Landing"], dependencies=[Depends(get_current_active_user)])
-app.include_router(tenants.router, prefix="/api/tenants", tags=["Tenants (Multi-tenant SaaS)"], dependencies=[Depends(get_current_active_user)])
+app.include_router(tenants.router, prefix="/api/tenants", tags=["Tenants (Multi-tenant SaaS)"])
 app.include_router(etiquetas.router, tags=["Etiquetas"], dependencies=[Depends(get_current_active_user)])
+app.include_router(paleta_colores.router, prefix="/api/paleta-colores", tags=["Paletas de Colores"], dependencies=[Depends(get_current_active_user)])
 app.include_router(debug_menu.router, prefix="/api/debug", tags=["Debug Menu"])
 
 @app.get("/")

@@ -38,7 +38,10 @@ def autenticar():
 def listar_y_contar(endpoint, headers, nombre):
     """Listar y contar registros de un endpoint."""
     try:
-        resp = requests.get(f"{API_URL}{endpoint}", headers=headers)
+        # Agregar limit=10000 para evitar paginación default de 100
+        separator = '&' if '?' in endpoint else '?'
+        url = f"{API_URL}{endpoint}{separator}limit=10000"
+        resp = requests.get(url, headers=headers)
         if resp.status_code == 200:
             data = resp.json()
             return data, len(data)
@@ -91,7 +94,7 @@ def eliminar_pedidos(headers):
 def eliminar_compras(headers):
     """Eliminar todas las compras del tenant (incluidas las RECIBIDAS)."""
     try:
-        response = requests.get(f"{API_URL}/api/compras/", headers=headers, timeout=30)
+        response = requests.get(f"{API_URL}/api/compras/?limit=10000", headers=headers, timeout=30)
         if response.status_code != 200:
             print(f"❌ Error obteniendo compras: {response.status_code}")
             return 0
@@ -146,7 +149,7 @@ def eliminar_compras(headers):
 def eliminar_ordenes_produccion(headers):
     """Eliminar todas las órdenes de producción del tenant."""
     try:
-        response = requests.get(f"{API_URL}/api/produccion/ordenes", headers=headers, timeout=30)
+        response = requests.get(f"{API_URL}/api/produccion/ordenes?limit=10000", headers=headers, timeout=30)
         if response.status_code != 200:
             print(f"❌ Error obteniendo órdenes de producción: {response.status_code}")
             return 0
@@ -565,13 +568,13 @@ def eliminar_datos_masasestacion():
         
         # Contar órdenes de producción y compras
         try:
-            resp_ordenes = requests.get(f"{API_URL}/api/produccion/ordenes", headers=headers, timeout=30)
+            resp_ordenes = requests.get(f"{API_URL}/api/produccion/ordenes?limit=10000", headers=headers, timeout=30)
             ordenes_count = len(resp_ordenes.json()) if resp_ordenes.status_code == 200 else 0
         except:
             ordenes_count = 0
             
         try:
-            resp_compras = requests.get(f"{API_URL}/api/compras/", headers=headers, timeout=30)
+            resp_compras = requests.get(f"{API_URL}/api/compras/?limit=10000", headers=headers, timeout=30)
             compras_count = len(resp_compras.json()) if resp_compras.status_code == 200 else 0
         except:
             compras_count = 0

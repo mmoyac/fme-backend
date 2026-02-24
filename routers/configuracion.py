@@ -26,12 +26,15 @@ async def get_landing_config(
     Endpoint público (sin autenticación) que detecta el tenant automáticamente
     basándose en el dominio de la petición.
     
+    Si la configuración tiene paleta_id, retorna los colores de la paleta.
+    Si no tiene paleta_id, retorna los colores custom del campo colores.
+    
     Ejemplos:
     - masasestacion.cl → Tenant 1
     - elolivo.masasestacion.cl → Tenant 2
     - localhost → Tenant 1 (desarrollo)
     """
-    from database.models import Tenant, ConfiguracionLanding
+    from database.models import Tenant, ConfiguracionLanding, PaletaColores
     
     # Detectar tenant por dominio
     tenant = tenant_service.get_tenant_from_request(request, db)
@@ -41,10 +44,35 @@ async def get_landing_config(
     # Validar que el tenant esté activo
     tenant_service.validar_tenant_activo(tenant)
     
-    # Buscar configuración de landing
+    # Buscar configuración de landing con JOIN a paleta_colores
     config = db.query(ConfiguracionLanding).filter(ConfiguracionLanding.tenant_id == tenant.id).first()
     if not config:
         raise HTTPException(status_code=404, detail="Configuración de landing no encontrada")
+    
+    # Determinar colores: usar paleta si existe, sino usar colores custom
+    colores_final = {}
+    if config.paleta_id:
+        # Cargar colores de la paleta
+        paleta = db.query(PaletaColores).filter(PaletaColores.id == config.paleta_id).first()
+        if paleta:
+            colores_final = {
+                "primario": paleta.primario,
+                "primario_light": paleta.primario_light,
+                "primario_dark": paleta.primario_dark,
+                "secundario": paleta.secundario,
+                "secundario_light": paleta.secundario_light,
+                "secundario_dark": paleta.secundario_dark,
+                "acento": paleta.acento,
+                "fondo_hero_inicio": paleta.fondo_hero_inicio,
+                "fondo_hero_fin": paleta.fondo_hero_fin,
+                "fondo_seccion": paleta.fondo_seccion
+            }
+        else:
+            # Paleta no existe, usar colores custom
+            colores_final = config.colores
+    else:
+        # Sin paleta, usar colores custom
+        colores_final = config.colores
     
     # Retornar configuración completa
     return {
@@ -59,7 +87,7 @@ async def get_landing_config(
             "favicon_url": config.favicon_url,
             "nombre_comercial": config.nombre_comercial
         },
-        "colores": config.colores,
+        "colores": colores_final,
         "hero": {
             "titulo": config.hero_titulo,
             "subtitulo": config.hero_subtitulo,

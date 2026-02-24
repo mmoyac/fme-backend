@@ -1,3 +1,4 @@
+
 """
 Modelos de la base de datos con SQLAlchemy ORM.
 """
@@ -7,6 +8,41 @@ from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import JSON
 from .database import Base
 import enum
+
+# --------------------------------------------------
+# PALETAS DE COLORES (THEMES)
+# --------------------------------------------------
+
+class PaletaColores(Base):
+    """
+    Paletas de colores reutilizables para branding y temas visuales.
+    Permite asociar una paleta a uno o varios tenants/configuraciones.
+    """
+    __tablename__ = "paleta_colores"
+
+    id = Column(Integer, primary_key=True, index=True)
+    nombre = Column(String(100), unique=True, nullable=False, index=True)
+    descripcion = Column(String(255), nullable=True)
+
+    # Colores principales y avanzados (igual que en ConfiguracionLanding.colores)
+    primario = Column(String(10), nullable=False)
+    primario_light = Column(String(10), nullable=True)
+    primario_dark = Column(String(10), nullable=True)
+    secundario = Column(String(10), nullable=False)
+    secundario_light = Column(String(10), nullable=True)
+    secundario_dark = Column(String(10), nullable=True)
+    acento = Column(String(10), nullable=True)
+    fondo_hero_inicio = Column(String(10), nullable=True)
+    fondo_hero_fin = Column(String(10), nullable=True)
+    fondo_seccion = Column(String(10), nullable=True)
+
+    es_publica = Column(Boolean, default=True, nullable=False)
+    creado_por = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    fecha_creacion = Column(DateTime(timezone=True), server_default=func.now())
+    fecha_actualizacion = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relaciones (opcional: si quieres asociar a tenants/configuraciones)
+    # configuraciones = relationship("ConfiguracionLanding", back_populates="paleta_colores")
 
 
 # --------------------------------------------------
@@ -32,13 +68,24 @@ class Tenant(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # Relaciones
-    configuracion_landing = relationship("ConfiguracionLanding", back_populates="tenant", uselist=False)
-    productos = relationship("Producto", back_populates="tenant")
-    locales = relationship("Local", back_populates="tenant")
-    clientes = relationship("Cliente", back_populates="tenant")
-    pedidos = relationship("Pedido", back_populates="tenant")
-    usuarios = relationship("User", back_populates="tenant")
-    proveedores = relationship("Proveedor", back_populates="tenant")
+    configuracion_landing = relationship(
+        "ConfiguracionLanding",
+        back_populates="tenant",
+        uselist=False,
+        cascade="all, delete-orphan",
+        passive_deletes=True
+    )
+    productos = relationship("Producto", back_populates="tenant", passive_deletes=True)
+    locales = relationship("Local", back_populates="tenant", passive_deletes=True)
+    clientes = relationship("Cliente", back_populates="tenant", passive_deletes=True)
+    pedidos = relationship("Pedido", back_populates="tenant", passive_deletes=True)
+    usuarios = relationship(
+        "User",
+        back_populates="tenant",
+        cascade="all, delete-orphan",
+        passive_deletes=True
+    )
+    proveedores = relationship("Proveedor", back_populates="tenant", passive_deletes=True)
 
 
 class ConfiguracionLanding(Base):
@@ -56,7 +103,11 @@ class ConfiguracionLanding(Base):
     favicon_url = Column(String(255), nullable=True)
     nombre_comercial = Column(String(100), nullable=True)
     
+    # Paleta de colores (FK opcional a tabla paleta_colores)
+    paleta_id = Column(Integer, ForeignKey("paleta_colores.id", ondelete="SET NULL"), nullable=True)
+    
     # Colores (JSON: {primario, secundario, fondo_hero_inicio, etc.})
+    # NOTA: Si paleta_id está definido, estos colores se sobrescriben por los de la paleta
     colores = Column(JSON, nullable=False, server_default='{}')
     
     # Hero Section
@@ -92,6 +143,7 @@ class ConfiguracionLanding(Base):
 
     # Relaciones
     tenant = relationship("Tenant", back_populates="configuracion_landing")
+    paleta = relationship("PaletaColores", foreign_keys=[paleta_id])
 
 
 # --------------------------------------------------
@@ -323,7 +375,7 @@ class Producto(Base):
     tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     nombre = Column(String, nullable=False, index=True)
     descripcion = Column(Text)
-    sku = Column(String, unique=True, nullable=False, index=True)
+    sku = Column(String, nullable=False, index=True)  # Único por tenant, no global
     imagen_url = Column(String, nullable=True)
     codigo_barra = Column(String(50), nullable=True, index=True)  # Número para generar códigos de barra
     
@@ -352,7 +404,7 @@ class Producto(Base):
     categoria = relationship("CategoriaProducto", back_populates="productos")
     tipo_producto = relationship("TipoProducto", back_populates="productos")
     unidad_medida = relationship("UnidadMedida", back_populates="productos")
-    tenant = relationship("Tenant", back_populates="productos")
+    tenant = relationship("Tenant", back_populates="productos", passive_deletes=True)
     
     inventarios = relationship("Inventario", back_populates="producto", cascade="all, delete-orphan")
     precios = relationship("Precio", back_populates="producto", cascade="all, delete-orphan")
@@ -369,6 +421,11 @@ class Producto(Base):
     # Relaciones de etiquetado
     informacion_nutricional = relationship("InformacionNutricional", back_populates="producto", uselist=False, cascade="all, delete-orphan")
     sellos = relationship("ProductoSello", back_populates="producto", cascade="all, delete-orphan")
+    
+    # Constraints: SKU único por tenant
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'sku', name='uq_producto_tenant_sku'),
+    )
 
 
 class SelloAdvertencia(Base):
@@ -445,20 +502,26 @@ class Local(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
-    codigo = Column(String, unique=True, nullable=False, index=True)
-    nombre = Column(String, unique=True, nullable=False, index=True)
+    codigo = Column(String, nullable=False, index=True)  # Único por tenant, no global
+    nombre = Column(String, nullable=False, index=True)  # Único por tenant, no global
     direccion = Column(String)
     activo = Column(Boolean, default=True)
     tipo_local_id = Column(Integer, ForeignKey("tipos_local.id", ondelete="SET NULL"), nullable=True)
     
     # Relaciones
-    tenant = relationship("Tenant", back_populates="locales")
+    tenant = relationship("Tenant", back_populates="locales", passive_deletes=True)
     tipo_local = relationship("TipoLocal", back_populates="locales")
     inventarios = relationship("Inventario", back_populates="local", cascade="all, delete-orphan")
     precios = relationship("Precio", back_populates="local", cascade="all, delete-orphan")
     pedidos = relationship("Pedido", back_populates="local", foreign_keys="Pedido.local_id")
     compras = relationship("Compra", back_populates="local")
     turnos_caja = relationship("TurnoCaja", back_populates="local", cascade="all, delete-orphan")
+    
+    # Constraints: codigo y nombre únicos por tenant
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'codigo', name='uq_local_tenant_codigo'),
+        UniqueConstraint('tenant_id', 'nombre', name='uq_local_tenant_nombre'),
+    )
 
 
 class Cliente(Base):
@@ -469,7 +532,10 @@ class Cliente(Base):
     tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     nombre = Column(String, nullable=False)
     apellido = Column(String)
-    email = Column(String, unique=True)
+    email = Column(String, nullable=False)
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'email', name='uq_cliente_tenant_email'),
+    )
     telefono = Column(String)
     direccion = Column(String)
     comuna = Column(String)

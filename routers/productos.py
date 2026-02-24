@@ -189,7 +189,7 @@ def obtener_catalogo_local(
 @router.get("/", response_model=List[ProductoResponse])
 def listar_productos(
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 5000,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
 ):
@@ -217,7 +217,8 @@ def listar_productos(
     result = []
     for p in productos:
         total_stock = sum(inv.cantidad_stock for inv in p.inventarios)
-        
+        # Obtener símbolo de unidad de medida
+        unidad_medida_simbolo = p.unidad_medida.simbolo if p.unidad_medida else None
         # Crear diccionario con todos los campos base
         producto_dict = {
             'id': p.id,
@@ -244,11 +245,11 @@ def listar_productos(
             'categoria_puntos_fidelidad': p.categoria.puntos_fidelidad if p.categoria else None,
             # Información de tipo de venta (peso vs cantidad)
             'tipo_venta_codigo': p.categoria.tipo_venta.codigo if p.categoria and p.categoria.tipo_venta else None,
-            'tipo_venta_nombre': p.categoria.tipo_venta.nombre if p.categoria and p.categoria.tipo_venta else None
+            'tipo_venta_nombre': p.categoria.tipo_venta.nombre if p.categoria and p.categoria.tipo_venta else None,
+            # Unidad de medida simbólica
+            'unidad_medida_simbolo': unidad_medida_simbolo
         }
-        
         result.append(producto_dict)
-        
     return result
 
 
@@ -282,8 +283,9 @@ def obtener_producto(producto_id: int, db: Session = Depends(get_db), current_us
     
     # Calcular stock actual
     total_stock = sum(inv.cantidad_stock for inv in producto.inventarios)
-    
-    # Retornar con información de categoría
+    # Obtener símbolo de unidad de medida
+    unidad_medida_simbolo = producto.unidad_medida.simbolo if producto.unidad_medida else None
+    # Retornar con información de categoría y unidad simbólica
     return {
         'id': producto.id,
         'nombre': producto.nombre,
@@ -309,7 +311,9 @@ def obtener_producto(producto_id: int, db: Session = Depends(get_db), current_us
         'categoria_puntos_fidelidad': producto.categoria.puntos_fidelidad if producto.categoria else None,
         # Información de tipo de venta (peso vs cantidad)
         'tipo_venta_codigo': producto.categoria.tipo_venta.codigo if producto.categoria and producto.categoria.tipo_venta else None,
-        'tipo_venta_nombre': producto.categoria.tipo_venta.nombre if producto.categoria and producto.categoria.tipo_venta else None
+        'tipo_venta_nombre': producto.categoria.tipo_venta.nombre if producto.categoria and producto.categoria.tipo_venta else None,
+        # Unidad de medida simbólica
+        'unidad_medida_simbolo': unidad_medida_simbolo
     }
 
 
