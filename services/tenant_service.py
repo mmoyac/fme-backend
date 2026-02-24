@@ -72,6 +72,19 @@ def get_tenant_from_request(request: Request, db: Session) -> Optional[Tenant]:
             print(f"✅ Tenant encontrado por dominio sin www: {tenant.nombre} (ID: {tenant.id})")
             return tenant
     
+    # 1c. Si empieza con prefijo administrativo (admin., api., backoffice.), extraer dominio base
+    # Ej: admin.elolivo.lexastech.cl → buscar por elolivo.lexastech.cl
+    parts = hostname.split('.')
+    if len(parts) >= 3 and parts[0] in ['admin', 'api', 'www', 'backoffice']:
+        dominio_base = '.'.join(parts[1:])  # Remover primer segmento
+        tenant = db.query(Tenant).filter(
+            Tenant.dominio_principal == dominio_base
+        ).first()
+        
+        if tenant:
+            print(f"✅ Tenant encontrado por dominio base (sin prefijo {parts[0]}): {tenant.nombre} (ID: {tenant.id})")
+            return tenant
+    
     # 2. Si es localhost, retornar tenant por defecto (Masas Estación)
     if hostname in ['localhost', '127.0.0.1', '0.0.0.0']:
         tenant = db.query(Tenant).filter(Tenant.id == 1).first()
