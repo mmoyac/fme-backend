@@ -652,6 +652,7 @@ def escanear_qr_lote(
     3. Auto-completa el peso_real con el peso_actual del lote
     4. Marca el item como completado
     """
+    print(f"[DEBUG] Usuario autenticado: {current_user.email} (tenant_id={current_user.tenant_id})")
     # Obtener el picking_item con joins necesarios para validar tenant
     picking_item = db.query(PickingItem).join(
         Despacho
@@ -663,6 +664,11 @@ def escanear_qr_lote(
         PickingItem.id == picking_item_id,
         Cliente.tenant_id == current_user.tenant_id
     ).first()
+    if picking_item:
+        print(f"[DEBUG] PickingItem encontrado: id={picking_item.id}, lote_codigo={picking_item.lote_codigo}, despacho_id={picking_item.despacho_id}")
+        print(f"[DEBUG] Cliente.tenant_id={picking_item.despacho.pedido.cliente.tenant_id}")
+    else:
+        print(f"[DEBUG] PickingItem NO encontrado para id={picking_item_id} y tenant_id={current_user.tenant_id}")
     
     if not picking_item:
         raise HTTPException(

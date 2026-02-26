@@ -523,6 +523,48 @@ class Local(Base):
         UniqueConstraint('tenant_id', 'nombre', name='uq_local_tenant_nombre'),
     )
 
+# --------------------------------------------------
+# 11. SOLICITUDES DE TRANSFERENCIA ENTRE LOCALES
+# --------------------------------------------------
+
+class SolicitudTransferencia(Base):
+    """Solicitud de productos entre locales."""
+    __tablename__ = "solicitudes_transferencia"
+
+    solicitud_id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    local_origen_id = Column(Integer, ForeignKey("locales.id", ondelete="RESTRICT"), nullable=False)
+    local_destino_id = Column(Integer, ForeignKey("locales.id", ondelete="RESTRICT"), nullable=False)
+    usuario_solicitante_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    estado_id = Column(Integer, ForeignKey("estados_enrolamiento.id", ondelete="RESTRICT"), nullable=False)
+    nota = Column(Text, nullable=True)
+    fecha_creacion = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    fecha_actualizacion = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Relaciones
+    items = relationship("ItemSolicitudTransferencia", back_populates="solicitud", cascade="all, delete-orphan")
+    local_origen = relationship("Local", foreign_keys=[local_origen_id])
+    local_destino = relationship("Local", foreign_keys=[local_destino_id])
+    usuario_solicitante = relationship("User")
+    estado = relationship("EstadoEnrolamiento")
+    tenant = relationship("Tenant")
+
+
+class ItemSolicitudTransferencia(Base):
+    """Detalle de productos solicitados en una solicitud de transferencia."""
+    __tablename__ = "items_solicitud_transferencia"
+
+    solicitud_item_id = Column(Integer, primary_key=True, index=True)
+    solicitud_id = Column(Integer, ForeignKey("solicitudes_transferencia.solicitud_id", ondelete="CASCADE"), nullable=False)
+    producto_id = Column(Integer, ForeignKey("productos.id", ondelete="RESTRICT"), nullable=False)
+    cantidad_solicitada = Column(Integer, nullable=False)
+    cantidad_aprobada = Column(Integer, nullable=True)
+    movimiento_inventario_id = Column(Integer, ForeignKey("movimientos_inventario.id", ondelete="SET NULL"), nullable=True)
+
+    # Relaciones
+    solicitud = relationship("SolicitudTransferencia", back_populates="items")
+    producto = relationship("Producto")
+    movimiento_inventario = relationship("MovimientoInventario")
 
 class Cliente(Base):
     """Clientes del sistema."""

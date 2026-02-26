@@ -1124,7 +1124,7 @@ def eliminar_tipo_vehiculo(
 @router.get("/estados-enrolamiento", response_model=List[EstadoEnrolamiento])
 def listar_estados_enrolamiento(db: Session = Depends(get_db)):
     """Listar todos los estados de enrolamiento."""
-    return db.query(EstadoEnrolamientoModel).filter(EstadoEnrolamientoModel.activo == True).all()
+    return db.query(EstadoEnrolamientoModel).all()
 
 
 @router.post("/estados-enrolamiento", response_model=EstadoEnrolamiento, status_code=status.HTTP_201_CREATED)
@@ -1204,7 +1204,7 @@ def eliminar_estado_enrolamiento(
 @router.get("/ubicaciones", response_model=List[Ubicacion])
 def listar_ubicaciones(db: Session = Depends(get_db)):
     """Listar todas las ubicaciones activas."""
-    return db.query(UbicacionModel).filter(UbicacionModel.activo == True).all()
+    return db.query(UbicacionModel).all()
 
 
 @router.post("/ubicaciones", response_model=Ubicacion, status_code=status.HTTP_201_CREATED)

@@ -8,7 +8,8 @@ from fastapi.staticfiles import StaticFiles
 from routers.auth import get_current_active_user
 
 # Importar routers
-from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, admin_utils, payments, test_payments, maestras, recetas, produccion, compras, cheques, puntos, caja, enrolamiento, gemini_vision, precios_proveedor, stock_cajas, alertas, tipos_pedido, despachos, configuracion, debug_menu, admin_configuracion_landing, tenants, etiquetas, paleta_colores
+from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, admin_utils, payments, test_payments, maestras, recetas, produccion, compras, cheques, puntos, caja, enrolamiento, gemini_vision, precios_proveedor, stock_cajas, alertas, tipos_pedido, despachos, configuracion, debug_menu, admin_configuracion_landing, tenants, etiquetas, paleta_colores, solicitudes_transferencia
+
 
 app = FastAPI(
     title="FME Backend API",
@@ -101,6 +102,9 @@ app.include_router(tenants.router, prefix="/api/tenants", tags=["Tenants (Multi-
 app.include_router(etiquetas.router, tags=["Etiquetas"], dependencies=[Depends(get_current_active_user)])
 app.include_router(paleta_colores.router, prefix="/api/paleta-colores", tags=["Paletas de Colores"], dependencies=[Depends(get_current_active_user)])
 app.include_router(debug_menu.router, prefix="/api/debug", tags=["Debug Menu"])
+
+# Registrar router de solicitudes de transferencia
+app.include_router(solicitudes_transferencia.router)
 
 @app.get("/")
 async def root():
