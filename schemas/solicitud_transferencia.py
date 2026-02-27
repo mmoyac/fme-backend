@@ -19,6 +19,7 @@ class SolicitudTransferenciaCreate(BaseModel):
     local_origen_id: int
     local_destino_id: int
     usuario_solicitante_id: int
+    usuario_finalizador_id: Optional[int] = None
     estado_id: int
     nota: Optional[str] = None
     items: List[ItemSolicitudTransferenciaCreate]
@@ -27,6 +28,7 @@ class SolicitudTransferenciaUpdate(BaseModel):
     estado_id: Optional[int] = None
     nota: Optional[str] = None
     items: Optional[List[ItemSolicitudTransferenciaCreate]] = None
+    usuario_finalizador_id: Optional[int] = None
 
 class SolicitudTransferenciaResponse(BaseModel):
     solicitud_id: int
@@ -34,6 +36,7 @@ class SolicitudTransferenciaResponse(BaseModel):
     local_origen_id: int
     local_destino_id: int
     usuario_solicitante_id: int
+    usuario_finalizador_id: Optional[int] = None
     estado_id: int
     nota: Optional[str] = None
     fecha_creacion: datetime

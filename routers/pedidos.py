@@ -1146,9 +1146,10 @@ def listar_pedidos(
     from sqlalchemy.orm import joinedload
     from database.models import EstadoPedido as EstadoPedidoModel, Despacho
     
-    # Filtrar por tenant mediante join con Cliente
+    # Filtrar por tenant y por local asignado al usuario (local_defecto_id)
     query = db.query(Pedido).join(Cliente).filter(
-        Cliente.tenant_id == current_user.tenant_id
+        Cliente.tenant_id == current_user.tenant_id,
+        Pedido.local_id == current_user.local_defecto_id
     ).options(
         joinedload(Pedido.cliente),
         joinedload(Pedido.items),

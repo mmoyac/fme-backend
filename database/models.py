@@ -536,6 +536,7 @@ class SolicitudTransferencia(Base):
     local_origen_id = Column(Integer, ForeignKey("locales.id", ondelete="RESTRICT"), nullable=False)
     local_destino_id = Column(Integer, ForeignKey("locales.id", ondelete="RESTRICT"), nullable=False)
     usuario_solicitante_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    usuario_finalizador_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
     estado_id = Column(Integer, ForeignKey("estados_enrolamiento.id", ondelete="RESTRICT"), nullable=False)
     nota = Column(Text, nullable=True)
     fecha_creacion = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -545,7 +546,8 @@ class SolicitudTransferencia(Base):
     items = relationship("ItemSolicitudTransferencia", back_populates="solicitud", cascade="all, delete-orphan")
     local_origen = relationship("Local", foreign_keys=[local_origen_id])
     local_destino = relationship("Local", foreign_keys=[local_destino_id])
-    usuario_solicitante = relationship("User")
+    usuario_solicitante = relationship("User", foreign_keys=[usuario_solicitante_id])
+    usuario_finalizador = relationship("User", foreign_keys=[usuario_finalizador_id])
     estado = relationship("EstadoEnrolamiento")
     tenant = relationship("Tenant")
 

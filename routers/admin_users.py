@@ -209,9 +209,9 @@ def crear_usuario(
 def obtener_usuario(
     user_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_admin_user)
+    current_user: User = Depends(get_current_active_user)
 ):
-    """Obtener un usuario por ID."""
+    """Obtener un usuario por ID (requiere solo autenticación)."""
     user = db.query(User).filter(
         User.id == user_id,
         User.tenant_id == current_user.tenant_id
