@@ -3,6 +3,7 @@ Router para el sistema de enrolamiento de vehículos y trazabilidad de lotes.
 """
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 from datetime import datetime
 
@@ -14,6 +15,7 @@ from database.models import (
     TipoProveedor as TipoProveedorModel,
     User,
     Producto as ProductoModel,
+    Ubicacion as UbicacionModel,
     StockCajasProveedor as StockCajasProveedorModel,
     MovimientoStockCajas as MovimientoStockCajasModel
 )
@@ -328,6 +330,8 @@ def listar_lotes(
         query = query.filter(LoteModel.disponible_venta == filtro.disponible_venta)
     if filtro.vendido is not None:
         query = query.filter(LoteModel.vendido == filtro.vendido)
+    if filtro.reservado is not None:
+        query = query.filter(LoteModel.reservado == filtro.reservado)
     if filtro.fecha_vencimiento_desde:
         query = query.filter(LoteModel.fecha_vencimiento >= filtro.fecha_vencimiento_desde)
     if filtro.fecha_vencimiento_hasta:
@@ -348,9 +352,11 @@ def listar_lotes(
             "qr_propio": lote.qr_propio,
             "peso_original": lote.peso_original,
             "peso_actual": lote.peso_actual,
+            "peso_bruto_kg": lote.peso_bruto_kg,
             "fecha_vencimiento": lote.fecha_vencimiento,
             "disponible_venta": lote.disponible_venta,
             "vendido": lote.vendido,
+            "reservado": lote.reservado,
             "fecha_registro": lote.fecha_registro,
             "producto_nombre": lote.producto.nombre,
             "ubicacion_codigo": lote.ubicacion.codigo,
@@ -465,6 +471,184 @@ def crear_lote(
     )
     
     return lote_completo
+
+
+# ─────────────────────────────────────────────────────────────
+# CARGA MASIVA DE LOTES
+# ─────────────────────────────────────────────────────────────
+
+class LoteBulkItem(BaseModel):
+    """Un ítem del archivo de carga masiva."""
+    sku_producto: str
+    qr_original: str  # Código de barras de la etiqueta original del frigorífico (obligatorio)
+    peso_neto_kg: float   # Peso neto (el que se vende / precio por kg)
+    peso_bruto_kg: float  # Peso bruto (para cálculo de carga en camión)
+    fecha_vencimiento: str  # DD/MM/AAAA
+    lote_proveedor: Optional[str] = None
+    fecha_fabricacion: Optional[str] = None  # DD/MM/AAAA
+
+
+class LotesBulkCreate(BaseModel):
+    enrolamiento_id: int
+    ubicacion_id: int
+    lotes: list[LoteBulkItem]
+
+
+class LoteBulkResultItem(BaseModel):
+    fila: int
+    sku_producto: str
+    ok: bool
+    codigo_lote: Optional[str] = None
+    error: Optional[str] = None
+
+
+class LotesBulkResponse(BaseModel):
+    total: int
+    creados: int
+    errores: int
+    resultados: list[LoteBulkResultItem]
+
+
+@router.post("/lotes/bulk", response_model=LotesBulkResponse, status_code=status.HTTP_201_CREATED)
+def crear_lotes_masivo(
+    payload: LotesBulkCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_with_wms_access)
+):
+    """Carga masiva de lotes desde template propio. Genera código y QR automáticamente."""
+    import uuid
+    from datetime import datetime as dt
+
+    # Validar enrolamiento
+    enrolamiento = (
+        db.query(EnrolamientoModel)
+        .join(ProveedorModel, EnrolamientoModel.proveedor_id == ProveedorModel.id)
+        .filter(
+            EnrolamientoModel.id == payload.enrolamiento_id,
+            ProveedorModel.tenant_id == current_user.tenant_id
+        )
+        .first()
+    )
+    if not enrolamiento:
+        raise HTTPException(status_code=404, detail="Enrolamiento no encontrado")
+
+    # Validar ubicación
+    ubicacion = db.query(UbicacionModel).filter(
+        UbicacionModel.id == payload.ubicacion_id,
+        UbicacionModel.activo == True
+    ).first()
+    if not ubicacion:
+        raise HTTPException(status_code=404, detail="Ubicación no encontrada")
+
+    disponible_venta = enrolamiento.estado.codigo == "FINALIZADO"
+
+    resultados = []
+    creados = 0
+    errores = 0
+    nuevos_lotes_db = []  # Para actualizar stock si enrolamiento ya está FINALIZADO
+
+    for idx, item in enumerate(payload.lotes, start=1):
+        try:
+            # Buscar producto por SKU dentro del tenant
+            producto = (
+                db.query(ProductoModel)
+                .filter(
+                    ProductoModel.sku == item.sku_producto,
+                    ProductoModel.tenant_id == current_user.tenant_id
+                )
+                .first()
+            )
+            if not producto:
+                raise ValueError(f"SKU '{item.sku_producto}' no encontrado")
+
+            # Parsear fecha_vencimiento (DD/MM/AAAA)
+            try:
+                fecha_venc = dt.strptime(item.fecha_vencimiento, "%d/%m/%Y")
+            except ValueError:
+                raise ValueError(f"Fecha vencimiento inválida '{item.fecha_vencimiento}' (usar DD/MM/AAAA)")
+
+            fecha_fab = None
+            if item.fecha_fabricacion:
+                try:
+                    fecha_fab = dt.strptime(item.fecha_fabricacion, "%d/%m/%Y")
+                except ValueError:
+                    raise ValueError(f"Fecha fabricación inválida '{item.fecha_fabricacion}' (usar DD/MM/AAAA)")
+
+            # Generar código único
+            short_uuid = str(uuid.uuid4()).replace("-", "")[:8].upper()
+            codigo_lote = f"{producto.sku}-{enrolamiento.id:04d}-{short_uuid}"
+            qr_propio = f"QR-{codigo_lote}"
+
+            # Asegurar unicidad dentro del tenant (muy improbable pero seguro)
+            while (
+                db.query(LoteModel)
+                .join(ProductoModel, LoteModel.producto_id == ProductoModel.id)
+                .filter(
+                    LoteModel.codigo_lote == codigo_lote,
+                    ProductoModel.tenant_id == current_user.tenant_id
+                )
+                .first()
+            ):
+                short_uuid = str(uuid.uuid4()).replace("-", "")[:8].upper()
+                codigo_lote = f"{producto.sku}-{enrolamiento.id:04d}-{short_uuid}"
+                qr_propio = f"QR-{codigo_lote}"
+
+            db_lote = LoteModel(
+                enrolamiento_id=payload.enrolamiento_id,
+                producto_id=producto.id,
+                ubicacion_id=payload.ubicacion_id,
+                codigo_lote=codigo_lote,
+                qr_propio=qr_propio,
+                qr_original=item.qr_original,
+                peso_original=item.peso_neto_kg,
+                peso_actual=item.peso_neto_kg,
+                peso_bruto_kg=item.peso_bruto_kg,
+                fecha_vencimiento=fecha_venc,
+                fecha_fabricacion=fecha_fab,
+                lote_proveedor=item.lote_proveedor,
+                disponible_venta=disponible_venta
+            )
+            db.add(db_lote)
+            db.flush()
+
+            resultados.append(LoteBulkResultItem(
+                fila=idx,
+                sku_producto=item.sku_producto,
+                ok=True,
+                codigo_lote=codigo_lote
+            ))
+            creados += 1
+            if disponible_venta:
+                nuevos_lotes_db.append(db_lote)
+
+        except Exception as e:
+            db.rollback()
+            resultados.append(LoteBulkResultItem(
+                fila=idx,
+                sku_producto=item.sku_producto,
+                ok=False,
+                error=str(e)
+            ))
+            errores += 1
+            # Reiniciar transacción para continuar con los demás
+            db.begin()
+
+    if creados > 0:
+        db.commit()
+        # Si el enrolamiento ya está FINALIZADO, actualizar stock_cajas_proveedor
+        # solo para los lotes recién creados (evita doble conteo)
+        db.refresh(enrolamiento)
+        if enrolamiento.estado and enrolamiento.estado.codigo == "FINALIZADO" and nuevos_lotes_db:
+            for lote in nuevos_lotes_db:
+                db.refresh(lote)
+            actualizar_stock_cajas_desde_enrolamiento(db, enrolamiento, current_user, lotes_especificos=nuevos_lotes_db)
+
+    return LotesBulkResponse(
+        total=len(payload.lotes),
+        creados=creados,
+        errores=errores,
+        resultados=resultados
+    )
 
 
 @router.put("/lotes/{lote_id}", response_model=LoteResponse)
@@ -848,22 +1032,27 @@ def obtener_estadisticas_enrolamiento(
     )
 
 
-def actualizar_stock_cajas_desde_enrolamiento(db: Session, db_enrolamiento, current_user):
+def actualizar_stock_cajas_desde_enrolamiento(db: Session, db_enrolamiento, current_user, lotes_especificos=None):
     """
     Actualiza el stock de cajas basado en los datos del enrolamiento finalizado.
     
-    - Recorre los lotes del enrolamiento
+    - lotes_especificos: lista de LoteModel a procesar. Si es None, procesa todos los lotes del enrolamiento.
     - Identifica productos que son cajas de carnes
     - Actualiza el stock por proveedor usando el servicio de stock
     """
     print(f"📦 Iniciando actualización de stock desde enrolamiento {db_enrolamiento.id}")
     
-    # Obtener lotes del enrolamiento
-    lotes = (
-        db.query(LoteModel)
-        .filter(LoteModel.enrolamiento_id == db_enrolamiento.id)
-        .all()
-    )
+    # Obtener lotes a procesar
+    if lotes_especificos is not None:
+        lotes = lotes_especificos
+        print(f"📋 Procesando {len(lotes)} lotes específicos (bulk)")
+    else:
+        lotes = (
+            db.query(LoteModel)
+            .filter(LoteModel.enrolamiento_id == db_enrolamiento.id)
+            .all()
+        )
+        print(f"📋 Encontrados {len(lotes)} lotes en el enrolamiento")
     
     print(f"📋 Encontrados {len(lotes)} lotes en el enrolamiento")
     

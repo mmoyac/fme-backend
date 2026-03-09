@@ -10,7 +10,7 @@ import io
 from decimal import Decimal
 
 from database.database import get_db
-from database.models import Pedido, ItemPedido, Cliente, Producto, Local, Inventario, MovimientoInventario, TurnoCaja, OperacionCaja, TipoOperacionCaja, EstadoTurnoCaja, TipoPedido, StockCajasProveedor
+from database.models import Pedido, ItemPedido, Cliente, Producto, Local, Inventario, MovimientoInventario, TurnoCaja, OperacionCaja, TipoOperacionCaja, EstadoTurnoCaja, TipoPedido, StockCajasProveedor, MedioPago
 from schemas.pedido import (
     PedidoCreateFrontend,
     PedidoCreateBackoffice,
@@ -259,13 +259,17 @@ def _descontar_inventario_cajas(pedido: Pedido, local_despacho_id: int, db: Sess
         if lote_id_principal:
             item.lote_id = lote_id_principal
         
-        # Si lotes ya asignados, NO actualizar precio (ya está correcto)
-        # Si son nuevos lotes, actualizar precio unitario al precio real
-        if not lotes_ya_asignados:
-            item.precio_unitario_venta = float(precio_total_item / Decimal(str(item.cantidad)))
-        else:
-            # Para lotes ya asignados, el precio_total_item es el mismo que ya estaba calculado
-            precio_total_item = Decimal(str(item.precio_unitario_venta)) * Decimal(str(item.cantidad))
+        # Aplicar IVA si el precio del producto no lo incluye (precio_kg es neto sin IVA)
+        from database.models import Producto as ProductoModel
+        producto_obj = db.query(ProductoModel).filter(ProductoModel.id == item.producto_id).first()
+        print(f"🔍 [Confirmación] Producto {item.producto_id}: precio_incluye_iva={producto_obj.precio_incluye_iva if producto_obj else 'NO ENCONTRADO'}")
+        if producto_obj and not producto_obj.precio_incluye_iva:
+            IVA_RATE = Decimal('0.19')
+            precio_total_item = precio_total_item * (1 + IVA_RATE)
+            print(f"✅ [Confirmación] IVA aplicado: neto={float(precio_total_item / Decimal('1.19')):.0f} → total={float(precio_total_item):.0f}")
+        
+        # Actualizar precio unitario al precio real (con IVA si aplica)
+        item.precio_unitario_venta = float(precio_total_item / Decimal(str(item.cantidad)))
         
         nuevo_monto_total += precio_total_item
         
@@ -299,14 +303,10 @@ def _descontar_inventario_cajas(pedido: Pedido, local_despacho_id: int, db: Sess
             'proveedor_id': proveedor_id
         })
     
-    # Actualizar monto total del pedido con precio real
-    # (solo si los lotes NO estaban pre-asignados, ya que el precio ya sería el correcto)
-    if not lotes_ya_asignados:
-        monto_original = pedido.monto_total
-        pedido.monto_total = nuevo_monto_total
-        print(f"Pedido #{pedido.id}: Precio actualizado de ${monto_original} a ${nuevo_monto_total}")
-    else:
-        print(f"Pedido #{pedido.id}: Precio ya correcto (lotes pre-asignados): ${pedido.monto_total}")
+    # Actualizar monto total del pedido con precio real (con IVA si el producto no lo incluye)
+    monto_original = pedido.monto_total
+    pedido.monto_total = nuevo_monto_total
+    print(f"Pedido #{pedido.id}: Precio actualizado de ${monto_original} a ${nuevo_monto_total}")
     
     # Log para auditoría
     print(f"Items actualizados: {items_actualizados}")
@@ -372,7 +372,7 @@ def _devolver_inventario_productos(pedido: Pedido, db: Session):
 
 def _devolver_inventario_cajas(pedido: Pedido, db: Session):
     """Devuelve lotes específicos de cajas al estado original para pedidos de carne."""
-    from database.models import MovimientoStockCajas, Lote
+    from database.models import MovimientoStockCajas, Lote, StockCajasProveedor
     
     # Buscar movimientos de lotes para este pedido (tanto RESERVA como VENTA)
     movimientos_lotes = db.query(MovimientoStockCajas).filter(
@@ -382,30 +382,39 @@ def _devolver_inventario_cajas(pedido: Pedido, db: Session):
     ).all()
     
     if not movimientos_lotes:
-        # Fallback al método anterior si no hay movimientos de lote específico
+        # Fallback: no hay movimientos de lote registrados, restaurar stock directamente
         for item in pedido.items:
-            # Buscar el stock de cajas para devolver
             stock_cajas = db.query(StockCajasProveedor).filter(
                 StockCajasProveedor.producto_id == item.producto_id
-            ).order_by(StockCajasProveedor.id.desc()).first()  # El más reciente
+            ).order_by(StockCajasProveedor.id.desc()).first()
             
             if stock_cajas:
-                # Devolver cajas al stock
                 stock_cajas.cajas_disponibles += item.cantidad
-                stock_cajas.cajas_vendidas -= item.cantidad
+                if stock_cajas.cajas_totales_vendidas >= item.cantidad:
+                    stock_cajas.cajas_totales_vendidas -= item.cantidad
                 
-                # Registrar movimiento de devolución de cajas
                 movimiento_cajas = MovimientoStockCajas(
-                    stock_cajas_id=stock_cajas.id,
-                    tipo_movimiento="DEVOLUCION",
+                    producto_id=item.producto_id,
+                    proveedor_id=stock_cajas.proveedor_id,
+                    tipo_movimiento="DEVOLUCION_LOTE",
                     cajas_movimiento=item.cantidad,
-                    peso_total_kg=item.cantidad * stock_cajas.peso_promedio_caja_kg,
+                    peso_total_kg=float(item.cantidad * (stock_cajas.peso_promedio_caja_kg or 0)),
+                    descripcion=f"Devolución de {item.cantidad} cajas por cancelación de pedido #{pedido.id}",
                     referencia_tipo="PEDIDO",
                     referencia_id=pedido.id,
-                    notas=f"Devolución de {item.cantidad} cajas por cancelación de pedido #{pedido.id}",
                     usuario="sistema"
                 )
                 db.add(movimiento_cajas)
+            
+            # Restaurar lotes reservados (flujo preventa: lote.reservado=True sin movimientos)
+            lotes_a_liberar = db.query(Lote).filter(
+                Lote.producto_id == item.producto_id,
+                Lote.reservado == True,
+                Lote.vendido == False,
+            ).limit(int(item.cantidad)).all()
+            for lote_r in lotes_a_liberar:
+                lote_r.reservado = False
+                print(f"🔓 Lote {lote_r.codigo_lote} liberado (reservado→False) por cancelación pedido #{pedido.id}")
         return
     
     # Devolver lotes específicos a su estado original
@@ -796,15 +805,12 @@ def crear_pedido_backoffice(
         items_a_crear.append({
             'producto_id': producto.id,
             'cantidad': item_data.cantidad,
-            'precio_unitario_venta': item_data.precio_unitario_venta
+            'precio_unitario_venta': item_data.precio_unitario_venta,
+            'local_cliente_id': item_data.local_cliente_id
         })
-        
+
         # Redondear subtotal individual para evitar centavos
         subtotal = round(item_data.precio_unitario_venta * item_data.cantidad)
-        monto_total += subtotal
-    
-    # El total ya está redondeado gracias a la suma de subtotales redondeados
-    
     # 4.3. Procesar uso de puntos si se especificó
     descuento_puntos = 0.0
     puntos_usar = pedido_data.puntos_usar or 0
@@ -985,11 +991,20 @@ def crear_pedido_backoffice(
                 stock_cajas.cajas_disponibles -= item.cantidad
                 print(f"📦 Stock actualizado: {stock_cajas.cajas_disponibles} cajas disponibles de {item.producto.nombre}")
             
-            # Actualizar precio unitario del item con precio real
-            item.precio_unitario = precio_total_item / Decimal(str(item.cantidad))
+            # Aplicar IVA si el precio del producto no lo incluye (precio_kg es neto sin IVA)
+            from database.models import Producto as ProductoModel
+            producto_obj = db.query(ProductoModel).filter(ProductoModel.id == item.producto_id).first()
+            print(f"🔍 Producto {item.producto_id}: precio_incluye_iva={producto_obj.precio_incluye_iva if producto_obj else 'NO ENCONTRADO'}")
+            if producto_obj and not producto_obj.precio_incluye_iva:
+                IVA_RATE = Decimal('0.19')
+                precio_total_item = precio_total_item * (1 + IVA_RATE)
+                print(f"✅ IVA aplicado: neto={float(precio_total_item / Decimal('1.19')):.0f} → total={float(precio_total_item):.0f}")
+            
+            # Actualizar precio unitario del item con precio real (con IVA si aplica)
+            item.precio_unitario_venta = float(precio_total_item / Decimal(str(item.cantidad)))
             nuevo_monto_total += precio_total_item
         
-        # Actualizar monto total del pedido con precio real
+        # Actualizar monto total del pedido con precio real (con IVA si el producto no lo incluye)
         monto_total = nuevo_monto_total  # Variable local para retorno
         db_pedido.monto_total = nuevo_monto_total
         
@@ -1135,6 +1150,8 @@ def listar_pedidos(
     skip: int = 0,
     limit: int = 100,
     estado: str = None,
+    fecha: str = None,
+    tipo_pedido_id: int = None,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
 ):
@@ -1152,12 +1169,13 @@ def listar_pedidos(
         Pedido.local_id == current_user.local_defecto_id
     ).options(
         joinedload(Pedido.cliente),
-        joinedload(Pedido.items),
+        joinedload(Pedido.items).joinedload(ItemPedido.producto),
         joinedload(Pedido.medio_pago),
         joinedload(Pedido.tipo_pedido),
         joinedload(Pedido.tipo_documento_tributario),
         joinedload(Pedido.usuario),
-        joinedload(Pedido.estado_pedido)  # Cargar relación de estado
+        joinedload(Pedido.estado_pedido),  # Cargar relación de estado
+        joinedload(Pedido.cheques)  # Para resumen de cobro
     )
     
     if estado:
@@ -1165,9 +1183,30 @@ def listar_pedidos(
         query = query.join(EstadoPedidoModel, Pedido.estado_id == EstadoPedidoModel.id).filter(
             EstadoPedidoModel.codigo == estado
         )
+
+    if fecha:
+        from sqlalchemy import cast, Date
+        query = query.filter(cast(Pedido.fecha_pedido, Date) == fecha)
+
+    if tipo_pedido_id:
+        query = query.filter(Pedido.tipo_pedido_id == tipo_pedido_id)
     
     pedidos = query.order_by(Pedido.fecha_pedido.desc()).offset(skip).limit(limit).all()
-    
+
+    # Calcular peso total por item desde asignaciones_picking (consulta directa)
+    from sqlalchemy import func as sqlfunc
+    from database.models import AsignacionPicking
+    all_item_ids = [item.id for p in pedidos for item in p.items]
+    peso_por_item: dict = {}
+    if all_item_ids:
+        peso_rows = db.query(
+            AsignacionPicking.item_pedido_id,
+            sqlfunc.sum(AsignacionPicking.peso_real).label('total_kg')
+        ).filter(
+            AsignacionPicking.item_pedido_id.in_(all_item_ids)
+        ).group_by(AsignacionPicking.item_pedido_id).all()
+        peso_por_item = {row.item_pedido_id: float(row.total_kg) for row in peso_rows}
+
     # Mapear a schema de respuesta
     result = []
     for pedido in pedidos:
@@ -1222,6 +1261,8 @@ def listar_pedidos(
             'usuario_id': pedido.usuario_id,
             'usuario_nombre': pedido.usuario.nombre_completo if pedido.usuario else None,
             'usuario_email': pedido.usuario.email if pedido.usuario else None,
+            # Resumen de cobro de cheques (estado_id=3 es COBRADO)
+            'monto_cobrado_cheques': sum(float(c.monto) for c in pedido.cheques if c.estado_id == 3) if pedido.cheques else 0.0,
             # Serializar cliente correctamente
             'cliente': {
                 'id': pedido.cliente.id,
@@ -1230,7 +1271,7 @@ def listar_pedidos(
                 'telefono': pedido.cliente.telefono,
                 'rut': pedido.cliente.rut,
                 'direccion': pedido.cliente.direccion,
-                'comuna': pedido.cliente.comuna,
+                # 'comuna' eliminado porque ya no existe en Cliente
                 'limite_credito': float(pedido.cliente.limite_credito) if pedido.cliente.limite_credito else 0,
                 'credito_usado': float(pedido.cliente.credito_usado) if pedido.cliente.credito_usado else 0
             } if pedido.cliente else None,
@@ -1242,7 +1283,8 @@ def listar_pedidos(
                 'producto_nombre': item.producto.nombre if item.producto else None,
                 'cantidad': item.cantidad,
                 'precio_unitario_venta': float(item.precio_unitario_venta) if item.precio_unitario_venta else 0,
-                'subtotal': float(item.cantidad * item.precio_unitario_venta) if item.cantidad and item.precio_unitario_venta else 0
+                'subtotal': float(item.cantidad * item.precio_unitario_venta) if item.cantidad and item.precio_unitario_venta else 0,
+                'peso_total_kg': peso_por_item.get(item.id),
             } for item in pedido.items] if pedido.items else []
         }
         result.append(pedido_dict)
@@ -1659,6 +1701,103 @@ def generar_boleta(
         )
 
 
+@router.get("/{pedido_id}/factura")
+def generar_factura(
+    pedido_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    """
+    Genera y descarga la factura en PDF de un pedido (tipo FAC).
+    """
+    from sqlalchemy.orm import joinedload
+    from database.models import ConfiguracionLanding, Tenant, AsignacionPicking, Lote
+    pedido = db.query(Pedido).options(
+        joinedload(Pedido.cliente),
+        joinedload(Pedido.tenant).joinedload(Tenant.configuracion_landing),
+        joinedload(Pedido.tipo_pedido),
+        joinedload(Pedido.items).joinedload(ItemPedido.producto),
+        joinedload(Pedido.items).joinedload(ItemPedido.asignaciones_picking).joinedload(AsignacionPicking.lote),
+    ).filter(Pedido.id == pedido_id).first()
+    if not pedido:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido con ID {pedido_id} no encontrado"
+        )
+
+    if pedido.tipo_documento_tributario_id != 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Este pedido no corresponde a una factura (tipo_documento_tributario_id != 1)"
+        )
+
+    try:
+        from services.boleta_service import generar_factura_pedido
+        pdf_buffer = generar_factura_pedido(pedido)
+        numero_pedido = pedido.numero_pedido
+        nombre_archivo = f"Factura_{numero_pedido}.pdf"
+        return StreamingResponse(
+            io.BytesIO(pdf_buffer.read()),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={nombre_archivo}"}
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al generar la factura: {str(e)}"
+        )
+
+
+@router.put("/{pedido_id}/registrar-folio")
+def registrar_folio_sii(
+    pedido_id: int,
+    folio_sii: str,
+    numero_dte: str = "",
+    observaciones: str = "",
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    """
+    Registra el folio SII de una factura emitida manualmente en el portal del SII.
+
+    **Flujo:** El usuario ingresa la factura en el SII, obtiene el folio y lo registra aquí.
+    Actualiza estado_sii a REGISTRADO.
+    """
+    pedido = db.query(Pedido).filter(Pedido.id == pedido_id).first()
+    if not pedido:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pedido con ID {pedido_id} no encontrado"
+        )
+
+    if pedido.tipo_documento_tributario_id != 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solo se puede registrar folio en facturas (tipo_documento = FAC)"
+        )
+
+    from datetime import datetime
+    pedido.folio_sii = folio_sii
+    if numero_dte:
+        pedido.numero_dte = numero_dte
+    pedido.estado_sii = "REGISTRADO"
+    pedido.fecha_envio_sii = datetime.now()
+    if observaciones:
+        pedido.observaciones_sii = observaciones
+
+    db.commit()
+    db.refresh(pedido)
+
+    return {
+        "pedido_id": pedido_id,
+        "folio_sii": pedido.folio_sii,
+        "numero_dte": pedido.numero_dte,
+        "estado_sii": pedido.estado_sii,
+        "fecha_envio_sii": pedido.fecha_envio_sii,
+        "mensaje": f"Folio SII {folio_sii} registrado correctamente"
+    }
+
+
 @router.put("/{pedido_id}/estado-sii")
 def actualizar_estado_sii(
     pedido_id: int,
@@ -1716,6 +1855,89 @@ def actualizar_estado_sii(
         "fecha_envio_sii": pedido.fecha_envio_sii,
         "fecha_respuesta_sii": pedido.fecha_respuesta_sii,
         "mensaje": f"Estado SII actualizado a {estado_sii}"
+    }
+
+
+@router.patch("/{pedido_id}/registrar-pago")
+def registrar_pago(
+    pedido_id: int,
+    medio_pago_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    """
+    Registra el medio de pago de un pedido/factura.
+    - CHEQUE (permite_cheque=True): es_pagado=False (pendiente hasta acreditación)
+    - Resto: es_pagado=True (pago inmediato)
+    """
+    pedido = db.query(Pedido).filter(Pedido.id == pedido_id).first()
+    if not pedido:
+        raise HTTPException(status_code=404, detail=f"Pedido {pedido_id} no encontrado")
+
+    # Validar que la factura tenga folio SII registrado
+    if not pedido.folio_sii or not pedido.folio_sii.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="No se puede registrar el pago: la factura no tiene folio SII. "
+                   "Primero ingrese la factura al SII y registre el folio."
+        )
+
+    medio_pago = db.query(MedioPago).filter(MedioPago.id == medio_pago_id, MedioPago.activo == True).first()
+    if not medio_pago:
+        raise HTTPException(status_code=404, detail=f"Medio de pago {medio_pago_id} no encontrado")
+
+    # --- Lógica de crédito ---
+    # Si el pedido ya tenía un medio de pago cheque anterior, liberar ese crédito primero
+    medio_pago_anterior = None
+    if pedido.medio_pago_id and pedido.medio_pago_id != medio_pago.id:
+        medio_pago_anterior = db.query(MedioPago).filter(MedioPago.id == pedido.medio_pago_id).first()
+        if medio_pago_anterior and medio_pago_anterior.permite_cheque:
+            CreditoService.liberar_credito(pedido.cliente_id, float(pedido.monto_total), db)
+
+    if medio_pago.permite_cheque:
+        # Validar que el cliente tiene crédito disponible
+        cliente = db.query(Cliente).filter(Cliente.id == pedido.cliente_id).first()
+        if not cliente:
+            raise HTTPException(status_code=404, detail="Cliente del pedido no encontrado")
+
+        if not cliente.limite_credito or float(cliente.limite_credito) <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"El cliente '{cliente.nombre}' no tiene línea de crédito configurada. "
+                       "Para pagar con cheque se requiere un límite de crédito asignado."
+            )
+
+        es_valido, mensaje_credito = CreditoService.validar_credito_disponible(
+            pedido.cliente_id, float(pedido.monto_total), db
+        )
+        if not es_valido:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Pago con cheque rechazado: {mensaje_credito}"
+            )
+
+        # Ocupar crédito
+        CreditoService.ocupar_credito(pedido.cliente_id, float(pedido.monto_total), db)
+
+        pedido.medio_pago_id = medio_pago.id
+        pedido.es_pagado = False
+        mensaje = f"Medio de pago registrado como Cheque. Pago pendiente de acreditación."
+    else:
+        pedido.medio_pago_id = medio_pago.id
+        # Efectivo, transferencia, tarjeta, etc.: pago inmediato
+        pedido.es_pagado = True
+        mensaje = f"Pago registrado con {medio_pago.nombre}."
+
+    db.commit()
+    db.refresh(pedido)
+
+    return {
+        "pedido_id": pedido_id,
+        "medio_pago": medio_pago.nombre,
+        "medio_pago_codigo": medio_pago.codigo,
+        "es_pagado": pedido.es_pagado,
+        "permite_cheque": medio_pago.permite_cheque,
+        "mensaje": mensaje
     }
 
 

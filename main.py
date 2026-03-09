@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from routers.auth import get_current_active_user
 
 # Importar routers
-from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, admin_utils, payments, test_payments, maestras, recetas, produccion, compras, cheques, puntos, caja, enrolamiento, gemini_vision, precios_proveedor, stock_cajas, alertas, tipos_pedido, despachos, configuracion, debug_menu, admin_configuracion_landing, tenants, etiquetas, paleta_colores, solicitudes_transferencia
+from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, admin_utils, payments, test_payments, maestras, recetas, produccion, compras, cheques, puntos, caja, enrolamiento, gemini_vision, precios_proveedor, stock_cajas, alertas, tipos_pedido, despachos, configuracion, debug_menu, admin_configuracion_landing, tenants, etiquetas, paleta_colores, solicitudes_transferencia, locales_cliente, preventa, hojas_ruta, vehiculos
 
 
 app = FastAPI(
@@ -35,8 +35,11 @@ origins = [
     
     # Desarrollo local (hosts file)
     "http://masasestacion.local:3000",
+    "http://masasestacion.local:3001",
     "http://elolivo.local:3000",
+    "http://elolivo.local:3001",
     "http://donajuanita.local:3000",
+    "http://donajuanita.local:3001",
     "http://api.masasestacion.local:8000",
     "http://admin.masasestacion.local:3001",
     "http://admin.elolivo.local:3001",
@@ -49,7 +52,7 @@ origins = [
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Permitir todos los orígenes en desarrollo
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -91,6 +94,8 @@ app.include_router(puntos.router, tags=["Puntos"])
 app.include_router(caja.router, prefix="/api/caja", tags=["Caja"], dependencies=[Depends(get_current_active_user)])
 app.include_router(tipos_pedido.router, prefix="/api/tipos-pedido", tags=["Tipos de Pedido"])
 app.include_router(enrolamiento.router, prefix="/api/enrolamiento", tags=["Enrolamiento WMS"], dependencies=[Depends(get_current_active_user)])
+app.include_router(preventa.router, prefix="/api/preventa", tags=["Pre-Venta Cajas"], dependencies=[Depends(get_current_active_user)])
+app.include_router(preventa.router_pdf, prefix="/api/preventa", tags=["Pre-Venta Cajas PDF"])
 app.include_router(gemini_vision.router, tags=["Gemini Vision"], dependencies=[Depends(get_current_active_user)])
 app.include_router(precios_proveedor.router, prefix="/api/precios-proveedor", tags=["Precios Proveedor"], dependencies=[Depends(get_current_active_user)])
 app.include_router(stock_cajas.router, prefix="/api/stock-cajas", tags=["Stock Cajas"], dependencies=[Depends(get_current_active_user)])
@@ -103,8 +108,15 @@ app.include_router(etiquetas.router, tags=["Etiquetas"], dependencies=[Depends(g
 app.include_router(paleta_colores.router, prefix="/api/paleta-colores", tags=["Paletas de Colores"], dependencies=[Depends(get_current_active_user)])
 app.include_router(debug_menu.router, prefix="/api/debug", tags=["Debug Menu"])
 
+# Registrar router de locales_cliente (locales propios de cliente)
+app.include_router(locales_cliente.router)
+
 # Registrar router de solicitudes de transferencia
 app.include_router(solicitudes_transferencia.router)
+
+# Registrar router de hojas de ruta
+app.include_router(hojas_ruta.router)
+app.include_router(vehiculos.router, dependencies=[Depends(get_current_active_user)])
 
 @app.get("/")
 async def root():

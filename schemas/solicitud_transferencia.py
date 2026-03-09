@@ -9,10 +9,12 @@ class ItemSolicitudTransferenciaCreate(BaseModel):
     producto_id: int
     cantidad_solicitada: int
     cantidad_aprobada: Optional[int] = None
+    cantidad_recibida: Optional[int] = None
 
 class ItemSolicitudTransferenciaResponse(ItemSolicitudTransferenciaCreate):
     solicitud_item_id: int
     movimiento_inventario_id: Optional[int] = None
+    cantidad_recibida: Optional[int] = None
 
 class SolicitudTransferenciaCreate(BaseModel):
     tenant_id: int
@@ -29,6 +31,9 @@ class SolicitudTransferenciaUpdate(BaseModel):
     nota: Optional[str] = None
     items: Optional[List[ItemSolicitudTransferenciaCreate]] = None
     usuario_finalizador_id: Optional[int] = None
+    recibido: Optional[bool] = None
+    usuario_receptor_id: Optional[int] = None
+    fecha_recepcion: Optional[datetime] = None
 
 class SolicitudTransferenciaResponse(BaseModel):
     solicitud_id: int
@@ -41,4 +46,7 @@ class SolicitudTransferenciaResponse(BaseModel):
     nota: Optional[str] = None
     fecha_creacion: datetime
     fecha_actualizacion: datetime
+    recibido: bool
+    usuario_receptor_id: Optional[int] = None
+    fecha_recepcion: Optional[datetime] = None
     items: List[ItemSolicitudTransferenciaResponse]

@@ -57,6 +57,7 @@ def crear_solicitud_transferencia(data: SolicitudTransferenciaCreate, db: Sessio
                 producto_id=i.producto_id,
                 cantidad_solicitada=i.cantidad_solicitada,
                 cantidad_aprobada=i.cantidad_aprobada,
+                cantidad_recibida=i.cantidad_recibida,
                 movimiento_inventario_id=i.movimiento_inventario_id
             ) for i in items],
             usuario_finalizador_id=solicitud.usuario_finalizador_id
@@ -80,15 +81,19 @@ def listar_solicitudes_transferencia(request: Request, db: Session = Depends(get
             nota=s.nota,
             fecha_creacion=s.fecha_creacion,
             fecha_actualizacion=s.fecha_actualizacion,
-                items=[ItemSolicitudTransferenciaResponse(
-                    solicitud_item_id=i.solicitud_item_id,
-                    producto_id=i.producto_id,
-                    cantidad_solicitada=i.cantidad_solicitada,
-                    cantidad_aprobada=i.cantidad_aprobada,
-                    movimiento_inventario_id=i.movimiento_inventario_id
-                ) for i in s.items],
-                usuario_finalizador_id=s.usuario_finalizador_id
-            ))
+            items=[ItemSolicitudTransferenciaResponse(
+                solicitud_item_id=i.solicitud_item_id,
+                producto_id=i.producto_id,
+                cantidad_solicitada=i.cantidad_solicitada,
+                cantidad_aprobada=i.cantidad_aprobada,
+                cantidad_recibida=i.cantidad_recibida,
+                movimiento_inventario_id=i.movimiento_inventario_id
+            ) for i in s.items],
+            usuario_finalizador_id=s.usuario_finalizador_id,
+            recibido=s.recibido,
+            usuario_receptor_id=s.usuario_receptor_id,
+            fecha_recepcion=s.fecha_recepcion
+        ))
     return result
 
 @router.get("/{solicitud_id}", response_model=SolicitudTransferenciaResponse)
@@ -106,15 +111,19 @@ def obtener_solicitud_transferencia(solicitud_id: int, db: Session = Depends(get
         nota=s.nota,
         fecha_creacion=s.fecha_creacion,
         fecha_actualizacion=s.fecha_actualizacion,
-            items=[ItemSolicitudTransferenciaResponse(
-                solicitud_item_id=i.solicitud_item_id,
-                producto_id=i.producto_id,
-                cantidad_solicitada=i.cantidad_solicitada,
-                cantidad_aprobada=i.cantidad_aprobada,
-                movimiento_inventario_id=i.movimiento_inventario_id
-            ) for i in s.items],
-            usuario_finalizador_id=s.usuario_finalizador_id  # New field added
-        )
+        items=[ItemSolicitudTransferenciaResponse(
+            solicitud_item_id=i.solicitud_item_id,
+            producto_id=i.producto_id,
+            cantidad_solicitada=i.cantidad_solicitada,
+            cantidad_aprobada=i.cantidad_aprobada,
+            cantidad_recibida=i.cantidad_recibida,
+            movimiento_inventario_id=i.movimiento_inventario_id
+        ) for i in s.items],
+        usuario_finalizador_id=s.usuario_finalizador_id,
+        recibido=s.recibido,
+        usuario_receptor_id=s.usuario_receptor_id,
+        fecha_recepcion=s.fecha_recepcion
+    )
 
 @router.put("/{solicitud_id}", response_model=SolicitudTransferenciaResponse)
 def actualizar_solicitud_transferencia(
@@ -132,9 +141,24 @@ def actualizar_solicitud_transferencia(
     ESTADO_EN_PROCESO = 2
     ESTADO_FINALIZADO = 3
 
-    # Si está FINALIZADO, nadie puede editar
+    # Si está FINALIZADO, solo el local destino puede registrar/actualizar la recepción
     if s.estado_id == ESTADO_FINALIZADO:
-        raise HTTPException(status_code=403, detail="La solicitud ya está finalizada y no puede editarse.")
+        if current_user.local_defecto_id != s.local_destino_id:
+            raise HTTPException(status_code=403, detail="Solo el local destino puede registrar la recepción.")
+        # Permitir registrar o actualizar la recepción (incluso si ya estaba recibida)
+        s.recibido = True
+        s.usuario_receptor_id = current_user.id
+        from datetime import datetime as dt
+        s.fecha_recepcion = dt.now()
+        # Actualizar cantidades recibidas por ítem
+        if data.items is not None:
+            for item_data in data.items:
+                item_db = next((i for i in s.items if i.producto_id == item_data.producto_id), None)
+                if item_db and item_data.cantidad_recibida is not None:
+                    item_db.cantidad_recibida = item_data.cantidad_recibida
+        db.commit()
+        db.refresh(s)
+        return obtener_solicitud_transferencia(solicitud_id, db)
 
     # Si está EN_PROCESO, solo el local origen puede editar (responder y finalizar)
     if s.estado_id == ESTADO_EN_PROCESO:

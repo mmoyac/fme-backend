@@ -1,5 +1,5 @@
 from datetime import timedelta
-from typing import Annotated, List
+from typing import Annotated, Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm, HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
@@ -63,6 +63,30 @@ async def get_current_active_user(current_user: Annotated[User, Depends(get_curr
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
+
+async def get_optional_user(
+    token: Annotated[str, Depends(oauth2_scheme)],
+    auth: Annotated[HTTPAuthorizationCredentials, Depends(security_scheme)],
+    db: Session = Depends(get_db)
+) -> Optional[User]:
+    """Como get_current_user pero retorna None en vez de lanzar excepcion."""
+    final_token = token or (auth.credentials if auth else None)
+    if not final_token:
+        return None
+    try:
+        from utils.security import SECRET_KEY, ALGORITHM
+        payload = jwt.decode(final_token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        tenant_id: int = payload.get("tenant_id")
+        if not email:
+            return None
+        query = db.query(User).filter(User.email == email)
+        if tenant_id:
+            query = query.filter(User.tenant_id == tenant_id)
+        user = query.first()
+        return user if user and user.is_active else None
+    except JWTError:
+        return None
 
 @router.post("/token", response_model=Token)
 async def login_for_access_token(

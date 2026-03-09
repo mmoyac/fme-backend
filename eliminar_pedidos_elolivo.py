@@ -28,11 +28,13 @@ from database.models import (
     Precio,
     PuntosCliente,
     TurnoCaja,
-    OperacionCaja
+    OperacionCaja,
+    HojaRutaItem,
+    HojaRuta
 )
 
 
-def eliminar_pedidos_elolivo():
+def eliminar_pedidos_elolivo(eliminar_clientes=True):
     """Elimina todos los pedidos del tenant El Olivo."""
     db = SessionLocal()
     
@@ -201,7 +203,7 @@ def eliminar_pedidos_elolivo():
                 print(f'   ✓ {precios_elim} precios eliminados')
             
             # Eliminar puntos de clientes
-            if puntos_clientes_count > 0:
+            if eliminar_clientes and puntos_clientes_count > 0:
                 clientes_ids = [c.id for c in db.query(Cliente).filter(Cliente.tenant_id == tenant.id).all()]
                 if clientes_ids:
                     puntos_elim = db.query(PuntosCliente).filter(
@@ -210,18 +212,15 @@ def eliminar_pedidos_elolivo():
                     print(f'   ✓ {puntos_elim} registros de puntos eliminados')
             
             # Eliminar clientes
-            if clientes_count > 0:
+            if eliminar_clientes and clientes_count > 0:
                 clientes_elim = db.query(Cliente).filter(
                     Cliente.tenant_id == tenant.id
                 ).delete(synchronize_session=False)
                 print(f'   ✓ {clientes_elim} clientes eliminados')
+            elif not eliminar_clientes:
+                print(f'   ⏭ Clientes CONSERVADOS ({clientes_count} registros)')
             
-            # Eliminar productos (los precios ya fueron eliminados)
-            if productos_count > 0:
-                productos_elim = db.query(Producto).filter(
-                    Producto.tenant_id == tenant.id
-                ).delete(synchronize_session=False)
-                print(f'   ✓ {productos_elim} productos eliminados')
+            # NOTA: Productos se conservan intencionalmente
                         # Eliminar operaciones de caja (antes de eliminar turnos)
             if locales_ids and operaciones_caja_count > 0:
                 turnos = db.query(TurnoCaja).filter(TurnoCaja.local_id.in_(locales_ids)).all()
@@ -316,7 +315,7 @@ def eliminar_pedidos_elolivo():
             print('   • Movimientos de inventario eliminados')
             print('   • Precios eliminados')
             print('   • Clientes y puntos eliminados')
-            print('   • Productos eliminados')
+            print('   • Productos: CONSERVADOS')
             print('   • Turnos y operaciones de caja eliminados')
             print('   • Enrolamientos, lotes, movimientos y stock de cajas eliminados')
             return
@@ -575,6 +574,18 @@ def eliminar_pedidos_elolivo():
         ).delete(synchronize_session=False)
         print(f'   ✓ {movs_pts} movimientos de puntos eliminados')
         
+        # 4.11b. Eliminar hoja_ruta_items que referencian estos pedidos
+        hoja_ruta_items_elim = db.query(HojaRutaItem).filter(
+            HojaRutaItem.pedido_id.in_(pedidos_ids)
+        ).delete(synchronize_session=False)
+        print(f'   ✓ {hoja_ruta_items_elim} hoja_ruta_items eliminados')
+        
+        # 4.11c. Eliminar hojas_ruta del tenant (las vacías o cualquier restante)
+        hojas_ruta_elim = db.query(HojaRuta).filter(
+            HojaRuta.tenant_id == tenant.id
+        ).delete(synchronize_session=False)
+        print(f'   ✓ {hojas_ruta_elim} hojas de ruta eliminadas')
+        
         # 4.12. Eliminar pedidos
         eliminados = db.query(Pedido).filter(
             Pedido.id.in_(pedidos_ids)
@@ -592,23 +603,25 @@ def eliminar_pedidos_elolivo():
         # 4.14. Eliminar puntos de clientes (antes de eliminar clientes)
         clientes_ids = [c.id for c in db.query(Cliente).filter(Cliente.tenant_id == tenant.id).all()]
         puntos_eliminados = 0
-        if clientes_ids:
+        if eliminar_clientes and clientes_ids:
             puntos_eliminados = db.query(PuntosCliente).filter(
                 PuntosCliente.cliente_id.in_(clientes_ids)
             ).delete(synchronize_session=False)
-        print(f'   ✓ {puntos_eliminados} registros de puntos eliminados')
+            print(f'   ✓ {puntos_eliminados} registros de puntos eliminados')
+        elif not eliminar_clientes:
+            print(f'   ⏭ Puntos de clientes CONSERVADOS')
         
         # 4.15. Eliminar clientes
-        clientes_eliminados = db.query(Cliente).filter(
-            Cliente.tenant_id == tenant.id
-        ).delete(synchronize_session=False)
-        print(f'   ✓ {clientes_eliminados} clientes eliminados')
+        clientes_eliminados = 0
+        if eliminar_clientes:
+            clientes_eliminados = db.query(Cliente).filter(
+                Cliente.tenant_id == tenant.id
+            ).delete(synchronize_session=False)
+            print(f'   ✓ {clientes_eliminados} clientes eliminados')
+        else:
+            print(f'   ⏭ Clientes CONSERVADOS ({clientes_count} registros)')
         
-        # 4.16. Eliminar productos (al final, después de precios)
-        productos_eliminados = db.query(Producto).filter(
-            Producto.tenant_id == tenant.id
-        ).delete(synchronize_session=False)
-        print(f'   ✓ {productos_eliminados} productos eliminados')
+        # NOTA: Productos se conservan intencionalmente
         
         # 4.17. Eliminar operaciones de caja (antes de eliminar turnos)
         operaciones_caja_eliminadas = 0
@@ -640,8 +653,9 @@ def eliminar_pedidos_elolivo():
         print('   • Lotes, enrolamientos, stock de cajas y movimientos')
         print('   • Movimientos de puntos')
         print('   • Precios')
-        print('   • Clientes y puntos de fidelización')
-        print('   • Productos')
+        if eliminar_clientes:
+            print('   • Clientes y puntos de fidelización')
+        print('   • Productos: CONSERVADOS')
         print('   • Turnos y operaciones de caja')
         
         # 6. Verificación
@@ -674,7 +688,7 @@ if __name__ == '__main__':
     print('🗑️  RESET COMPLETO DE BASE DE DATOS - EL OLIVO')
     print('=' * 60)
     print('\n⚠️  Este script eliminará TODO de El Olivo:')
-    print('   📦 Todos los PRODUCTOS')
+    print('   📦 Todos los PRODUCTOS (se CONSERVAN)')
     print('   💰 Todos los PRECIOS')
     print('   👥 Todos los CLIENTES y puntos')
     print('   🛒 Todas las COMPRAS')
@@ -692,7 +706,11 @@ if __name__ == '__main__':
     
     respuesta = input('¿Confirmas que deseas RESETEAR TODO? (SI/NO): ').strip().upper()
     
-    if respuesta == 'SI':
-        eliminar_pedidos_elolivo()
-    else:
+    if respuesta != 'SI':
         print('\n❌ Operación cancelada')
+    else:
+        resp_clientes = input('¿Eliminar también los CLIENTES y sus puntos? (SI/NO): ').strip().upper()
+        eliminar_clientes = (resp_clientes == 'SI')
+        if not eliminar_clientes:
+            print('   → Clientes serán CONSERVADOS')
+        eliminar_pedidos_elolivo(eliminar_clientes=eliminar_clientes)

@@ -107,8 +107,9 @@ class EnrolamientoList(BaseModel):
 # ============================================
 
 class LoteBase(BaseModel):
-    peso_original: Decimal = Field(..., description="Peso extraído de la etiqueta original")
-    peso_actual: Decimal = Field(..., description="Peso actual del lote")
+    peso_original: Decimal = Field(..., description="Peso neto extraído de la etiqueta")
+    peso_actual: Decimal = Field(..., description="Peso neto actual del lote")
+    peso_bruto_kg: Optional[Decimal] = Field(None, description="Peso bruto del frigorífico (para carga de camión)")
     fecha_vencimiento: datetime = Field(..., description="Fecha de vencimiento")
     fecha_fabricacion: Optional[datetime] = None
     qr_original: Optional[str] = None
@@ -126,6 +127,7 @@ class LoteCreate(LoteBase):
 
 class LoteUpdate(BaseModel):
     peso_actual: Optional[Decimal] = None
+    peso_bruto_kg: Optional[Decimal] = None
     fecha_vencimiento: Optional[datetime] = None
     fecha_fabricacion: Optional[datetime] = None
     ubicacion_id: Optional[int] = None
@@ -145,6 +147,7 @@ class LoteResponse(LoteBase):
     qr_propio: str
     disponible_venta: bool
     vendido: bool
+    reservado: bool = False
     fecha_registro: datetime
     
     # Datos relacionados usando esquemas correctos
@@ -165,15 +168,17 @@ class LoteList(BaseModel):
     lote_proveedor: Optional[str] = None  # Lote del proveedor
     peso_original: float
     peso_actual: float
+    peso_bruto_kg: Optional[float] = None
     fecha_vencimiento: datetime
     disponible_venta: bool
     vendido: bool
+    reservado: bool = False
     fecha_registro: datetime
     producto_nombre: str
     ubicacion_codigo: str
     enrolamiento_patente: str
 
-    @validator('peso_original', 'peso_actual', pre=True)
+    @validator('peso_original', 'peso_actual', 'peso_bruto_kg', pre=True)
     def decimal_to_float(cls, v):
         if isinstance(v, Decimal):
             return float(v)
@@ -205,6 +210,7 @@ class FiltroLote(BaseModel):
     ubicacion_id: Optional[int] = None
     disponible_venta: Optional[bool] = None
     vendido: Optional[bool] = None
+    reservado: Optional[bool] = None
     fecha_vencimiento_desde: Optional[datetime] = None
     fecha_vencimiento_hasta: Optional[datetime] = None
 

@@ -52,6 +52,7 @@ class ProductoPreciosProveedores(BaseModel):
     id: int
     nombre: str
     sku: str
+    precio_incluye_iva: bool = True
     precios_proveedores: List[PrecioProveedorConDetalles] = []
     
     class Config:

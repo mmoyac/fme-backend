@@ -25,6 +25,7 @@ class ProductoBase(BaseModel):
     activo: bool = True
     stock_minimo: Optional[int] = 0
     stock_critico: Optional[int] = 0
+    precio_incluye_iva: bool = True  # True: precio ya tiene IVA incluido. False: precio es neto, se agrega 19%
 
 
 class ProductoCreate(ProductoBase):
@@ -51,6 +52,7 @@ class ProductoUpdate(BaseModel):
     activo: Optional[bool] = None
     stock_minimo: Optional[int] = None
     stock_critico: Optional[int] = None
+    precio_incluye_iva: Optional[bool] = None
 
 
 class ProductoResponse(ProductoBase):

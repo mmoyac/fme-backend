@@ -12,7 +12,6 @@ class ClienteBase(BaseModel):
     email: Optional[str] = None
     telefono: Optional[str] = None
     direccion: Optional[str] = None
-    comuna: Optional[str] = None
     
     # Campos tributarios
     rut: Optional[str] = Field(None, max_length=20, description="RUT del cliente (obligatorio para facturas)")
@@ -35,7 +34,6 @@ class ClienteUpdate(BaseModel):
     email: Optional[str] = None
     telefono: Optional[str] = None
     direccion: Optional[str] = None
-    comuna: Optional[str] = None
     
     # Campos tributarios
     rut: Optional[str] = Field(None, max_length=20, description="RUT del cliente")

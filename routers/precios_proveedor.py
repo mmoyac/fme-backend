@@ -196,6 +196,7 @@ def listar_productos_con_precios(
             "id": producto.id,
             "nombre": producto.nombre,
             "sku": producto.sku,
+            "precio_incluye_iva": producto.precio_incluye_iva,
             "precios_proveedores": precios_formateados
         })
     

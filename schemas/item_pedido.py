@@ -11,6 +11,7 @@ class ItemPedidoBase(BaseModel):
     producto_id: int = Field(..., gt=0)
     cantidad: float = Field(..., gt=0)  # Cambiado a float para soportar decimales
     precio_unitario_venta: float = Field(..., gt=0)
+    local_cliente_id: Optional[int] = None  # Local de despacho del cliente para este ítem
 
 
 class ItemPedidoCreate(BaseModel):
@@ -18,6 +19,7 @@ class ItemPedidoCreate(BaseModel):
     producto_id: int = Field(..., gt=0)
     cantidad: float = Field(..., gt=0)  # Cambiado a float para soportar decimales
     precio_unitario_venta: float = Field(..., gt=0)
+    local_cliente_id: Optional[int] = None  # Local de despacho del cliente para este ítem
 
 
 class ItemPedidoUpdate(BaseModel):
@@ -30,6 +32,8 @@ class ItemPedidoResponse(ItemPedidoBase):
     """Schema de respuesta de ItemPedido."""
     id: int
     producto: Optional["ProductoSimple"] = None
+    producto_nombre: Optional[str] = None
+    peso_total_kg: Optional[float] = None
 
     model_config = ConfigDict(from_attributes=True)
 

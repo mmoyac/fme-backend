@@ -82,6 +82,7 @@ class ItemPedidoCreateBackoffice(BaseModel):
     producto_id: int = Field(..., gt=0)
     cantidad: float = Field(..., gt=0)
     precio_unitario_venta: float = Field(..., gt=0)
+    local_cliente_id: Optional[int] = None  # Local de despacho del cliente para este ítem
 
 
 class PedidoCreateBackoffice(BaseModel):
@@ -229,7 +230,10 @@ class PedidoConRelaciones(BaseModel):
     
     # Información del despacho (opcional)
     despacho: Optional[dict] = Field(None, description="Información del despacho asignado (si existe)")
-    
+
+    # Resumen de cobro de cheques
+    monto_cobrado_cheques: Optional[float] = Field(None, description="Suma de cheques en estado COBRADO")
+
     cliente: Optional["ClienteResponse"] = None
     items: List["ItemPedidoResponse"] = []
 
