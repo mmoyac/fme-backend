@@ -1,9 +1,11 @@
 """
 Punto de entrada principal de la aplicación FastAPI.
 """
-from fastapi import FastAPI, Depends
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Request, Depends
+from fastapi.middleware.cors import CORSMiddleware  # noqa: F401 (kept for potential use)
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 
 from routers.auth import get_current_active_user
 
@@ -17,29 +19,18 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configuración de CORS
-origins = [
-    # Producción
+# Orígenes estáticos siempre permitidos (desarrollo + apps móviles)
+STATIC_ORIGINS = [
+    # Producción masasestacion.cl
     "https://masasestacion.cl",
     "https://www.masasestacion.cl",
-    "https://elolivo.masasestacion.cl",
     "https://api.masasestacion.cl",
     "https://admin.masasestacion.cl",
-    "https://backoffice.masasestacion.cl",
-    # Producción lexastech.cl (tenants)
-    "https://elolivo.lexastech.cl",
-    "https://admin.elolivo.lexastech.cl",
-    "https://bigschool.lexastech.cl",
-    "https://admin.bigschool.lexastech.cl",
-    "https://elquincho.lexastech.cl",
-    "https://admin.elquincho.lexastech.cl",
-    
     # Desarrollo local (localhost)
-    "http://localhost:3000",  # Landing en desarrollo
-    "http://localhost:3001",  # Backoffice en desarrollo
+    "http://localhost:3000",
+    "http://localhost:3001",
     "http://localhost:8080",
-    "http://localhost",       # POS App (Capacitor Android)
-    
+    "http://localhost",
     # Desarrollo local (hosts file)
     "http://masasestacion.local:3000",
     "http://masasestacion.local:3001",
@@ -51,19 +42,67 @@ origins = [
     "http://admin.masasestacion.local:3001",
     "http://admin.elolivo.local:3001",
     "http://admin.donajuanita.local:3001",
-    
     # POS App (Capacitor)
-    "capacitor://localhost",  # POS App (Capacitor iOS)
-    "ionic://localhost",      # POS App (Capacitor alternativo)
+    "capacitor://localhost",
+    "ionic://localhost",
 ]
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+def get_allowed_origins() -> list[str]:
+    """
+    Construye la lista de orígenes CORS combinando los estáticos
+    con los dominios de todos los tenants registrados en la BD.
+    Genera automáticamente:  https://{dominio} y https://admin.{dominio}
+    """
+    from database.database import SessionLocal
+    from database.models import Tenant
+    origins = list(STATIC_ORIGINS)
+    try:
+        db = SessionLocal()
+        tenants = db.query(Tenant).filter(Tenant.activo == True).all()
+        for tenant in tenants:
+            if tenant.dominio_principal:
+                d = tenant.dominio_principal.strip()
+                origins.append(f"https://{d}")
+                origins.append(f"https://www.{d}")
+                origins.append(f"https://admin.{d}")
+        db.close()
+    except Exception:
+        pass  # Si la BD no está lista aún, usamos solo los estáticos
+    return list(set(origins))
+
+
+class DynamicCORSMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware CORS dinámico: valida el Origin contra BD en cada petición.
+    Permite agregar nuevos tenants sin redesplegar.
+    """
+    async def dispatch(self, request: Request, call_next):
+        origin = request.headers.get("origin", "")
+        allowed = get_allowed_origins()
+
+        if request.method == "OPTIONS":
+            if origin in allowed:
+                return Response(
+                    status_code=204,
+                    headers={
+                        "Access-Control-Allow-Origin": origin,
+                        "Access-Control-Allow-Credentials": "true",
+                        "Access-Control-Allow-Methods": "*",
+                        "Access-Control-Allow-Headers": "*",
+                        "Access-Control-Max-Age": "600",
+                    },
+                )
+            return Response(status_code=400)
+
+        response = await call_next(request)
+        if origin in allowed:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+        return response
+
+
+app.add_middleware(DynamicCORSMiddleware)
 
 # Servir archivos estáticos (imágenes de productos)
 app.mount("/static", StaticFiles(directory="static"), name="static")
