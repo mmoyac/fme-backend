@@ -26,6 +26,13 @@ origins = [
     "https://api.masasestacion.cl",
     "https://admin.masasestacion.cl",
     "https://backoffice.masasestacion.cl",
+    # Producción lexastech.cl (tenants)
+    "https://elolivo.lexastech.cl",
+    "https://admin.elolivo.lexastech.cl",
+    "https://bigschool.lexastech.cl",
+    "https://admin.bigschool.lexastech.cl",
+    "https://elquincho.lexastech.cl",
+    "https://admin.elquincho.lexastech.cl",
     
     # Desarrollo local (localhost)
     "http://localhost:3000",  # Landing en desarrollo
