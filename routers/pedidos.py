@@ -417,8 +417,18 @@ def _devolver_inventario_cajas(pedido: Pedido, db: Session):
                 print(f"🔓 Lote {lote_r.codigo_lote} liberado (reservado→False) por cancelación pedido #{pedido.id}")
         return
     
-    # Devolver lotes específicos a su estado original
-    for movimiento in movimientos_lotes:
+    # Deduplicar por lote_codigo: si hay RESERVA_LOTE y VENTA_LOTE para el mismo lote,
+    # quedarnos solo con VENTA_LOTE (mayor prioridad). Así cada lote se procesa UNA sola vez.
+    movimientos_por_lote: dict[str, MovimientoStockCajas] = {}
+    for mov in movimientos_lotes:
+        if not mov.lote_codigo:
+            continue
+        previo = movimientos_por_lote.get(mov.lote_codigo)
+        if previo is None or mov.tipo_movimiento == "VENTA_LOTE":
+            movimientos_por_lote[mov.lote_codigo] = mov
+
+    # Devolver lotes específicos a su estado original (una vez por lote)
+    for movimiento in movimientos_por_lote.values():
         if movimiento.lote_codigo:
             # Buscar el lote específico
             lote = db.query(Lote).filter(
@@ -451,6 +461,15 @@ def _devolver_inventario_cajas(pedido: Pedido, db: Session):
                         
                         print(f"📦 Stock restaurado: {stock_cajas.cajas_disponibles} cajas disponibles")
                 
+                # Eliminar AsignacionPicking del lote (evita registros huérfanos)
+                from database.models import AsignacionPicking as AsignacionPickingModel
+                asignaciones_huerfanas = db.query(AsignacionPickingModel).filter(
+                    AsignacionPickingModel.lote_id == lote.id
+                ).all()
+                for asig in asignaciones_huerfanas:
+                    db.delete(asig)
+                    print(f"🗑️ AsignacionPicking ID={asig.id} eliminada (lote {lote.codigo_lote}, pedido cancelado #{pedido.id})")
+
                 # Registrar movimiento de devolución del lote
                 tipo_devolucion = "DEVOLUCION_LOTE" if es_venta else "LIBERACION_RESERVA"
                 movimiento_devolucion = MovimientoStockCajas(
@@ -811,6 +830,7 @@ def crear_pedido_backoffice(
 
         # Redondear subtotal individual para evitar centavos
         subtotal = round(item_data.precio_unitario_venta * item_data.cantidad)
+        monto_total += subtotal
     # 4.3. Procesar uso de puntos si se especificó
     descuento_puntos = 0.0
     puntos_usar = pedido_data.puntos_usar or 0
@@ -1098,7 +1118,7 @@ def crear_pedido_backoffice(
     db.refresh(db_pedido)
     
     # 7.5. Ocupar crédito si el medio de pago permite cheques
-    if medio_pago.permite_cheque and not es_pedido_pos_directo:
+    if medio_pago.permite_cheque:
         CreditoService.ocupar_credito(cliente.id, monto_total, db)
     
     # 8. Retornar respuesta

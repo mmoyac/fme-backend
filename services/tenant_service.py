@@ -107,6 +107,12 @@ def get_tenant_from_request(request: Request, db: Session) -> Optional[Tenant]:
             Tenant.codigo == codigo.replace('.', '-')
         ).first()
         
+        # Fallback: buscar por subdomain si no se encontró por codigo
+        if not tenant:
+            tenant = db.query(Tenant).filter(
+                Tenant.subdomain == codigo
+            ).first()
+        
         if tenant:
             print(f"✅ Tenant encontrado por desarrollo .local: {tenant.nombre} (ID: {tenant.id})")
             return tenant

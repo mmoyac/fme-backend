@@ -1,0 +1,12 @@
+﻿==========================================================================================
+­ƒöä  SINCRONIZACI├ôN DE TENANT DESDE GOOGLE SHEET
+==========================================================================================
+
+Ô£à Entorno: PRODUCCI├ôN  (https://api.masasestacion.cl)
+Ô£à Autenticado correctamente
+Ô£à Tenant: [3] El Olivo
+
+ÔÜá´©Å  Usuario autenticado pertenece al tenant 1, se necesita tenant 3.
+   Creando usuario de sincronizaci├│n temporal para tenant 3...
+ÔØî No se pudo crear el usuario de sincronizaci├│n: Error response from daemon: No such container: masas_estacion_backend
+

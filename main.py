@@ -31,17 +31,6 @@ STATIC_ORIGINS = [
     "http://localhost:3001",
     "http://localhost:8080",
     "http://localhost",
-    # Desarrollo local (hosts file)
-    "http://masasestacion.local:3000",
-    "http://masasestacion.local:3001",
-    "http://elolivo.local:3000",
-    "http://elolivo.local:3001",
-    "http://donajuanita.local:3000",
-    "http://donajuanita.local:3001",
-    "http://api.masasestacion.local:8000",
-    "http://admin.masasestacion.local:3001",
-    "http://admin.elolivo.local:3001",
-    "http://admin.donajuanita.local:3001",
     # POS App (Capacitor)
     "capacitor://localhost",
     "ionic://localhost",
@@ -52,7 +41,9 @@ def get_allowed_origins() -> list[str]:
     """
     Construye la lista de orígenes CORS combinando los estáticos
     con los dominios de todos los tenants registrados en la BD.
-    Genera automáticamente:  https://{dominio} y https://admin.{dominio}
+    Genera automáticamente para cada tenant:
+    - http://{subdomain}.local:3000 / :3001  (desarrollo)
+    - https://{dominio_principal}            (producción)
     """
     from database.database import SessionLocal
     from database.models import Tenant
@@ -61,6 +52,14 @@ def get_allowed_origins() -> list[str]:
         db = SessionLocal()
         tenants = db.query(Tenant).filter(Tenant.activo == True).all()
         for tenant in tenants:
+            # Orígenes de desarrollo .local desde subdomain
+            if tenant.subdomain:
+                s = tenant.subdomain.strip()
+                for port in [3000, 3001, 8080]:
+                    origins.append(f"http://{s}.local:{port}")
+                    origins.append(f"http://admin.{s}.local:{port}")
+                origins.append(f"http://{s}.local")
+            # Orígenes de producción desde dominio_principal
             if tenant.dominio_principal:
                 d = tenant.dominio_principal.strip()
                 origins.append(f"https://{d}")
@@ -70,6 +69,21 @@ def get_allowed_origins() -> list[str]:
     except Exception:
         pass  # Si la BD no está lista aún, usamos solo los estáticos
     return list(set(origins))
+
+
+def is_origin_allowed(origin: str, allowed: list[str]) -> bool:
+    """Verifica si un origen está permitido. Acepta comodín *.local en desarrollo."""
+    if origin in allowed:
+        return True
+    # Comodín de desarrollo: cualquier *.local (cualquier puerto)
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(origin)
+        if parsed.scheme == "http" and parsed.hostname and parsed.hostname.endswith(".local"):
+            return True
+    except Exception:
+        pass
+    return False
 
 
 class DynamicCORSMiddleware(BaseHTTPMiddleware):
@@ -82,7 +96,7 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
         allowed = get_allowed_origins()
 
         if request.method == "OPTIONS":
-            if origin in allowed:
+            if is_origin_allowed(origin, allowed):
                 return Response(
                     status_code=204,
                     headers={
@@ -96,7 +110,7 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
             return Response(status_code=400)
 
         response = await call_next(request)
-        if origin in allowed:
+        if is_origin_allowed(origin, allowed):
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Access-Control-Allow-Credentials"] = "true"
         return response

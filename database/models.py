@@ -63,6 +63,7 @@ class Tenant(Base):
     subdomain = Column(String(50), unique=True, nullable=True)  # 'masasestacion' para *.tuapp.cl
     activo = Column(Boolean, default=True, nullable=False)
     correlativo_pedido = Column(Integer, default=0, nullable=False)  # Correlativo para numero_pedido por tenant
+    google_sheet_id = Column(String(200), nullable=True)  # ID del Google Sheet para importación de datos
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -774,6 +775,7 @@ class PrecioProveedor(Base):
     producto_id = Column(Integer, ForeignKey("productos.id", ondelete="CASCADE"), nullable=False)
     proveedor_id = Column(Integer, ForeignKey("proveedores.id", ondelete="CASCADE"), nullable=False)
     precio_kg = Column(Numeric(10, 2), nullable=False)  # Precio por kilogramo
+    precio_minimo_kg = Column(Numeric(10, 2), nullable=True)  # Precio piso que puede ofrecer el vendedor
     fecha_vigencia = Column(DateTime(timezone=True), server_default=func.now())
     activo = Column(Boolean, default=True)
     notas = Column(String, nullable=True)  # Notas sobre el precio (temporal, promocional, etc.)
@@ -1099,7 +1101,7 @@ class Proveedor(Base):
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     nombre = Column(String, nullable=False, index=True)
-    rut = Column(String, unique=True, index=True)
+    rut = Column(String, index=True)  # Único por tenant (ver UniqueConstraint)
     contacto = Column(String)
     email = Column(String)
     telefono = Column(String)
@@ -1113,6 +1115,10 @@ class Proveedor(Base):
     compras = relationship("Compra", back_populates="proveedor")
     enrolamientos = relationship("Enrolamiento", back_populates="proveedor")
     stock_cajas = relationship("StockCajasProveedor", back_populates="proveedor", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'rut', name='uix_proveedor_tenant_rut'),
+    )
 
 
 class Enrolamiento(Base):

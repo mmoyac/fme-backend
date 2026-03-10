@@ -11,6 +11,7 @@ from datetime import datetime
 
 class PrecioProveedorBase(BaseModel):
     precio_kg: Decimal = Field(..., ge=0, description="Precio por kilogramo")
+    precio_minimo_kg: Optional[Decimal] = Field(None, ge=0, description="Precio mínimo permitido para descuentos del vendedor")
     notas: Optional[str] = Field(None, description="Notas sobre el precio")
     activo: bool = Field(default=True, description="Si el precio está activo")
 
@@ -22,6 +23,7 @@ class PrecioProveedorCreate(PrecioProveedorBase):
 
 class PrecioProveedorUpdate(BaseModel):
     precio_kg: Optional[Decimal] = Field(None, ge=0, description="Nuevo precio por kilogramo")
+    precio_minimo_kg: Optional[Decimal] = Field(None, ge=0, description="Precio mínimo permitido para descuentos del vendedor")
     notas: Optional[str] = Field(None, description="Notas sobre el precio")
     activo: Optional[bool] = Field(None, description="Estado del precio")
 

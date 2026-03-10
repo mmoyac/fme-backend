@@ -1,0 +1,140 @@
+﻿==========================================================================================
+­ƒöä  SINCRONIZACI├ôN DE TENANT DESDE GOOGLE SHEET
+==========================================================================================
+
+Ô£à Entorno: DESARROLLO  (http://localhost:8000)
+Ô£à Autenticado correctamente
+Ô£à Tenant: [2] El Olivo
+
+ÔÜá´©Å  Usuario autenticado pertenece al tenant 1, se necesita tenant 2.
+   Creando usuario de sincronizaci├│n temporal para tenant 2...
+   Ô£à Usuario sync creado: sync_tenant_2@fme.sync
+   Ô£à Re-autenticado como sync_tenant_2@fme.sync (tenant 2)
+
+­ƒôä Sheet ID: 1gxiX266yYZBQaQpobFPjW0eWm8kk4uxYtKjutLxpv_c  (v├¡a argumento)
+
+==========================================================================================
+­ƒôû LEYENDO GOOGLE SHEETS...
+==========================================================================================
+   Categor├¡as:  14 registros
+   Productos:   5 registros
+   Precios:     5 registros
+   Inventario:  5 registros
+
+==========================================================================================
+­ƒôé SINCRONIZANDO CATEGOR├ìAS...
+==========================================================================================
+   Existentes en BD: 14
+   Ôä╣´©Å  GENERAL         ÔåÆ ID   1 (ya existe)
+   Ôä╣´©Å  PANADERIA       ÔåÆ ID   2 (ya existe)
+   Ôä╣´©Å  PASTELERIA      ÔåÆ ID   3 (ya existe)
+   ÔÜá´©Å  nombre vac├¡o para 'EMPANADAS', se usar├í el codigo como nombre
+   Ôä╣´©Å  EMPANADAS       ÔåÆ ID   4 (ya existe)
+   ÔÜá´©Å  nombre vac├¡o para 'LACTEOS', se usar├í el codigo como nombre
+   Ôä╣´©Å  LACTEOS         ÔåÆ ID   5 (ya existe)
+   ÔÜá´©Å  nombre vac├¡o para 'ABARROTES', se usar├í el codigo como nombre
+   Ôä╣´©Å  ABARROTES       ÔåÆ ID   6 (ya existe)
+   ÔÜá´©Å  nombre vac├¡o para 'CARNES', se usar├í el codigo como nombre
+   Ôä╣´©Å  CARNES          ÔåÆ ID   7 (ya existe)
+   ÔÜá´©Å  nombre vac├¡o para 'QUESOS', se usar├í el codigo como nombre
+   Ôä╣´©Å  QUESOS          ÔåÆ ID   8 (ya existe)
+   ÔÜá´©Å  nombre vac├¡o para 'PIZZA', se usar├í el codigo como nombre
+   Ôä╣´©Å  PIZZA           ÔåÆ ID   9 (ya existe)
+   ÔÜá´©Å  nombre vac├¡o para 'QUESOS_UNIDAD', se usar├í el codigo como nombre
+   Ôä╣´©Å  QUESOS_UNIDAD   ÔåÆ ID  13 (ya existe)
+   ÔÜá´©Å  nombre vac├¡o para 'ACEITE', se usar├í el codigo como nombre
+   Ôä╣´©Å  ACEITE          ÔåÆ ID  11 (ya existe)
+   ÔÜá´©Å  nombre vac├¡o para 'PAPAS', se usar├í el codigo como nombre
+   Ôä╣´©Å  PAPAS           ÔåÆ ID  12 (ya existe)
+   ÔÜá´©Å  nombre vac├¡o para 'GOURMET', se usar├í el codigo como nombre
+   Ôä╣´©Å  GOURMET         ÔåÆ ID  14 (ya existe)
+   ÔÜá´©Å  SALTADA (falta codigo): {'id': '14', 'codigo': '', 'nombre': ''}
+
+==========================================================================================
+­ƒôª IMPORTANDO PRODUCTOS...
+==========================================================================================
+
+  10001 ÔÇö ALCAPARRAS IMPORTADAS
+    Ô£à CREADO (ID 57)
+
+  10002 ÔÇö CALDO EN POLVO SABOR AVE
+    Ô£à CREADO (ID 58)
+
+  10003 ÔÇö CALDO EN POLVO SABOR CARNE
+    Ô£à CREADO (ID 59)
+
+  10004 ÔÇö CALDO EN POLVO SABOR COSTILLA
+    Ô£à CREADO (ID 60)
+
+  10005 ÔÇö ESENCIA CANELA
+    Ô£à CREADO (ID 61)
+
+   Ô×ò 5 creados  ­ƒöä 0 actualizados  ÔØî 0 fallidos
+
+==========================================================================================
+­ƒÆ░ IMPORTANDO PRECIOS...
+==========================================================================================
+    ÔÜá´©Å  Local 'LOC_001' no existe, creando...
+    Ô£à Local 'LOC_001' creado (ID 18, c├│digo asignado: LOC_004)
+
+  10001 / LOC_001: $1973
+    Ô£à OK
+
+  10002 / LOC_001: $3807
+    Ô£à OK
+
+  10003 / LOC_001: $3807
+    Ô£à OK
+
+  10004 / LOC_001: $3807
+    Ô£à OK
+
+  10005 / LOC_001: $3512
+    Ô£à OK
+
+   Ô£à 5 precios  ÔØî 0 fallidos
+
+==========================================================================================
+­ƒôè IMPORTANDO INVENTARIO...
+==========================================================================================
+
+  10001 / LOC_001: 12 uds.
+    Ô£à OK
+
+  10002 / LOC_001: 10 uds.
+    Ô£à OK
+
+  10003 / LOC_001: 10 uds.
+    Ô£à OK
+
+  10004 / LOC_001: 10 uds.
+    Ô£à OK
+
+  10005 / LOC_001: 10 uds.
+    Ô£à OK
+
+   Ô£à 5 inventarios  ÔØî 0 fallidos
+
+==========================================================================================
+­ƒôè RESUMEN FINAL
+==========================================================================================
+   Entorno:    DESARROLLO
+   Tenant:     [2] El Olivo
+   Sheet:      1gxiX266yYZBQaQpobFPjW0eWm8kk4uxYtKjutLxpv_c
+
+   ­ƒôª Productos:   Ô×ò   5 nuevos   ­ƒöä   0 actualizados   ÔØî   0 fallidos
+   ­ƒÆ░ Precios:     Ô£à   5   ÔØî   0
+   ­ƒôè Inventario:  Ô£à   5   ÔØî   0
+
+   Ô×ò Productos nuevos:
+      ÔÇó 10001           (ID 57)
+      ÔÇó 10002           (ID 58)
+      ÔÇó 10003           (ID 59)
+      ÔÇó 10004           (ID 60)
+      ÔÇó 10005           (ID 61)
+
+   ­ƒº╣ Usuario temporal 'sync_tenant_2@fme.sync' eliminado.
+
+==========================================================================================
+­ƒÄ» SINCRONIZACI├ôN COMPLETADA
+==========================================================================================

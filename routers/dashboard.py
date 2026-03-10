@@ -39,26 +39,27 @@ def obtener_estadisticas_dashboard(db: Session = Depends(get_db), current_user =
     inicio_mes = datetime(hoy.year, hoy.month, 1, tzinfo=CHILE_TZ).date()
     hace_7_dias = hoy - timedelta(days=7)
     
-    # --- Ventas del día (filtrado por tenant) ---
-    ventas_hoy = db.query(func.sum(Pedido.monto_total)).join(Cliente).filter(
-        func.date(Pedido.fecha_pedido) == hoy,
-        Cliente.tenant_id == current_user.tenant_id
-    ).scalar() or 0
-    
-    # --- Ventas del mes (filtrado por tenant) ---
-    ventas_mes = db.query(func.sum(Pedido.monto_total)).join(Cliente).filter(
-        func.date(Pedido.fecha_pedido) >= inicio_mes,
-        Cliente.tenant_id == current_user.tenant_id
-    ).scalar() or 0
-    
-    # --- Pedidos pendientes de pago (filtrado por tenant) ---
+    # Buscar el ID del estado CANCELADO (usado en múltiples queries)
     from database.models import EstadoPedido as EstadoPedidoModel
-    
-    # Buscar el ID del estado CANCELADO
     estado_cancelado = db.query(EstadoPedidoModel).filter(
         EstadoPedidoModel.codigo == 'CANCELADO'
     ).first()
+
+    # --- Ventas del día (filtrado por tenant, excluye CANCELADO) ---
+    ventas_hoy = db.query(func.sum(Pedido.monto_total)).join(Cliente).filter(
+        func.date(Pedido.fecha_pedido) == hoy,
+        Cliente.tenant_id == current_user.tenant_id,
+        Pedido.estado_id != estado_cancelado.id if estado_cancelado else True,
+    ).scalar() or 0
     
+    # --- Ventas del mes (filtrado por tenant, excluye CANCELADO) ---
+    ventas_mes = db.query(func.sum(Pedido.monto_total)).join(Cliente).filter(
+        func.date(Pedido.fecha_pedido) >= inicio_mes,
+        Cliente.tenant_id == current_user.tenant_id,
+        Pedido.estado_id != estado_cancelado.id if estado_cancelado else True,
+    ).scalar() or 0
+    
+    # --- Pedidos pendientes de pago (filtrado por tenant) ---
     pedidos_sin_pagar = db.query(Pedido).join(Cliente).filter(
         Pedido.es_pagado == False,
         Pedido.estado_id != estado_cancelado.id if estado_cancelado else True,
@@ -83,7 +84,7 @@ def obtener_estadisticas_dashboard(db: Session = Depends(get_db), current_user =
     for estado, cantidad in pedidos_por_estado_query:
         estados[estado] = cantidad
     
-    total_pedidos = sum(estados.values())
+    total_pedidos = sum(v for k, v in estados.items() if k != 'CANCELADO')
     
     # --- Ticket promedio ---
     if total_pedidos > 0:
@@ -152,7 +153,8 @@ def obtener_estadisticas_dashboard(db: Session = Depends(get_db), current_user =
         fecha = hoy - timedelta(days=6-i)
         ventas_dia = db.query(func.sum(Pedido.monto_total)).join(Cliente).filter(
             func.date(Pedido.fecha_pedido) == fecha,
-            Cliente.tenant_id == current_user.tenant_id
+            Cliente.tenant_id == current_user.tenant_id,
+            Pedido.estado_id != estado_cancelado.id if estado_cancelado else True,
         ).scalar() or 0
         
         ventas_por_dia.append({

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from database.database import get_db
-from database.models import Inventario, Producto, Local
+from database.models import Inventario, Producto, Local, MovimientoInventario
 from schemas.inventario_consulta import InventarioResumen, InventarioDetalle
 from schemas.inventario import InventarioResponse, InventarioUpdate
 from services import inventario_service
@@ -200,3 +200,77 @@ def actualizar_inventario_por_producto_local(
     db.commit()
     db.refresh(db_inventario)
     return db_inventario
+
+
+@router.post("/ajuste-merma")
+def ajuste_merma(
+    producto_id: int,
+    local_id: int,
+    cantidad: int,
+    motivo: str = "",
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    """
+    Descuenta stock por merma (pérdida, daño, vencimiento).
+    - Solo permite descuentos (cantidad > 0).
+    - No puede dejar stock negativo.
+    - Registra el movimiento tipo MERMA con el usuario que lo realizó.
+    """
+    if cantidad <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La cantidad a descontar debe ser mayor a cero"
+        )
+
+    producto = db.query(Producto).filter(
+        Producto.id == producto_id,
+        Producto.tenant_id == current_user.tenant_id
+    ).first()
+    if not producto:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Producto no encontrado")
+
+    local = db.query(Local).filter(
+        Local.id == local_id,
+        Local.tenant_id == current_user.tenant_id
+    ).first()
+    if not local:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Local no encontrado")
+
+    db_inventario = db.query(Inventario).filter(
+        Inventario.producto_id == producto_id,
+        Inventario.local_id == local_id
+    ).first()
+    if not db_inventario:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No existe inventario para ese producto/local")
+
+    if cantidad > db_inventario.cantidad_stock:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"La cantidad a descontar ({cantidad}) supera el stock disponible ({db_inventario.cantidad_stock})"
+        )
+
+    stock_anterior = db_inventario.cantidad_stock
+    db_inventario.cantidad_stock = max(0, db_inventario.cantidad_stock - cantidad)
+
+    movimiento = MovimientoInventario(
+        producto_id=producto_id,
+        local_origen_id=local_id,
+        local_destino_id=None,
+        cantidad=cantidad,
+        tipo_movimiento="MERMA",
+        notas=motivo or f"Merma registrada por {current_user.nombre_completo or current_user.email}",
+        usuario=current_user.nombre_completo or current_user.email
+    )
+    db.add(movimiento)
+    db.commit()
+    db.refresh(db_inventario)
+
+    return {
+        "producto_id": producto_id,
+        "local_id": local_id,
+        "stock_anterior": stock_anterior,
+        "cantidad_descontada": cantidad,
+        "stock_nuevo": db_inventario.cantidad_stock,
+        "usuario": current_user.nombre_completo or current_user.email
+    }

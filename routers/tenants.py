@@ -50,6 +50,7 @@ def listar_tenants(
             'subdomain': tenant.subdomain,
             'activo': tenant.activo,
             'correlativo_pedido': tenant.correlativo_pedido,
+            'google_sheet_id': tenant.google_sheet_id,
             'created_at': tenant.created_at,
             'updated_at': tenant.updated_at,
             # Estadísticas
@@ -87,6 +88,7 @@ def obtener_tenant(
         'subdomain': tenant.subdomain,
         'activo': tenant.activo,
         'correlativo_pedido': tenant.correlativo_pedido,
+        'google_sheet_id': tenant.google_sheet_id,
         'created_at': tenant.created_at,
         'updated_at': tenant.updated_at,
         # Estadísticas
@@ -317,6 +319,9 @@ def actualizar_tenant(
     if tenant_data.correlativo_pedido is not None:
         tenant.correlativo_pedido = tenant_data.correlativo_pedido
     
+    if tenant_data.google_sheet_id is not None:
+        tenant.google_sheet_id = tenant_data.google_sheet_id if tenant_data.google_sheet_id else None
+    
     db.commit()
     db.refresh(tenant)
     
@@ -328,6 +333,7 @@ def actualizar_tenant(
         'subdomain': tenant.subdomain,
         'activo': tenant.activo,
         'correlativo_pedido': tenant.correlativo_pedido,
+        'google_sheet_id': tenant.google_sheet_id,
         'created_at': tenant.created_at,
         'updated_at': tenant.updated_at,
         # Estadísticas

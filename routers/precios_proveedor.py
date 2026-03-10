@@ -52,6 +52,13 @@ def listar_precios_proveedor(
         query = query.filter(PrecioProveedor.proveedor_id == proveedor_id)
     if solo_activos:
         query = query.filter(PrecioProveedor.activo == True)
+
+    # Filtrar también que el proveedor pertenezca al tenant actual
+    query = query.join(
+        Proveedor, PrecioProveedor.proveedor_id == Proveedor.id
+    ).filter(
+        Proveedor.tenant_id == current_user.tenant_id
+    )
     
     precios = query.offset(skip).limit(limit).all()
     
@@ -63,6 +70,7 @@ def listar_precios_proveedor(
             "producto_id": precio.producto_id,
             "proveedor_id": precio.proveedor_id,
             "precio_kg": float(precio.precio_kg),
+            "precio_minimo_kg": float(precio.precio_minimo_kg) if precio.precio_minimo_kg is not None else None,
             "fecha_vigencia": precio.fecha_vigencia,
             "activo": precio.activo,
             "notas": precio.notas,
@@ -82,14 +90,21 @@ def crear_precio_proveedor(
     current_user: User = Depends(get_current_active_user)
 ):
     """Crear un nuevo precio por proveedor."""
-    # Verificar que producto y proveedor existen
-    producto = db.query(Producto).filter(Producto.id == precio.producto_id).first()
+    # Verificar que producto existe y pertenece al tenant actual
+    producto = db.query(Producto).filter(
+        Producto.id == precio.producto_id,
+        Producto.tenant_id == current_user.tenant_id
+    ).first()
     if not producto:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
     
-    proveedor = db.query(Proveedor).filter(Proveedor.id == precio.proveedor_id).first()
+    # Verificar que proveedor existe y pertenece al tenant actual
+    proveedor = db.query(Proveedor).filter(
+        Proveedor.id == precio.proveedor_id,
+        Proveedor.tenant_id == current_user.tenant_id
+    ).first()
     if not proveedor:
-        raise HTTPException(status_code=404, detail="Proveedor no encontrado")
+        raise HTTPException(status_code=404, detail="Proveedor no encontrado o no pertenece a su organización")
     
     # Verificar si ya existe un precio activo para esta combinación
     precio_existente = db.query(PrecioProveedor).filter(
@@ -171,9 +186,12 @@ def listar_productos_con_precios(
     for producto in productos:
         precios_proveedor = db.query(PrecioProveedor).options(
             joinedload(PrecioProveedor.proveedor)
+        ).join(
+            Proveedor, PrecioProveedor.proveedor_id == Proveedor.id
         ).filter(
             PrecioProveedor.producto_id == producto.id,
-            PrecioProveedor.activo == True
+            PrecioProveedor.activo == True,
+            Proveedor.tenant_id == current_user.tenant_id
         ).all()
         
         precios_formateados = []
@@ -183,6 +201,7 @@ def listar_productos_con_precios(
                 "producto_id": precio.producto_id,
                 "proveedor_id": precio.proveedor_id,
                 "precio_kg": float(precio.precio_kg),
+                "precio_minimo_kg": float(precio.precio_minimo_kg) if precio.precio_minimo_kg is not None else None,
                 "fecha_vigencia": precio.fecha_vigencia,
                 "activo": precio.activo,
                 "notas": precio.notas,
@@ -225,6 +244,7 @@ def obtener_precio_especifico(
     
     return {
         "precio_kg": float(precio.precio_kg),
+        "precio_minimo_kg": float(precio.precio_minimo_kg) if precio.precio_minimo_kg is not None else None,
         "fecha_vigencia": precio.fecha_vigencia,
         "notas": precio.notas
     }

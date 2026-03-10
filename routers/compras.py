@@ -38,11 +38,11 @@ def create_proveedor(proveedor: schemas.ProveedorCreate, db: Session = Depends(g
         db.rollback()
         error_message = str(e.orig)
         
-        # Detectar error de RUT duplicado
-        if 'ix_proveedores_rut' in error_message or 'duplicate key' in error_message.lower():
+        # Detectar error de RUT duplicado (único por tenant)
+        if 'uix_proveedor_tenant_rut' in error_message or 'ix_proveedores_rut' in error_message or 'duplicate key' in error_message.lower():
             raise HTTPException(
-                status_code=400, 
-                detail=f"El RUT '{proveedor.rut}' ya está registrado en el sistema"
+                status_code=400,
+                detail=f"El RUT '{proveedor.rut}' ya está registrado para este tenant"
             )
         
         # Detectar error de email duplicado

@@ -64,11 +64,23 @@ def crear_local(local: LocalCreate, db: Session = Depends(get_db), current_user 
             detail=f"Ya existe un local con nombre '{local.nombre}'"
         )
     
-    # Generar código automático dentro del tenant
-    max_id = db.query(Local).filter(Local.tenant_id == current_user.tenant_id).count()
-    codigo = f"LOC_{max_id + 1:03d}"
-    
-    # Crear nuevo local con tenant_id (excluir codigo del dump porque se genera automáticamente)
+    # Usar el código provisto; si no viene, generar automáticamente
+    if local.codigo:
+        # Verificar que el código no esté en uso en el mismo tenant
+        existing_code = db.query(Local).filter(
+            Local.codigo == local.codigo, Local.tenant_id == current_user.tenant_id
+        ).first()
+        if existing_code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Ya existe un local con código '{local.codigo}'"
+            )
+        codigo = local.codigo.upper()
+    else:
+        max_id = db.query(Local).filter(Local.tenant_id == current_user.tenant_id).count()
+        codigo = f"LOC_{max_id + 1:03d}"
+
+    # Crear nuevo local con tenant_id
     local_data = local.model_dump(exclude={'codigo'})
     db_local = Local(**local_data, codigo=codigo, tenant_id=current_user.tenant_id)
     db.add(db_local)

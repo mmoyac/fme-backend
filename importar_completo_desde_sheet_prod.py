@@ -1,6 +1,22 @@
 """
-Script para importar productos, precios e inventario desde Google Sheet a PRODUCCIÓN.
-Tenant ID: 1 (Masas Estación)
+Script para importar productos, precios e inventario desde Google Sheet.
+
+Uso:
+    python importar_completo_desde_sheet_prod.py [--env ENV] [--tenant TENANT_ID] [--sheet SHEET_ID]
+
+Entornos disponibles:
+    prod  → https://api.masasestacion.cl          (por defecto)
+    dev   → http://localhost:8000
+
+Ejemplos:
+    # Importar en producción, tenant 1 con sheet guardado en BD
+    python importar_completo_desde_sheet_prod.py --tenant 1
+
+    # Importar en desarrollo, menú interactivo
+    python importar_completo_desde_sheet_prod.py --env dev
+
+    # Importar en desarrollo, tenant 1 con sheet personalizado
+    python importar_completo_desde_sheet_prod.py --env dev --tenant 1 --sheet 1acE1CN_1foFi16a7eF2xCXaq8es2gSKMfu-paUaubZM
 """
 import sys
 import io
@@ -9,15 +25,151 @@ import io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
+import argparse
 import requests
 import csv
 import time
 from io import StringIO
 
-# Configuración
-SHEET_ID = "1acE1CN_1foFi16a7eF2xCXaq8es2gSKMfu-paUaubZM"
-API_URL = "https://api.masasestacion.cl"
-TENANT_ID = 1  # Masas Estación
+# ─── Entornos disponibles ─────────────────────────────────────────────────────
+ENVIRONMENTS = {
+    "prod": {
+        "api_url": "https://api.masasestacion.cl",
+        "label": "PRODUCCIÓN",
+        "user": "admin@fme.cl",
+        "password": "admin",
+        "docker_container": "masas_estacion_backend",  # docker exec <container>
+        "docker_compose": False,
+    },
+    "dev": {
+        "api_url": "http://localhost:8000",
+        "label": "DESARROLLO",
+        "user": "admin@fme.cl",
+        "password": "admin",
+        "docker_container": "fme-backend",  # docker compose exec backend
+        "docker_compose": True,
+    },
+}
+
+# ─── Parsear argumentos ───────────────────────────────────────────────────────
+parser = argparse.ArgumentParser(description="Importar datos desde Google Sheet")
+parser.add_argument("--env", choices=["prod", "dev"], default=None,
+                    help="Entorno destino: 'prod' (producción) o 'dev' (desarrollo local). Si se omite, se pregunta interactivamente.")
+parser.add_argument("--tenant", type=int, help="ID del tenant a importar (ej: 1)")
+parser.add_argument("--sheet", type=str, help="ID del Google Sheet (anula el valor almacenado en la BD)")
+parser.add_argument("--limpiar", action="store_true",
+                    help="Eliminar todos los datos operativos del tenant antes de importar (reset completo)")
+parser.add_argument("--conservar-clientes", action="store_true",
+                    help="Con --limpiar: conserva clientes y sus puntos de fidelización")
+args = parser.parse_args()
+
+# ─── Selección de entorno ─────────────────────────────────────────────────────
+if args.env:
+    ENV_KEY = args.env
+else:
+    print("=" * 100)
+    print("🌍 SELECCIÓN DE ENTORNO")
+    print("=" * 100)
+    for key, cfg in ENVIRONMENTS.items():
+        print(f"   [{key}] {cfg['label']} → {cfg['api_url']}")
+    print()
+    try:
+        ENV_KEY = input("👉 Entorno [prod/dev] (Enter = prod): ").strip().lower() or "prod"
+    except EOFError:
+        ENV_KEY = "prod"
+    if ENV_KEY not in ENVIRONMENTS:
+        print(f"❌ Entorno '{ENV_KEY}' no válido. Usa 'prod' o 'dev'.")
+        sys.exit(1)
+
+ENV_CFG = ENVIRONMENTS[ENV_KEY]
+API_URL = ENV_CFG["api_url"]
+
+# ─── Autenticar para obtener tenants disponibles ─────────────────────────────
+print("=" * 100)
+print(f"🚀 IMPORTACIÓN COMPLETA — {ENV_CFG['label']}")
+print("=" * 100)
+print(f"🌐 API: {API_URL}")
+
+_auth_resp = requests.post(
+    f"{API_URL}/api/auth/token",
+    data={"username": ENV_CFG["user"], "password": ENV_CFG["password"]},
+    headers={"Content-Type": "application/x-www-form-urlencoded"}
+)
+if _auth_resp.status_code != 200:
+    print(f"❌ ERROR al autenticar: {_auth_resp.text}")
+    sys.exit(1)
+
+_TOKEN_BOOTSTRAP = _auth_resp.json()["access_token"]
+_headers_bootstrap = {"Authorization": f"Bearer {_TOKEN_BOOTSTRAP}"}
+
+# ─── Obtener lista de tenants ─────────────────────────────────────────────────
+_tenants_resp = requests.get(f"{API_URL}/api/admin/tenants/", headers=_headers_bootstrap)
+if _tenants_resp.status_code != 200:
+    print(f"❌ ERROR al obtener tenants: {_tenants_resp.text}")
+    sys.exit(1)
+
+_all_tenants = _tenants_resp.json()
+_tenants_map = {t["id"]: t for t in _all_tenants}
+
+# ─── Selección interactiva si no se pasaron argumentos ───────────────────────
+if args.tenant:
+    TENANT_ID = args.tenant
+else:
+    print("\n📋 TENANTS DISPONIBLES:")
+    for t in _all_tenants:
+        sheet_info = f"  [sheet: {t.get('google_sheet_id', 'NO CONFIGURADO')}]" if t.get("google_sheet_id") else "  ⚠️  Sin Google Sheet configurado"
+        estado = "✅" if t["activo"] else "❌"
+        print(f"   {estado} [{t['id']}] {t['nombre']} ({t['codigo']}){sheet_info}")
+    print()
+    try:
+        TENANT_ID = int(input("👉 Ingresa el ID del tenant a importar: ").strip())
+    except (ValueError, EOFError):
+        print("❌ ID inválido")
+        sys.exit(1)
+
+if TENANT_ID not in _tenants_map:
+    print(f"❌ Tenant ID {TENANT_ID} no encontrado")
+    sys.exit(1)
+
+_tenant_info = _tenants_map[TENANT_ID]
+
+# ─── Determinar SHEET_ID ─────────────────────────────────────────────────────
+if args.sheet:
+    SHEET_ID = args.sheet.strip()
+    print(f"\n📄 Sheet ID suministrado por argumento: {SHEET_ID}")
+elif _tenant_info.get("google_sheet_id"):
+    SHEET_ID = _tenant_info["google_sheet_id"]
+    print(f"\n📄 Sheet ID obtenido desde la BD del tenant: {SHEET_ID}")
+else:
+    print(f"\n⚠️  El tenant '{_tenant_info['nombre']}' no tiene Google Sheet configurado en la BD.")
+    try:
+        SHEET_ID = input("👉 Ingresa el Sheet ID manualmente (o Enter para cancelar): ").strip()
+    except EOFError:
+        SHEET_ID = ""
+    if not SHEET_ID:
+        print("❌ No se proporcionó Sheet ID. Abortando.")
+        sys.exit(1)
+    # Ofrecer guardar el sheet en la BD
+    try:
+        guardar = input(f"💾 ¿Guardar este Sheet ID en la BD para el tenant '{_tenant_info['nombre']}'? [s/N]: ").strip().lower()
+    except EOFError:
+        guardar = "n"
+    if guardar == "s":
+        _put_resp = requests.put(
+            f"{API_URL}/api/admin/tenants/{TENANT_ID}",
+            json={"google_sheet_id": SHEET_ID},
+            headers=_headers_bootstrap
+        )
+        if _put_resp.status_code == 200:
+            print(f"   ✅ Sheet ID guardado en la BD")
+        else:
+            print(f"   ⚠️  No se pudo guardar: {_put_resp.text}")
+
+print()
+print(f"📍 Tenant: [{TENANT_ID}] {_tenant_info['nombre']}")
+print(f"📄 Google Sheet: {SHEET_ID}")
+print(f"📋 Hojas a importar: Categorias, productos, precios, inventario")
+print("=" * 100)
 
 
 def obtener_detalle_error(resp):
@@ -40,14 +192,56 @@ def obtener_detalle_error(resp):
         return f"[HTTP {status}] {texto}"
 
 
-print("=" * 100)
-print("🚀 IMPORTACIÓN COMPLETA A PRODUCCIÓN")
-print("=" * 100)
-print(f"📍 Tenant: ID {TENANT_ID} (Masas Estación)")
-print(f"🌐 API: {API_URL}")
-print(f"📄 Google Sheet: {SHEET_ID}")
-print(f"📋 Hojas a importar: Categorias, productos, precios, inventario")
-print("=" * 100)
+# ─── Limpieza previa (opcional) ───────────────────────────────────────────────
+if args.limpiar:
+    import subprocess
+
+    print("\n🗑️  PASO 0: LIMPIEZA PREVIA DEL TENANT")
+    print("=" * 100)
+    print(f"⚠️  Se eliminarán TODOS los datos operativos de [{TENANT_ID}] {_tenant_info['nombre']}:")
+    print("   Pedidos, compras, inventario, precios, lotes, enrolamientos, caja, hojas de ruta...")
+    if args.conservar_clientes:
+        print("   Clientes: CONSERVADOS (--conservar-clientes activo)")
+    else:
+        print("   Clientes y puntos de fidelización")
+    print("   Productos: CONSERVADOS")
+
+    try:
+        confirmar = input("\n¿Confirmar limpieza antes de importar? (SI/NO): ").strip().upper()
+    except EOFError:
+        confirmar = "NO"
+
+    if confirmar != "SI":
+        print("❌ Limpieza cancelada. Abortando importación.")
+        sys.exit(0)
+
+    # Construir comando docker según entorno
+    delete_cmd = [
+        "python", "eliminar_datos_tenant.py",
+        f"--tenant-id={TENANT_ID}",
+        "--si",  # sin confirmación interactiva (ya confirmamos arriba)
+    ]
+    if args.conservar_clientes:
+        delete_cmd.append("--conservar-clientes")
+
+    if ENV_CFG["docker_compose"]:
+        cmd = ["docker", "compose", "exec", "backend"] + delete_cmd
+    else:
+        cmd = ["docker", "exec", ENV_CFG["docker_container"]] + delete_cmd
+
+    print(f"\n▶  Ejecutando: {' '.join(cmd)}\n")
+    result = subprocess.run(cmd, text=True, encoding="utf-8")
+    if result.returncode != 0:
+        print(f"\n❌ La limpieza falló (código {result.returncode}). Abortando importación.")
+        sys.exit(1)
+
+    print("\n✅ Limpieza completada. Iniciando importación...")
+    print("=" * 100)
+
+
+            texto += "..."
+        return f"[HTTP {status}] {texto}"
+
 
 # Función auxiliar para leer una hoja del Google Sheet
 def leer_hoja(sheet_name):
@@ -90,25 +284,15 @@ if not productos_data:
     print("❌ No hay productos para importar. Abortando.")
     exit(1)
 
-# 2. Autenticación
-print("\n🔐 PASO 2: Autenticando en producción...")
-login_data = {
-    "username": "admin@fme.cl",
-    "password": "admin"
+# 2. Reutilizar token de autenticación ya obtenido
+print("\n🔐 PASO 2: Autenticación...")
+token = _TOKEN_BOOTSTRAP
+headers = {
+    "Authorization": f"Bearer {token}",
+    "Content-Type": "application/json"
 }
+print("✅ Autenticación exitosa")
 
-try:
-    resp = requests.post(f"{API_URL}/api/auth/token", data=login_data)
-    resp.raise_for_status()
-    token = resp.json()["access_token"]
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
-    print("✅ Autenticación exitosa")
-except Exception as e:
-    print(f"❌ ERROR en autenticación: {e}")
-    exit(1)
 
 # 3. Sincronizar Categorías (crear las que no existen)
 print("\n📂 PASO 3: Sincronizando categorías...")

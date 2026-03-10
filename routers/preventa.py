@@ -56,6 +56,11 @@ class ItemPreventaCreate(BaseModel):
     proveedor_id: int
     cantidad: float = Field(..., gt=0, description="Número de cajas pedidas")
     local_cliente_id: Optional[int] = None
+    precio_acordado_kg: Optional[float] = Field(
+        default=None,
+        gt=0,
+        description="Precio por kg acordado con el cliente (debe estar entre precio_minimo_kg y precio_kg)",
+    )
 
 
 class PreventaCreate(BaseModel):
@@ -242,6 +247,28 @@ def crear_preventa(
         ).first()
 
         precio_kg = float(precio_proveedor.precio_kg) if precio_proveedor else 0.0
+        precio_minimo_kg = float(precio_proveedor.precio_minimo_kg) if (precio_proveedor and precio_proveedor.precio_minimo_kg is not None) else None
+
+        # Validar precio acordado si viene del vendedor
+        if item_data.precio_acordado_kg is not None:
+            if precio_minimo_kg is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"El producto/proveedor no tiene precio mínimo configurado. El administrador debe definirlo antes de permitir descuentos.",
+                )
+            if item_data.precio_acordado_kg < precio_minimo_kg:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"El precio acordado ${item_data.precio_acordado_kg:.2f}/kg es inferior al precio mínimo permitido ${precio_minimo_kg:.2f}/kg.",
+                )
+            if item_data.precio_acordado_kg > precio_kg:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"El precio acordado ${item_data.precio_acordado_kg:.2f}/kg no puede superar el precio base ${precio_kg:.2f}/kg.",
+                )
+            precio_efectivo_kg = item_data.precio_acordado_kg
+        else:
+            precio_efectivo_kg = precio_kg
 
         # --- Reserva FIFO de lotes ---
         lotes_disponibles = (
@@ -298,6 +325,10 @@ def crear_preventa(
             )
             db.add(movimiento_reserva)
 
+        # Forzar persistencia en BD para que los próximos ítems del mismo pedido
+        # no vean estos lotes como disponibles en su consulta FIFO
+        db.flush()
+
         # Descontar del stock disponible
         stock = db.query(StockCajasProveedorModel).filter(
             StockCajasProveedorModel.producto_id == item_data.producto_id,
@@ -312,7 +343,7 @@ def crear_preventa(
             producto_id=item_data.producto_id,
             proveedor_id=item_data.proveedor_id,
             cantidad=item_data.cantidad,
-            precio_unitario_venta=precio_kg,
+            precio_unitario_venta=precio_efectivo_kg,
             local_cliente_id=item_data.local_cliente_id,
         )
         db.add(item)
@@ -372,6 +403,96 @@ def listar_preventas(
     return [_build_preventa_out(p) for p in pedidos]
 
 
+@router.get("/resumen-cajas")
+def resumen_cajas_por_vendedor(
+    fecha: Optional[date] = Query(None, description="Fecha (YYYY-MM-DD), defecto=hoy"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Resumen de cajas vendidas agrupadas por vendedor para una fecha dada.
+    Solo incluye pedidos confirmados (excluye CANCELADO y PREVENTA).
+    """
+    target_date = fecha or date.today()
+    start = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=pytz.UTC)
+    end = datetime.combine(target_date, datetime.max.time()).replace(tzinfo=pytz.UTC)
+
+    # Obtener estados a excluir (solo CANCELADO)
+    estados_excluir = db.query(EstadoPedidoModel.id).filter(
+        EstadoPedidoModel.codigo.in_(["CANCELADO"])
+    ).all()
+    ids_excluir = [e[0] for e in estados_excluir]
+
+    pedidos = (
+        db.query(PedidoModel)
+        .options(
+            joinedload(PedidoModel.cliente),
+            joinedload(PedidoModel.usuario),
+            joinedload(PedidoModel.items).joinedload(ItemPedidoModel.proveedor),
+            joinedload(PedidoModel.items).joinedload(ItemPedidoModel.producto),
+        )
+        .filter(
+            PedidoModel.tenant_id == current_user.tenant_id,
+            PedidoModel.tipo_pedido_id == 2,  # CAJAS_VARIABLES
+            ~PedidoModel.estado_id.in_(ids_excluir),
+            PedidoModel.fecha_pedido >= start,
+            PedidoModel.fecha_pedido <= end,
+        )
+        .order_by(PedidoModel.usuario_id, PedidoModel.fecha_pedido)
+        .all()
+    )
+
+    # Agrupar por vendedor y por corte
+    vendedores: dict = {}
+    cortes: dict = {}
+
+    for pedido in pedidos:
+        uid = pedido.usuario_id or 0
+        nombre = pedido.usuario.nombre_completo if pedido.usuario else "Sin vendedor"
+        if uid not in vendedores:
+            vendedores[uid] = {
+                "vendedor_id": uid,
+                "vendedor_nombre": nombre,
+                "cantidad_cajas": 0,
+                "cantidad_pedidos": 0,
+                "pedidos": [],
+            }
+        total_cajas_pedido = sum(float(item.cantidad) for item in pedido.items)
+        vendedores[uid]["cantidad_cajas"] += total_cajas_pedido
+        vendedores[uid]["cantidad_pedidos"] += 1
+        vendedores[uid]["pedidos"].append({
+            "pedido_id": pedido.id,
+            "numero_pedido": pedido.numero_pedido,
+            "cliente": pedido.cliente.nombre if pedido.cliente else "N/A",
+            "cajas": total_cajas_pedido,
+            "monto_total": float(pedido.monto_total),
+            "estado": pedido.estado_pedido.codigo if pedido.estado_pedido else "N/A",
+        })
+
+        # Agrupar items por corte (producto)
+        for item in pedido.items:
+            prod_id = item.producto_id
+            prod_nombre = item.producto.nombre if item.producto else f"Producto #{prod_id}"
+            if prod_id not in cortes:
+                cortes[prod_id] = {
+                    "producto_id": prod_id,
+                    "corte": prod_nombre,
+                    "total_cajas": 0,
+                }
+            cortes[prod_id]["total_cajas"] += float(item.cantidad)
+
+    por_vendedor = list(vendedores.values())
+    por_corte = sorted(cortes.values(), key=lambda x: x["corte"])
+
+    return {
+        "fecha": str(target_date),
+        "total_cajas": sum(v["cantidad_cajas"] for v in por_vendedor),
+        "total_pedidos": sum(v["cantidad_pedidos"] for v in por_vendedor),
+        "por_vendedor": por_vendedor,
+        "por_corte": por_corte,
+    }
+
+
 @router.get("/{pedido_id}", response_model=PreventaOut)
 def obtener_preventa(
     pedido_id: int,
@@ -398,6 +519,98 @@ def obtener_preventa(
     if not pedido:
         raise HTTPException(status_code=404, detail="Pre-venta no encontrada")
     return _build_preventa_out(pedido)
+
+
+@router.delete("/item/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+def eliminar_item_preventa(
+    item_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Eliminar un item de una pre-venta liberando sus lotes reservados y restaurando el stock."""
+    item = (
+        db.query(ItemPedidoModel)
+        .options(
+            joinedload(ItemPedidoModel.asignaciones_picking).joinedload(AsignacionPickingModel.lote),
+        )
+        .filter(ItemPedidoModel.id == item_id)
+        .first()
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Item no encontrado")
+
+    # Validar que el pedido pertenece al tenant y está en PREVENTA
+    pedido = (
+        db.query(PedidoModel)
+        .options(joinedload(PedidoModel.estado_pedido))
+        .filter(
+            PedidoModel.id == item.pedido_id,
+            PedidoModel.tenant_id == current_user.tenant_id,
+        )
+        .first()
+    )
+    if not pedido:
+        raise HTTPException(status_code=404, detail="Pre-venta no encontrada")
+    if pedido.estado_pedido.codigo != "PREVENTA":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Solo se pueden modificar preventas en estado PREVENTA. Estado actual: {pedido.estado_pedido.codigo}"
+        )
+
+    cajas_a_liberar = int(item.cantidad)
+
+    # 1) Revertir lotes ya asignados en picking
+    for asignacion in item.asignaciones_picking:
+        lote = asignacion.lote
+        if lote:
+            lote.vendido = False
+            lote.reservado = False
+        db.delete(asignacion)
+    db.flush()
+
+    # 2) Liberar lotes aún reservados para este item
+    #    Identificamos los lotes exactos vía los movimientos de RESERVA_LOTE
+    movimientos_reserva = db.query(MovimientoStockCajasModel).filter(
+        MovimientoStockCajasModel.tipo_movimiento == "RESERVA_LOTE",
+        MovimientoStockCajasModel.referencia_tipo == "PEDIDO",
+        MovimientoStockCajasModel.referencia_id == pedido.id,
+        MovimientoStockCajasModel.producto_id == item.producto_id,
+        MovimientoStockCajasModel.proveedor_id == item.proveedor_id,
+    ).all()
+
+    lote_codigos = {m.lote_codigo for m in movimientos_reserva if m.lote_codigo}
+    if lote_codigos:
+        lotes_reservados = db.query(LoteModel).filter(
+            LoteModel.codigo_lote.in_(lote_codigos),
+            LoteModel.reservado == True,
+        ).all()
+        for lote in lotes_reservados:
+            lote.reservado = False
+
+    # 3) Restaurar stock disponible
+    if item.proveedor_id:
+        stock = db.query(StockCajasProveedorModel).filter(
+            StockCajasProveedorModel.producto_id == item.producto_id,
+            StockCajasProveedorModel.proveedor_id == item.proveedor_id,
+        ).first()
+        if stock:
+            stock.cajas_disponibles += cajas_a_liberar
+
+    # 4) Eliminar el item
+    db.delete(item)
+    db.flush()
+
+    # 5) Si era el último item, cancelar la preventa completa
+    items_restantes = db.query(ItemPedidoModel).filter(ItemPedidoModel.pedido_id == pedido.id).count()
+    if items_restantes == 0:
+        estado_cancelado = db.query(EstadoPedidoModel).filter(
+            EstadoPedidoModel.codigo == "CANCELADO"
+        ).first()
+        if estado_cancelado:
+            pedido.estado_id = estado_cancelado.id
+            pedido.monto_total = 0.0
+
+    db.commit()
 
 
 @router.delete("/{pedido_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -826,65 +1039,33 @@ def escanear_caja(
     if not lote_options:
         raise HTTPException(status_code=404, detail=f"No se encontró ninguna caja con código: {qr_original}")
 
-    # Filtrar los que NO están ya asignados
+    # Filtrar los que NO están ya asignados en pedidos ACTIVOS (excluir asignaciones de pedidos cancelados)
+    estado_cancelado_scan = db.query(EstadoPedidoModel).filter(
+        EstadoPedidoModel.codigo == "CANCELADO"
+    ).first()
     asignados_ids = {
         row.lote_id for row in db.query(AsignacionPickingModel.lote_id)
-        .filter(AsignacionPickingModel.lote_id.in_([l.id for l in lote_options]))
+        .join(ItemPedidoModel, AsignacionPickingModel.item_pedido_id == ItemPedidoModel.id)
+        .join(PedidoModel, ItemPedidoModel.pedido_id == PedidoModel.id)
+        .filter(
+            AsignacionPickingModel.lote_id.in_([l.id for l in lote_options]),
+            PedidoModel.estado_id != estado_cancelado_scan.id if estado_cancelado_scan else True,
+        )
         .all()
     }
     disponibles = [
         l for l in lote_options
-        if l.id not in asignados_ids          # sin asignación de picking
-        and not l.vendido                      # no vendido por sistema regular
+        if l.id not in asignados_ids          # sin asignación de picking en pedido activo
+        and not l.vendido                      # no vendido
         and l.disponible_venta                 # enrolamiento finalizado
-        # reservado=True se incluye: son cajas apartadas para pre-ventas, válidas para picking
+        and l.reservado                        # solo lotes reservados para pre-ventas
     ]
 
-    # Si hay lotes reservados entre los disponibles, mostrar SOLO esos.
-    # Los lotes reservados fueron apartados explícitamente al crear la preventa
-    # y tienen prioridad absoluta sobre lotes libres en el flujo de picking.
-    lotes_reservados = [l for l in disponibles if l.reservado]
-    if lotes_reservados:
-        disponibles = lotes_reservados
-    else:
-        # No hay lotes reservados — verificar si existe alguna preventa pendiente
-        # que todavía necesite cajas de este producto+proveedor antes de mostrar
-        # inventario libre al operador (evita confusión cuando el picking ya está completo).
-        if disponibles:
-            estado_preventa_check = _get_estado_preventa(db)
-            producto_ids = {l.producto_id for l in disponibles}
-            proveedor_ids = {
-                l.enrolamiento.proveedor.id
-                for l in disponibles
-                if l.enrolamiento and l.enrolamiento.proveedor
-            }
-            # Buscar item de preventa pendiente e incompleto para estos producto+proveedor
-            tiene_pendiente = False
-            if proveedor_ids:
-                candidatos_check = (
-                    db.query(ItemPedidoModel)
-                    .join(PedidoModel, ItemPedidoModel.pedido_id == PedidoModel.id)
-                    .options(joinedload(ItemPedidoModel.asignaciones_picking))
-                    .filter(
-                        PedidoModel.tenant_id == current_user.tenant_id,
-                        PedidoModel.estado_id == estado_preventa_check.id,
-                        ItemPedidoModel.producto_id.in_(producto_ids),
-                        ItemPedidoModel.proveedor_id.in_(proveedor_ids),
-                    )
-                    .all()
-                )
-                for it in candidatos_check:
-                    if len(it.asignaciones_picking) < int(it.cantidad):
-                        tiene_pendiente = True
-                        break
-            if not tiene_pendiente:
-                raise HTTPException(
-                    status_code=400,
-                    detail="✅ Picking completo — no hay preventas pendientes que requieran esta caja."
-                )
-
     if not disponibles:
-        raise HTTPException(status_code=400, detail="Todas las cajas con este código ya fueron asignadas a pedidos")
+        raise HTTPException(
+            status_code=400,
+            detail="Esta caja no está reservada para ninguna pre-venta activa, o ya fue asignada."
+        )
 
     # Si se especificó lote_id, resolverlo directamente
     if lote_id is not None:

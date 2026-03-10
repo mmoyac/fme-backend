@@ -299,7 +299,8 @@ async def obtener_lotes_disponibles_producto(
             Producto.nombre.label('producto_nombre'),
             Proveedor.nombre.label('proveedor_nombre'),
             Proveedor.id.label('proveedor_id'),
-            PrecioProveedor.precio_kg.label('precio_por_kg')
+            PrecioProveedor.precio_kg.label('precio_por_kg'),
+            PrecioProveedor.precio_minimo_kg.label('precio_minimo_por_kg')
         ).join(
             Producto, Lote.producto_id == Producto.id
         ).join(
@@ -335,6 +336,7 @@ async def obtener_lotes_disponibles_producto(
         lotes_resultado = []
         for lote in lotes_disponibles:
             precio_por_kg = float(lote.precio_por_kg) if lote.precio_por_kg else 0
+            precio_minimo_por_kg = float(lote.precio_minimo_por_kg) if lote.precio_minimo_por_kg else None
             precio_total = float(lote.peso_actual) * precio_por_kg
             
             lotes_resultado.append({
@@ -342,6 +344,7 @@ async def obtener_lotes_disponibles_producto(
                 'codigo_lote': lote.codigo_lote,
                 'peso_kg': float(lote.peso_actual),
                 'precio_por_kg': precio_por_kg,
+                'precio_minimo_por_kg': precio_minimo_por_kg,
                 'precio_total': round(precio_total, 2),
                 'fecha_vencimiento': lote.fecha_vencimiento.isoformat(),
                 'lote_proveedor': lote.lote_proveedor,
@@ -349,11 +352,15 @@ async def obtener_lotes_disponibles_producto(
                 'proveedor_id': lote.proveedor_id
             })
         
+        precio_base_kg = float(lotes_disponibles[0].precio_por_kg) if lotes_disponibles and lotes_disponibles[0].precio_por_kg else None
+        precio_minimo_kg = float(lotes_disponibles[0].precio_minimo_por_kg) if lotes_disponibles and lotes_disponibles[0].precio_minimo_por_kg else None
         return {
             "cajas_disponibles": len(lotes_disponibles),
             "cajas_requeridas": cantidad_requerida,
             "lotes": lotes_resultado,
-            "producto_nombre": lotes_disponibles[0].producto_nombre if lotes_disponibles else ""
+            "producto_nombre": lotes_disponibles[0].producto_nombre if lotes_disponibles else "",
+            "precio_base_kg": precio_base_kg,
+            "precio_minimo_kg": precio_minimo_kg,
         }
         
     except Exception as e:
