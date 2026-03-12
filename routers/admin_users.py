@@ -258,6 +258,8 @@ def actualizar_usuario(
         user.nombre_completo = user_update.nombre_completo
     if user_update.is_active is not None:
         user.is_active = user_update.is_active
+    if user_update.porcentaje_comision is not None or 'porcentaje_comision' in user_update.model_fields_set:
+        user.porcentaje_comision = user_update.porcentaje_comision if user_update.porcentaje_comision != 0 else None
     
     db.commit()
     db.refresh(user)

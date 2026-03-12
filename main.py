@@ -10,7 +10,7 @@ from starlette.responses import Response
 from routers.auth import get_current_active_user
 
 # Importar routers
-from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, admin_utils, payments, test_payments, maestras, recetas, produccion, compras, cheques, puntos, caja, enrolamiento, gemini_vision, precios_proveedor, stock_cajas, alertas, tipos_pedido, despachos, configuracion, debug_menu, admin_configuracion_landing, tenants, etiquetas, paleta_colores, solicitudes_transferencia, locales_cliente, preventa, hojas_ruta, vehiculos
+from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, admin_utils, payments, test_payments, maestras, recetas, produccion, compras, cheques, puntos, caja, enrolamiento, gemini_vision, precios_proveedor, stock_cajas, alertas, tipos_pedido, despachos, configuracion, debug_menu, admin_configuracion_landing, tenants, etiquetas, paleta_colores, solicitudes_transferencia, locales_cliente, preventa, hojas_ruta, vehiculos, comisiones
 
 
 app = FastAPI(
@@ -173,6 +173,7 @@ app.include_router(locales_cliente.router)
 
 # Registrar router de solicitudes de transferencia
 app.include_router(solicitudes_transferencia.router)
+app.include_router(comisiones.router, prefix="/api/comisiones", tags=["Comisiones Vendedores"], dependencies=[Depends(get_current_active_user)])
 
 # Registrar router de hojas de ruta
 app.include_router(hojas_ruta.router)

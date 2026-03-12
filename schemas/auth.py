@@ -19,6 +19,7 @@ class UserBase(BaseModel):
     nombre_completo: Optional[str] = None
     is_active: Optional[bool] = True
     local_defecto_id: Optional[int] = None
+    porcentaje_comision: Optional[float] = None
 
 class UserCreate(UserBase):
     password: str
@@ -29,6 +30,7 @@ class UserUpdate(BaseModel):
     is_active: Optional[bool] = None
     local_defecto_id: Optional[int] = None
     role_id: Optional[int] = None
+    porcentaje_comision: Optional[float] = None  # None = no cambia; 0 = quitar comisión
 
 class User(UserBase):
     id: int

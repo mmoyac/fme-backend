@@ -45,6 +45,7 @@ ENVIRONMENTS = {
         "password":         "admin",
         "docker_container": "masas_estacion_backend",
         "docker_compose":   False,
+        "ssh_host":         "168.231.96.205",
     },
     "dev": {
         "api_url":          "http://localhost:8000",
@@ -209,6 +210,10 @@ if HACER_LIMPIEZA:
 
     if ENV["docker_compose"]:
         cmd = ["docker", "compose", "exec", "backend"] + delete_cmd
+    elif ENV.get("ssh_host"):
+        # Producción remota: ejecutar vía SSH
+        remote_cmd = "docker exec " + ENV["docker_container"] + " " + " ".join(delete_cmd)
+        cmd = ["ssh", f"root@{ENV['ssh_host']}", remote_cmd]
     else:
         cmd = ["docker", "exec", ENV["docker_container"]] + delete_cmd
 
@@ -885,7 +890,7 @@ if precios_proveedor_data and productos_creados:
             print(f"   ❌ SKU '{sku}' no importado en este run")
             continue
 
-        # Resolver proveedor_id: RUT > nombre > ID directo
+        # Resolver proveedor_id: RUT > nombre > ID directo (solo si pertenece al tenant) > único proveedor
         # Los IDs válidos son SOLO los del tenant actual (proveedores_map.values())
         ids_validos_tenant = set(proveedores_map.values())
         proveedor_id = None
@@ -894,13 +899,21 @@ if precios_proveedor_data and productos_creados:
         if not proveedor_id and pv_nombre:
             proveedor_id = proveedores_map.get(pv_nombre)
         if not proveedor_id and pv_id_directo:
-            # Validar que el ID directo pertenezca al tenant actual
+            # Solo aceptar ID directo si pertenece al tenant actual (evita cross-tenant)
             if pv_id_directo in ids_validos_tenant:
                 proveedor_id = pv_id_directo
+            # Si el ID no pertenece al tenant pero hay UN SOLO proveedor, usarlo automáticamente
+            elif len(ids_validos_tenant) == 1:
+                proveedor_id = next(iter(ids_validos_tenant))
+                print(f"   ℹ️  proveedor_id={pv_id_directo} no pertenece al tenant → usando único proveedor disponible (ID {proveedor_id})")
             else:
                 res_precios_proveedor["fallidos"] += 1
                 print(f"   ❌ proveedor_id={pv_id_directo} no pertenece al tenant actual (IDs válidos: {sorted(ids_validos_tenant)})")
                 continue
+        # Fallback final: si hay exactamente un proveedor en el tenant, usarlo
+        if not proveedor_id and len(ids_validos_tenant) == 1:
+            proveedor_id = next(iter(ids_validos_tenant))
+            print(f"   ℹ️  Sin proveedor especificado → usando único proveedor disponible (ID {proveedor_id})")
         if not proveedor_id:
             res_precios_proveedor["fallidos"] += 1
             key = pv_rut or pv_nombre or pv_id_directo_str or "???"

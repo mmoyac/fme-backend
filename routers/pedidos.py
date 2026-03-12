@@ -25,6 +25,7 @@ from routers.auth import get_current_active_user
 from services.boleta_service import generar_boleta_pedido
 from services.credito_service import CreditoService
 from services.puntos_service import PuntosService
+from services.comisiones_service import generar_comision
 from services.tenant_service import obtener_siguiente_numero_pedido, get_tenant_from_request
 
 router = APIRouter()
@@ -1353,6 +1354,10 @@ def obtener_pedido(pedido_id: int, db: Session = Depends(get_db), current_user =
         # Información de tipo de pedido
         'tipo_pedido_codigo': pedido.tipo_pedido.codigo if pedido.tipo_pedido else None,
         'tipo_pedido_nombre': pedido.tipo_pedido.nombre if pedido.tipo_pedido else None,
+        # Control SII (Facturación Electrónica)
+        'tipo_documento_tributario_id': pedido.tipo_documento_tributario_id,
+        'tipo_documento_codigo': pedido.tipo_documento_tributario.codigo if pedido.tipo_documento_tributario else None,
+        'tipo_documento_nombre': pedido.tipo_documento_tributario.nombre if pedido.tipo_documento_tributario else None,
         # Información de puntos
         'puntos_ganados': pedido.puntos_ganados,
         'puntos_usados': pedido.puntos_usados,
@@ -1638,15 +1643,33 @@ def actualizar_pedido(
                     puntos_cliente.puntos_totales_usados = 0
         
         pedido.estado_id = nuevo_estado_id
-    
-    # Si solo se actualiza el local de despacho sin cambiar estado (caso raro pero posible)
+
+        # Para CAJAS_VARIABLES: si el pedido ya estaba marcado como pagado ANTES de la
+        # confirmación, generar la comisión ahora que el precio real ya fue fijado.
+        if (
+            nuevo_estado_id == ID_CONFIRMADO
+            and pedido.es_pagado
+            and pedido.tipo_pedido
+            and pedido.tipo_pedido.codigo == 'CAJAS_VARIABLES'
+        ):
+            try:
+                generar_comision(pedido, db)
+            except Exception:
+                pass
     elif pedido_update.local_despacho_id and pedido.estado_id == ID_CONFIRMADO and not pedido.inventario_descontado:
         descontar_inventario(pedido, pedido_update.local_despacho_id, db)
     
     # Actualizar local de despacho si se proporciona explícitamente (no auto-asignado)
     if pedido_update.local_despacho_id:
         pedido.local_despacho_id = pedido_update.local_despacho_id
-    
+
+    # Generar comisión si el pedido quedó pagado
+    if pedido.es_pagado:
+        try:
+            generar_comision(pedido, db)
+        except Exception:
+            pass  # No bloquear la actualización por errores en comisiones
+
     db.commit()
     db.refresh(pedido)
     
@@ -1672,6 +1695,10 @@ def actualizar_pedido(
         # Información de tipo de pedido
         'tipo_pedido_codigo': pedido.tipo_pedido.codigo if pedido.tipo_pedido else None,
         'tipo_pedido_nombre': pedido.tipo_pedido.nombre if pedido.tipo_pedido else None,
+        # Control SII (Facturación Electrónica)
+        'tipo_documento_tributario_id': pedido.tipo_documento_tributario_id,
+        'tipo_documento_codigo': pedido.tipo_documento_tributario.codigo if pedido.tipo_documento_tributario else None,
+        'tipo_documento_nombre': pedido.tipo_documento_tributario.nombre if pedido.tipo_documento_tributario else None,
         'puntos_ganados': pedido.puntos_ganados,
         'puntos_usados': pedido.puntos_usados,
         'descuento_puntos': float(pedido.descuento_puntos) if pedido.descuento_puntos else None,
@@ -1947,6 +1974,13 @@ def registrar_pago(
         # Efectivo, transferencia, tarjeta, etc.: pago inmediato
         pedido.es_pagado = True
         mensaje = f"Pago registrado con {medio_pago.nombre}."
+
+    # Generar comisión si el pedido quedó pagado
+    if pedido.es_pagado:
+        try:
+            generar_comision(pedido, db)
+        except Exception:
+            pass  # No bloquear el registro de pago por errores en comisiones
 
     db.commit()
     db.refresh(pedido)
