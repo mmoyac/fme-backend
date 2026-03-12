@@ -26,6 +26,7 @@ class ProductoBase(BaseModel):
     stock_minimo: Optional[int] = 0
     stock_critico: Optional[int] = 0
     precio_incluye_iva: bool = True  # True: precio ya tiene IVA incluido. False: precio es neto, se agrega 19%
+    descuento_contado: Optional[Decimal] = Field(None, ge=0, le=100, description="% de descuento aplicado cuando el pago es al contado")
 
 
 class ProductoCreate(ProductoBase):
@@ -53,6 +54,7 @@ class ProductoUpdate(BaseModel):
     stock_minimo: Optional[int] = None
     stock_critico: Optional[int] = None
     precio_incluye_iva: Optional[bool] = None
+    descuento_contado: Optional[Decimal] = None
 
 
 class ProductoResponse(ProductoBase):

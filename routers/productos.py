@@ -240,6 +240,7 @@ def listar_productos(
             'stock_minimo': p.stock_minimo,
             'stock_critico': p.stock_critico,
             'precio_incluye_iva': p.precio_incluye_iva,
+            'descuento_contado': p.descuento_contado,
             'stock_actual': total_stock,
             # Información de categoría
             'categoria_nombre': p.categoria.nombre if p.categoria else None,
@@ -307,6 +308,7 @@ def obtener_producto(producto_id: int, db: Session = Depends(get_db), current_us
         'stock_minimo': producto.stock_minimo,
         'stock_critico': producto.stock_critico,
         'precio_incluye_iva': producto.precio_incluye_iva,
+        'descuento_contado': producto.descuento_contado,
         'stock_actual': total_stock,
         # Información de categoría
         'categoria_nombre': producto.categoria.nombre if producto.categoria else None,

@@ -2,7 +2,7 @@
 """
 Modelos de la base de datos con SQLAlchemy ORM.
 """
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, UniqueConstraint, Index, Text, Table, Numeric, Enum
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, UniqueConstraint, Index, Text, Table, Numeric, Enum, Date
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import JSON
@@ -328,6 +328,7 @@ class MedioPago(Base):
     nombre = Column(String, nullable=False)
     descripcion = Column(String)
     permite_cheque = Column(Boolean, default=False)  # Si permite ingresar datos de cheque
+    es_contado = Column(Boolean, default=False, nullable=False, server_default='false')  # Si aplica descuento contado
     activo = Column(Boolean, default=True)
 
     # Relaciones
@@ -395,6 +396,7 @@ class Producto(Base):
     
     # Configuración tributaria
     precio_incluye_iva = Column(Boolean, default=True, nullable=False, server_default='true')  # True: precio ya incluye IVA (calcular neto hacia atrás). False: precio es neto (agregar IVA 19%)
+    descuento_contado = Column(Numeric(5, 2), default=0, nullable=True)  # % de descuento cuando el pago es al contado
 
     # Flags de comportamiento
     es_vendible = Column(Boolean, default=True)
@@ -868,6 +870,7 @@ class Pedido(Base):
     items = relationship("ItemPedido", back_populates="pedido", cascade="all, delete-orphan")
     cheques = relationship("Cheque", back_populates="pedido", cascade="all, delete-orphan")
     operacion_caja = relationship("OperacionCaja", back_populates="pedido", uselist=False)
+    comision = relationship("Comision", back_populates="pedido", uselist=False, cascade="all, delete-orphan")
     despacho = relationship("Despacho", back_populates="pedido", uselist=False)
 
 
@@ -982,12 +985,14 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     role_id = Column(Integer, ForeignKey("roles.id", ondelete="RESTRICT"), nullable=False)
     local_defecto_id = Column(Integer, ForeignKey("locales.id", ondelete="SET NULL"), nullable=True)
+    porcentaje_comision = Column(Numeric(5, 2), nullable=True, default=None)  # % comisión sobre neto; NULL = sin comisión
 
     # Relaciones
     tenant = relationship("Tenant", back_populates="usuarios")
     role = relationship("Role", back_populates="users")
     local_defecto = relationship("Local", foreign_keys=[local_defecto_id])
     turnos_caja = relationship("TurnoCaja", back_populates="vendedor", cascade="all, delete-orphan")
+    comisiones = relationship("Comision", back_populates="vendedor", cascade="all, delete-orphan")
 
 
 # --------------------------------------------------
@@ -1339,11 +1344,68 @@ class StockCajasProveedor(Base):
     producto = relationship("Producto", back_populates="stock_cajas")
     proveedor = relationship("Proveedor", back_populates="stock_cajas")
     movimientos = relationship("MovimientoStockCajas", back_populates="stock_cajas", cascade="all, delete-orphan")
-    
-    # RestricciÃƒÂ³n ÃƒÂºnica por producto-proveedor
+
+    # Restricci\u00f3n \u00fanica por producto-proveedor
     __table_args__ = (
         UniqueConstraint('producto_id', 'proveedor_id', name='uix_stock_cajas_producto_proveedor'),
     )
+
+
+# --------------------------------------------------
+# 11. COMISIONES DE VENDEDORES
+# --------------------------------------------------
+
+class LiquidacionComision(Base):
+    """Liquidación mensual de comisiones para un vendedor."""
+    __tablename__ = "liquidaciones_comisiones"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    vendedor_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    periodo = Column(String(7), nullable=False, index=True)           # "2026-03" (YYYY-MM)
+    fecha_inicio = Column(Date, nullable=False)                        # 2026-03-01
+    fecha_fin = Column(Date, nullable=False)                           # 2026-03-30
+    fecha_pago_prevista = Column(Date, nullable=False)                 # 2026-04-05
+    total_ventas_neto = Column(Numeric(12, 2), nullable=False, default=0)
+    total_comision = Column(Numeric(12, 2), nullable=False, default=0)
+    cantidad_pedidos = Column(Integer, nullable=False, default=0)
+    estado = Column(String(20), nullable=False, default="PENDIENTE")  # PENDIENTE, PAGADA
+    notas = Column(Text, nullable=True)
+    fecha_creacion = Column(DateTime(timezone=True), server_default=func.now())
+    fecha_pago_real = Column(DateTime(timezone=True), nullable=True)
+
+    # Relaciones
+    vendedor = relationship("User", foreign_keys=[vendedor_id])
+    comisiones = relationship("Comision", back_populates="liquidacion")
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "vendedor_id", "periodo", name="uq_liquidacion_vendedor_periodo"),
+    )
+
+
+class Comision(Base):
+    """Registro de comisión generada al pagar un pedido."""
+    __tablename__ = "comisiones"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    vendedor_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    pedido_id = Column(Integer, ForeignKey("pedidos.id", ondelete="RESTRICT"), nullable=False, unique=True)
+    liquidacion_id = Column(Integer, ForeignKey("liquidaciones_comisiones.id", ondelete="SET NULL"), nullable=True)
+    numero_pedido = Column(String(50), nullable=False)
+    porcentaje = Column(Numeric(5, 2), nullable=False)   # % aplicado al momento de generar
+    monto_bruto = Column(Numeric(12, 2), nullable=False)  # monto_total del pedido
+    monto_neto = Column(Numeric(12, 2), nullable=False)   # monto_bruto / 1.19
+    monto_comision = Column(Numeric(12, 2), nullable=False)  # monto_neto * porcentaje / 100
+    periodo = Column(String(7), nullable=False, index=True)   # "2026-03"
+    fecha_pedido = Column(DateTime(timezone=True), nullable=True)
+    fecha_generacion = Column(DateTime(timezone=True), server_default=func.now())
+    estado = Column(String(20), nullable=False, default="PENDIENTE")  # PENDIENTE, LIQUIDADA
+
+    # Relaciones
+    vendedor = relationship("User", back_populates="comisiones")
+    pedido = relationship("Pedido", back_populates="comision")
+    liquidacion = relationship("LiquidacionComision", back_populates="comisiones")
 
 
 class MovimientoStockCajas(Base):

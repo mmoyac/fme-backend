@@ -216,6 +216,7 @@ def listar_productos_con_precios(
             "nombre": producto.nombre,
             "sku": producto.sku,
             "precio_incluye_iva": producto.precio_incluye_iva,
+            "descuento_contado": float(producto.descuento_contado) if producto.descuento_contado is not None else None,
             "precios_proveedores": precios_formateados
         })
     

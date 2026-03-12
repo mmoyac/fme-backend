@@ -210,6 +210,7 @@ class MedioPagoBase(BaseModel):
     nombre: str = Field(..., description="Nombre del medio de pago")
     descripcion: Optional[str] = None
     permite_cheque: bool = Field(default=False, description="Si permite ingresar datos de cheque")
+    es_contado: bool = Field(default=False, description="Si este medio es al contado (aplica descuento contado en preventas)")
     activo: bool = True
 
 
@@ -222,6 +223,7 @@ class MedioPagoUpdate(BaseModel):
     nombre: Optional[str] = None
     descripcion: Optional[str] = None
     permite_cheque: Optional[bool] = None
+    es_contado: Optional[bool] = None
     activo: Optional[bool] = None
 
 

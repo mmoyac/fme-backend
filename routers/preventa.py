@@ -68,6 +68,7 @@ class PreventaCreate(BaseModel):
     local_id: int
     notas: Optional[str] = None
     tipo_documento_tributario_id: Optional[int] = Field(default=2, description="1=FAC, 2=BOL")
+    medio_pago_id: Optional[int] = None
     items: List[ItemPreventaCreate] = Field(..., min_length=1)
 
 
@@ -102,6 +103,10 @@ class PreventaOut(BaseModel):
     fecha_pedido: datetime
     notas: Optional[str]
     monto_total: float
+    vendedor_id: Optional[int] = None
+    vendedor_nombre: Optional[str] = None
+    medio_pago_id: Optional[int] = None
+    medio_pago_nombre: Optional[str] = None
     items: List[ItemPreventaOut]
 
     class Config:
@@ -189,6 +194,10 @@ def _build_preventa_out(pedido: PedidoModel) -> PreventaOut:
         fecha_pedido=pedido.fecha_pedido,
         notas=pedido.notas,
         monto_total=float(pedido.monto_total) if pedido.monto_total else 0.0,
+        vendedor_id=pedido.usuario_id,
+        vendedor_nombre=pedido.usuario.nombre_completo if pedido.usuario else None,
+        medio_pago_id=pedido.medio_pago_id,
+        medio_pago_nombre=pedido.medio_pago.nombre if pedido.medio_pago else None,
         items=[_build_item_out(i) for i in pedido.items],
     )
 
@@ -227,6 +236,7 @@ def crear_preventa(
         local_id=data.local_id,
         tipo_pedido_id=TIPO_PEDIDO_CAJAS,
         tipo_documento_tributario_id=data.tipo_documento_tributario_id or 2,
+        medio_pago_id=data.medio_pago_id,
         usuario_id=current_user.id,
         monto_total=0.0,
         estado_id=estado_preventa.id,
@@ -236,6 +246,11 @@ def crear_preventa(
     )
     db.add(pedido)
     db.flush()  # Obtener ID
+
+    # Cargar medio de pago para verificar si es al contado
+    from database.models import MedioPago as MedioPagoModel, Producto as ProductoModel
+    medio_pago_obj = db.query(MedioPagoModel).filter(MedioPagoModel.id == data.medio_pago_id).first() if data.medio_pago_id else None
+    es_contado = bool(medio_pago_obj and medio_pago_obj.es_contado)
 
     # Crear items y reservar lotes FIFO
     for item_data in data.items:
@@ -269,6 +284,14 @@ def crear_preventa(
             precio_efectivo_kg = item_data.precio_acordado_kg
         else:
             precio_efectivo_kg = precio_kg
+
+        # Aplicar descuento contado al precio efectivo
+        if es_contado:
+            producto_obj = db.query(ProductoModel).filter(ProductoModel.id == item_data.producto_id).first()
+            descuento_pct = float(producto_obj.descuento_contado or 0) if producto_obj else 0.0
+            if descuento_pct > 0:
+                precio_efectivo_kg = round(precio_efectivo_kg * (1 - descuento_pct / 100))
+                print(f"💰 [Preventa] Descuento contado {descuento_pct}% aplicado: {precio_kg} → {precio_efectivo_kg}/kg")
 
         # --- Reserva FIFO de lotes ---
         lotes_disponibles = (
@@ -386,6 +409,7 @@ def listar_preventas(
         .options(
             joinedload(PedidoModel.cliente),
             joinedload(PedidoModel.estado_pedido),
+            joinedload(PedidoModel.usuario),
             joinedload(PedidoModel.items).joinedload(ItemPedidoModel.producto),
             joinedload(PedidoModel.items).joinedload(ItemPedidoModel.proveedor),
             joinedload(PedidoModel.items).joinedload(ItemPedidoModel.asignaciones_picking)
@@ -400,6 +424,12 @@ def listar_preventas(
         .order_by(PedidoModel.fecha_pedido.desc())
         .all()
     )
+
+    # Filtrar por vendedor si no es admin
+    es_admin = current_user.role and current_user.role.nombre.lower() == "admin"
+    if not es_admin:
+        pedidos = [p for p in pedidos if p.usuario_id == current_user.id]
+
     return [_build_preventa_out(p) for p in pedidos]
 
 
@@ -505,6 +535,7 @@ def obtener_preventa(
         .options(
             joinedload(PedidoModel.cliente),
             joinedload(PedidoModel.estado_pedido),
+            joinedload(PedidoModel.medio_pago),
             joinedload(PedidoModel.items).joinedload(ItemPedidoModel.producto),
             joinedload(PedidoModel.items).joinedload(ItemPedidoModel.proveedor),
             joinedload(PedidoModel.items).joinedload(ItemPedidoModel.asignaciones_picking)
@@ -1218,7 +1249,8 @@ def asignar_caja_a_pedido(
             PrecioProveedorModel.activo == True,
         ).first()
 
-    precio_kg = float(precio_proveedor.precio_kg) if precio_proveedor else float(item.precio_unitario_venta)
+    # Usar precio_unitario_venta del item (ya incluye descuento contado aplicado en preventa)
+    precio_kg = float(item.precio_unitario_venta)
     peso_real = float(lote.peso_actual)
     monto_neto = round(peso_real * precio_kg, 2)
 
@@ -1333,6 +1365,14 @@ def asignar_caja_a_pedido(
                     db.add(op_caja)
 
             print(f"✅ Pedido {pedido.numero_pedido} auto-confirmado tras picking completo. Total: ${pedido.monto_total:,.0f}")
+
+            # Generar comisión si el pedido ya estaba pagado (precio real ya fijado aquí)
+            if pedido.es_pagado:
+                try:
+                    from services.comisiones_service import generar_comision
+                    generar_comision(pedido, db)
+                except Exception:
+                    pass  # No bloquear si falla comisión
 
     db.commit()
 
