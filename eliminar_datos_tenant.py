@@ -17,6 +17,7 @@ Se ELIMINAN:
     - Movimientos de inventario
     - Lotes, enrolamientos, stock de cajas y sus movimientos
     - Movimientos de puntos
+    - Comisiones y liquidaciones de comisiones
     - Precios
     - Clientes y puntos de fidelización (configurable)
     - Turnos y operaciones de caja
@@ -45,7 +46,8 @@ from database.models import (
     Compra, DetalleCompra, Proveedor, Producto,
     Precio, PuntosCliente, TurnoCaja, OperacionCaja,
     HojaRutaItem, HojaRuta,
-    SolicitudTransferencia, ItemSolicitudTransferencia
+    SolicitudTransferencia, ItemSolicitudTransferencia,
+    Comision, LiquidacionComision
 )
 
 # ─── Argumentos ───────────────────────────────────────────────────────────────
@@ -244,6 +246,16 @@ def eliminar_datos(tenant_id: int, conservar_clientes: bool = False):
         if pedidos_ids:
             n = db.query(MovimientoPuntos).filter(MovimientoPuntos.pedido_id.in_(pedidos_ids)).delete(synchronize_session=False)
             print(f"   ✓ {n} movimientos de puntos")
+
+        # Comisiones (FK pedido_id con RESTRICT — debe eliminarse antes que los pedidos)
+        if pedidos_ids:
+            n = db.query(Comision).filter(Comision.pedido_id.in_(pedidos_ids)).delete(synchronize_session=False)
+            print(f"   ✓ {n} comisiones")
+
+        # Liquidaciones de comisiones del tenant
+        n = db.query(LiquidacionComision).filter(LiquidacionComision.tenant_id == tenant.id).delete(synchronize_session=False)
+        if n:
+            print(f"   ✓ {n} liquidaciones de comisiones")
 
         # Pedidos
         if pedidos_ids:

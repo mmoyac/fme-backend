@@ -243,6 +243,7 @@ def crear_preventa(
         es_pagado=False,
         inventario_descontado=False,
         notas=data.notas,
+        canal_venta_id=1,  # POS — preventas siempre se crean desde el punto de venta
     )
     db.add(pedido)
     db.flush()  # Obtener ID

@@ -13,7 +13,7 @@ from database.database import get_db
 from database.models import (
     HojaRuta, HojaRutaItem, EstadoHojaRuta,
     Pedido, ItemPedido, AsignacionPicking,
-    EstadoPedido, Cliente, Vehiculo, User,
+    EstadoPedido, Cliente, Vehiculo, User, Producto,
 )
 from routers.auth import get_current_active_user
 
@@ -30,6 +30,8 @@ class HojaRutaCreate(BaseModel):
     capacidad_kg: Optional[float] = None  # si None, se toma de vehiculo.capacidad_kg
     notas: Optional[str] = None
     pedido_ids: List[int]
+    tipo_cobro_chofer: Optional[str] = None   # 'FIJO' o 'POR_KG'
+    tarifa_chofer: Optional[float] = None
 
 
 class HojaRutaUpdate(BaseModel):
@@ -38,6 +40,16 @@ class HojaRutaUpdate(BaseModel):
     capacidad_kg: Optional[float] = None
     notas: Optional[str] = None
     estado: Optional[str] = None
+    tipo_cobro_chofer: Optional[str] = None
+    tarifa_chofer: Optional[float] = None
+
+
+class PagarChoferRequest(BaseModel):
+    monto: Optional[float] = None  # si None, se usa monto_cobro_chofer calculado
+
+
+class PagarChoferMasivoRequest(BaseModel):
+    hoja_ids: List[int]  # rutas a liquidar
 
 
 class EntregarItemRequest(BaseModel):
@@ -48,18 +60,36 @@ class EntregarItemRequest(BaseModel):
 # Helper: kg brutos de un pedido
 # ──────────────────────────────────────────
 
-def _kg_pedido(db: Session, item_ids: List[int]) -> float:
-    if not item_ids:
+def _kg_pedido(db: Session, items: List) -> float:
+    """Calcula el peso total de un pedido.
+
+    Para CAJAS_VARIABLES: usa AsignacionPicking.peso_real (peso físico real de los lotes).
+    Para PRODUCTOS regulares: fallback a ItemPedido.cantidad * Producto.peso_bruto.
+    """
+    if not items:
         return 0.0
-    row = db.query(func.sum(AsignacionPicking.peso_real)).filter(
+    item_ids = [i.id for i in items]
+    rows = db.query(
+        AsignacionPicking.item_pedido_id,
+        func.sum(AsignacionPicking.peso_real).label("total_kg"),
+    ).filter(
         AsignacionPicking.item_pedido_id.in_(item_ids)
-    ).scalar()
-    return float(row) if row else 0.0
+    ).group_by(AsignacionPicking.item_pedido_id).all()
+    peso_por_asignacion = {r.item_pedido_id: float(r.total_kg) for r in rows}
+
+    total = 0.0
+    for item in items:
+        if item.id in peso_por_asignacion:
+            total += peso_por_asignacion[item.id]
+        else:
+            # Fallback: usar peso_bruto del producto × cantidad
+            peso_bruto = float(item.producto.peso_bruto) if item.producto and item.producto.peso_bruto else 0.0
+            total += peso_bruto * float(item.cantidad)
+    return round(total, 3)
 
 
 def _build_pedido_summary(pedido: Pedido, db: Session) -> dict:
-    item_ids = [i.id for i in pedido.items] if pedido.items else []
-    kg = _kg_pedido(db, item_ids)
+    kg = _kg_pedido(db, pedido.items or [])
     return {
         "id": pedido.id,
         "numero_pedido": pedido.numero_pedido,
@@ -68,6 +98,7 @@ def _build_pedido_summary(pedido: Pedido, db: Session) -> dict:
         "direccion": pedido.cliente.direccion if pedido.cliente else None,
         "monto_total": float(pedido.monto_total) if pedido.monto_total else 0,
         "estado": pedido.estado_pedido.codigo if pedido.estado_pedido else None,
+        "es_pagado": pedido.es_pagado,
         "kg_brutos": kg,
         "items_count": len(pedido.items) if pedido.items else 0,
     }
@@ -140,6 +171,12 @@ def _build_hoja_response(hoja: HojaRuta, db: Session) -> dict:
         "total_pedidos": len(items_out),
         "pedidos_entregados": sum(1 for i in items_out if i["entregado"]),
         "items": items_out,
+        # Cobro chofer
+        "tipo_cobro_chofer": hoja.tipo_cobro_chofer,
+        "tarifa_chofer": float(hoja.tarifa_chofer) if hoja.tarifa_chofer is not None else None,
+        "monto_cobro_chofer": float(hoja.monto_cobro_chofer) if hoja.monto_cobro_chofer is not None else None,
+        "cobro_chofer_pagado": hoja.cobro_chofer_pagado,
+        "fecha_pago_chofer": hoja.fecha_pago_chofer.isoformat() if hoja.fecha_pago_chofer else None,
     }
 
 
@@ -171,28 +208,16 @@ def listar_pedidos_disponibles(
         )
         .options(
             joinedload(Pedido.cliente),
-            joinedload(Pedido.items),
+            joinedload(Pedido.items).joinedload(ItemPedido.producto),
             joinedload(Pedido.estado_pedido),
         )
         .order_by(Pedido.fecha_pedido.desc())
         .all()
     )
 
-    # Calcular kg por pedido en una sola consulta
-    all_item_ids = [item.id for p in pedidos for item in (p.items or [])]
-    peso_por_item: dict = {}
-    if all_item_ids:
-        rows = db.query(
-            AsignacionPicking.item_pedido_id,
-            func.sum(AsignacionPicking.peso_real).label("total_kg"),
-        ).filter(
-            AsignacionPicking.item_pedido_id.in_(all_item_ids)
-        ).group_by(AsignacionPicking.item_pedido_id).all()
-        peso_por_item = {r.item_pedido_id: float(r.total_kg) for r in rows}
-
     result = []
     for p in pedidos:
-        kg = sum(peso_por_item.get(i.id, 0) for i in (p.items or []))
+        kg = _kg_pedido(db, p.items or [])
         result.append({
             "id": p.id,
             "numero_pedido": p.numero_pedido,
@@ -200,6 +225,7 @@ def listar_pedidos_disponibles(
             "cliente_telefono": p.cliente.telefono if p.cliente else None,
             "direccion": p.cliente.direccion if p.cliente else None,
             "monto_total": float(p.monto_total) if p.monto_total else 0,
+            "es_pagado": p.es_pagado,
             "kg_brutos": round(kg, 3),
             "items_count": len(p.items) if p.items else 0,
             "fecha_pedido": p.fecha_pedido.isoformat() if p.fecha_pedido else None,
@@ -230,7 +256,7 @@ def crear_hoja_ruta(
             Cliente.tenant_id == current_user.tenant_id,
             Pedido.estado_id == estado_confirmado.id,
         )
-        .options(joinedload(Pedido.items))
+        .options(joinedload(Pedido.items).joinedload(ItemPedido.producto))
         .all()
     )
 
@@ -244,22 +270,8 @@ def crear_hoja_ruta(
     if ya_asignados:
         raise HTTPException(status_code=400, detail="Uno o más pedidos ya están asignados a una hoja de ruta")
 
-    # Calcular kg totales y validar capacidad
-    all_item_ids = [item.id for p in pedidos for item in (p.items or [])]
-    peso_por_item: dict = {}
-    if all_item_ids:
-        rows = db.query(
-            AsignacionPicking.item_pedido_id,
-            func.sum(AsignacionPicking.peso_real).label("total_kg"),
-        ).filter(
-            AsignacionPicking.item_pedido_id.in_(all_item_ids)
-        ).group_by(AsignacionPicking.item_pedido_id).all()
-        peso_por_item = {r.item_pedido_id: float(r.total_kg) for r in rows}
-
-    total_kg = sum(
-        sum(peso_por_item.get(item.id, 0) for item in (p.items or []))
-        for p in pedidos
-    )
+    # Calcular kg totales y validar capacidad (incluye fallback a peso_bruto para pedidos POS)
+    total_kg = sum(_kg_pedido(db, p.items or []) for p in pedidos)
 
     # Validar vehículo y chofer
     vehiculo = db.query(Vehiculo).filter(
@@ -289,6 +301,11 @@ def crear_hoja_ruta(
             detail=f"Peso total ({total_kg:.1f} kg) supera la capacidad del vehículo ({capacidad_efectiva:.1f} kg)",
         )
 
+    # Calcular monto chofer si es FIJO (para POR_KG se calcula al finalizar)
+    monto_cobro_inicial = None
+    if data.tipo_cobro_chofer == "FIJO" and data.tarifa_chofer is not None:
+        monto_cobro_inicial = data.tarifa_chofer
+
     # Crear hoja de ruta
     hoja = HojaRuta(
         tenant_id=current_user.tenant_id,
@@ -298,6 +315,10 @@ def crear_hoja_ruta(
         capacidad_kg=capacidad_efectiva,
         notas=data.notas,
         estado=EstadoHojaRuta.PENDIENTE,
+        tipo_cobro_chofer=data.tipo_cobro_chofer,
+        tarifa_chofer=data.tarifa_chofer,
+        monto_cobro_chofer=monto_cobro_inicial,
+        cobro_chofer_pagado=False,
     )
     db.add(hoja)
     db.flush()
@@ -410,6 +431,13 @@ def actualizar_hoja_ruta(
         hoja.capacidad_kg = data.capacidad_kg
     if data.notas is not None:
         hoja.notas = data.notas
+    if data.tipo_cobro_chofer is not None:
+        hoja.tipo_cobro_chofer = data.tipo_cobro_chofer
+    if data.tarifa_chofer is not None:
+        hoja.tarifa_chofer = data.tarifa_chofer
+        # Recalcular monto si es FIJO
+        if hoja.tipo_cobro_chofer == "FIJO":
+            hoja.monto_cobro_chofer = data.tarifa_chofer
     if data.estado is not None:
         nuevo_estado = EstadoHojaRuta(data.estado)
         hoja.estado = nuevo_estado
@@ -517,6 +545,108 @@ def marcar_entregado(
         "pedido_id": hi.pedido_id,
         "fecha_entrega": hi.fecha_entrega.isoformat(),
         "hoja_completada": todos_entregados,
+    }
+
+
+@router.post("/{hoja_id}/calcular-cobro-chofer")
+def calcular_cobro_chofer(
+    hoja_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user),
+):
+    """Calcula y guarda el monto a cobrar al chofer.
+    - FIJO: usa tarifa_chofer directamente.
+    - POR_KG: tarifa_chofer × kg entregados efectivamente.
+    """
+    hoja = (
+        db.query(HojaRuta)
+        .filter(HojaRuta.id == hoja_id, HojaRuta.tenant_id == current_user.tenant_id)
+        .options(
+            joinedload(HojaRuta.items).joinedload(HojaRutaItem.pedido).joinedload(Pedido.items).joinedload(ItemPedido.producto),
+        )
+        .first()
+    )
+    if not hoja:
+        raise HTTPException(status_code=404, detail="Hoja de ruta no encontrada")
+    if not hoja.tipo_cobro_chofer or hoja.tarifa_chofer is None:
+        raise HTTPException(status_code=400, detail="No hay tipo de cobro o tarifa configurada")
+
+    if hoja.tipo_cobro_chofer == "FIJO":
+        monto = float(hoja.tarifa_chofer)
+    else:  # POR_KG
+        kg_entregados = sum(
+            _kg_pedido(db, hi.pedido.items or [])
+            for hi in (hoja.items or [])
+            if hi.entregado and hi.pedido
+        )
+        monto = round(float(hoja.tarifa_chofer) * kg_entregados, 2)
+
+    hoja.monto_cobro_chofer = monto
+    db.commit()
+    return {"ok": True, "monto_cobro_chofer": monto, "tipo_cobro_chofer": hoja.tipo_cobro_chofer}
+
+
+@router.post("/{hoja_id}/pagar-chofer")
+def pagar_chofer(
+    hoja_id: int,
+    body: PagarChoferRequest = PagarChoferRequest(),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user),
+):
+    """Marca el cobro del chofer como pagado."""
+    hoja = db.query(HojaRuta).filter(
+        HojaRuta.id == hoja_id, HojaRuta.tenant_id == current_user.tenant_id
+    ).first()
+    if not hoja:
+        raise HTTPException(status_code=404, detail="Hoja de ruta no encontrada")
+
+    if body.monto is not None:
+        hoja.monto_cobro_chofer = body.monto
+
+    hoja.cobro_chofer_pagado = True
+    hoja.fecha_pago_chofer = datetime.now()
+    db.commit()
+    return {
+        "ok": True,
+        "cobro_chofer_pagado": True,
+        "monto_cobro_chofer": float(hoja.monto_cobro_chofer) if hoja.monto_cobro_chofer else None,
+        "fecha_pago_chofer": hoja.fecha_pago_chofer.isoformat(),
+    }
+
+
+@router.post("/pagar-masivo")
+def pagar_chofer_masivo(
+    body: PagarChoferMasivoRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user),
+):
+    """Liquida en una sola operación múltiples cobros pendientes a un chofer."""
+    if not body.hoja_ids:
+        raise HTTPException(status_code=400, detail="Debe indicar al menos una hoja de ruta")
+
+    hojas = db.query(HojaRuta).filter(
+        HojaRuta.id.in_(body.hoja_ids),
+        HojaRuta.tenant_id == current_user.tenant_id,
+        HojaRuta.cobro_chofer_pagado == False,
+        HojaRuta.tipo_cobro_chofer.isnot(None),
+    ).all()
+
+    if not hojas:
+        raise HTTPException(status_code=404, detail="No se encontraron rutas pendientes de pago")
+
+    ahora = datetime.now()
+    total = 0.0
+    for hoja in hojas:
+        hoja.cobro_chofer_pagado = True
+        hoja.fecha_pago_chofer = ahora
+        total += float(hoja.monto_cobro_chofer or 0)
+
+    db.commit()
+    return {
+        "ok": True,
+        "hojas_pagadas": len(hojas),
+        "total_pagado": round(total, 2),
+        "fecha_pago": ahora.isoformat(),
     }
 
 

@@ -1,15 +1,18 @@
 from datetime import timedelta
 from typing import Annotated, Optional, List
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Header
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm, HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from jose import JWTError, jwt
+import os
 
 from database.database import get_db
 from database.models import User, Role, MenuItem as MenuItemModel, Tenant
 from schemas.auth import Token, UserCreate, User as UserSchema, MenuItem
 from utils.security import verify_password, create_access_token, get_password_hash, SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 from services import tenant_service
+
+INTEGRATION_API_KEY = os.getenv("INTEGRATION_API_KEY")
 
 router = APIRouter()
 
@@ -63,6 +66,62 @@ async def get_current_active_user(current_user: Annotated[User, Depends(get_curr
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
+
+
+class ApiKeyUser:
+    """Representa una sesión autenticada por API Key (integraciones externas como n8n)."""
+    def __init__(self, tenant_id: Optional[int] = None):
+        self.tenant_id = tenant_id
+        self.is_api_key = True
+        self.id = None
+        self.nombre_completo = "Integración API"
+
+
+async def get_current_user_or_api_key(
+    token: Annotated[str, Depends(oauth2_scheme)],
+    auth: Annotated[HTTPAuthorizationCredentials, Depends(security_scheme)],
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Dependencia de autenticación dual:
+    - Acepta JWT Bearer (usuarios del backoffice — comportamiento habitual)
+    - Acepta X-API-Key header (integraciones externas: n8n, WhatsApp, etc.)
+
+    Cuando se usa API Key, el tenant_id debe venir en el body del request.
+    """
+    # Opción 1: API Key externa
+    if x_api_key:
+        if not INTEGRATION_API_KEY or x_api_key != INTEGRATION_API_KEY:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API Key inválida")
+        return ApiKeyUser()
+
+    # Opción 2: JWT normal
+    final_token = token or (auth.credentials if auth else None)
+    if not final_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Se requiere autenticación (Bearer token o X-API-Key)",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        payload = jwt.decode(final_token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        tenant_id: int = payload.get("tenant_id")
+        if email is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
+
+    query = db.query(User).filter(User.email == email)
+    if tenant_id:
+        query = query.filter(User.tenant_id == tenant_id)
+    user = query.first()
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario no encontrado o inactivo")
+    return user
+
 
 async def get_optional_user(
     token: Annotated[str, Depends(oauth2_scheme)],
@@ -173,10 +232,18 @@ def create_initial_admin(db: Session = Depends(get_db)):
     if db.query(User).count() > 0:
         raise HTTPException(status_code=400, detail="Users already exist. Setup disabled.")
     
-    # Crear Rol Admin si no existe
-    admin_role = db.query(Role).filter(Role.nombre == "admin").first()
+    # Requiere que exista al menos un tenant
+    first_tenant = db.query(Tenant).order_by(Tenant.id).first()
+    if not first_tenant:
+        raise HTTPException(status_code=400, detail="Debe existir al menos un tenant antes de crear el admin inicial.")
+
+    # Crear Rol Admin para el primer tenant si no existe
+    admin_role = db.query(Role).filter(
+        Role.nombre == "admin",
+        Role.tenant_id == first_tenant.id
+    ).first()
     if not admin_role:
-        admin_role = Role(nombre="admin", descripcion="Administrador del sistema")
+        admin_role = Role(nombre="admin", descripcion="Administrador del sistema", tenant_id=first_tenant.id)
         db.add(admin_role)
         db.commit()
         db.refresh(admin_role)
@@ -187,7 +254,8 @@ def create_initial_admin(db: Session = Depends(get_db)):
         email="admin@fme.cl",
         hashed_password=hashed_password,
         nombre_completo="Admin Inicial",
-        role_id=admin_role.id
+        role_id=admin_role.id,
+        tenant_id=first_tenant.id
     )
     db.add(db_user)
     db.commit()

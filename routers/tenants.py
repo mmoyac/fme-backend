@@ -217,18 +217,15 @@ def crear_tenant(
     # ========================================
     # CREAR USUARIO ADMINISTRADOR POR DEFECTO
     # ========================================
-    # Buscar rol admin (normalmente id=1)
-    role_admin = db.query(Role).filter(Role.nombre == 'admin').first()
-    if not role_admin:
-        # Si no existe, crear rol admin
-        role_admin = Role(
-            nombre='admin',
-            descripcion='Administrador del sistema',
-            permisos={}
-        )
-        db.add(role_admin)
-        db.commit()
-        db.refresh(role_admin)
+    # Crear rol admin para el nuevo tenant
+    role_admin = Role(
+        nombre='admin',
+        descripcion='Administrador del sistema',
+        tenant_id=new_tenant.id
+    )
+    db.add(role_admin)
+    db.commit()
+    db.refresh(role_admin)
     
     # Crear usuario admin con contraseña temporal
     usuario_admin = User(

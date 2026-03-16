@@ -10,6 +10,7 @@ class RoleCreate(RoleBase):
 
 class Role(RoleBase):
     id: int
+    tenant_id: int
 
     class Config:
         from_attributes = True

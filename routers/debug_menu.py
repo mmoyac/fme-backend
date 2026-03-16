@@ -45,7 +45,7 @@ def fix_menu_pedidos(
             result["actions"].append(f"Menu 'Pedidos' existe: {pedidos_menu.href}")
         
         # 2. Verificar y corregir roles
-        roles = db.query(Role).all()
+        roles = db.query(Role).filter(Role.tenant_id == current_user.tenant_id).all()
         
         for role in roles:
             role_info = {
@@ -115,8 +115,8 @@ def get_menu_status(
             "orden": menu.orden
         })
     
-    # Todos los roles y sus menús
-    roles = db.query(Role).all()
+    # Todos los roles y sus menús (filtrado por tenant)
+    roles = db.query(Role).filter(Role.tenant_id == current_user.tenant_id).all()
     for role in roles:
         result["all_roles"].append({
             "nombre": role.nombre,

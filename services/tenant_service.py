@@ -157,14 +157,14 @@ def obtener_siguiente_numero_pedido(db: Session, tenant_id: int) -> str:
     Genera el siguiente número de pedido único para el tenant.
     
     Formato: {CODIGO}-{AÑO}-{CORRELATIVO:05d}
-    Ejemplos: ME-2026-00001, EO-2026-00042, DJ-2026-00123
+    Ejemplos: MASAS-ESTACION-2026-00001, EL-OLIVO-2026-00042
     
     Args:
         db: Sesión de base de datos
         tenant_id: ID del tenant
         
     Returns:
-        Número de pedido formateado (ej: "ME-2026-00001")
+        Número de pedido formateado (ej: "MASAS-ESTACION-2026-00001")
         
     Raises:
         ValueError: Si el tenant no existe
@@ -189,13 +189,11 @@ def obtener_siguiente_numero_pedido(db: Session, tenant_id: int) -> str:
     # Obtener año actual
     year = datetime.now().year
     
-    # Convertir codigo a siglas (tomar primeras letras de cada palabra)
-    # 'masas-estacion' → 'ME', 'elolivo' → 'EO', 'don-jorge' → 'DJ'
-    partes = codigo_tenant.upper().replace('-', ' ').split()
-    siglas = ''.join([parte[0] for parte in partes])
+    # Usar el codigo completo en uppercase (garantiza unicidad ya que codigo es UNIQUE en tenants)
+    prefijo = codigo_tenant.upper()
     
     # Formatear numero_pedido
-    numero_pedido = f"{siglas}-{year}-{correlativo:05d}"
+    numero_pedido = f"{prefijo}-{year}-{correlativo:05d}"
     
     db.commit()  # Confirmar el UPDATE
     

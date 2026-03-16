@@ -113,6 +113,11 @@ async def get_landing_config(
             "mostrar_precios": config.mostrar_precios,
             "mostrar_stock": config.mostrar_stock,
             "habilitar_carrito": config.habilitar_carrito
+        },
+        "delivery": {
+            "costo_fijo": float(config.costo_fijo_delivery) if config.costo_fijo_delivery is not None else None,
+            "costo_por_km": float(config.costo_por_km_delivery) if config.costo_por_km_delivery is not None else None,
+            "monto_minimo_gratis": float(config.monto_minimo_delivery_gratis) if config.monto_minimo_delivery_gratis is not None else None
         }
     }
 

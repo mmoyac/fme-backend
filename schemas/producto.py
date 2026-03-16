@@ -18,6 +18,7 @@ class ProductoBase(BaseModel):
     unidad_medida_id: int
     precio_compra: Optional[Decimal] = None
     costo_fabricacion: Optional[Decimal] = None
+    peso_bruto: Optional[Decimal] = Field(None, ge=0, description="Peso bruto en kg (producto + empaque). Para asignación de vehículos en delivery.")
     es_vendible: bool = True
     es_vendible_web: bool = False
     es_ingrediente: bool = False
@@ -46,6 +47,7 @@ class ProductoUpdate(BaseModel):
     unidad_medida_id: Optional[int] = None
     precio_compra: Optional[Decimal] = None
     costo_fabricacion: Optional[Decimal] = None
+    peso_bruto: Optional[Decimal] = Field(None, ge=0, description="Peso bruto en kg (producto + empaque). Para asignación de vehículos en delivery.")
     es_vendible: Optional[bool] = None
     es_vendible_web: Optional[bool] = None
     es_ingrediente: Optional[bool] = None

@@ -138,7 +138,12 @@ class ConfiguracionLanding(Base):
     mostrar_precios = Column(Boolean, nullable=False, server_default='true')
     mostrar_stock = Column(Boolean, nullable=False, server_default='true')
     habilitar_carrito = Column(Boolean, nullable=False, server_default='true')
-    
+
+    # Configuración de Delivery
+    costo_fijo_delivery = Column(Numeric(10, 2), nullable=True, default=None)
+    costo_por_km_delivery = Column(Numeric(10, 2), nullable=True, default=None)
+    monto_minimo_delivery_gratis = Column(Numeric(10, 2), nullable=True, default=None)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -386,9 +391,12 @@ class Producto(Base):
     tipo_producto_id = Column(Integer, ForeignKey("tipos_producto.id", ondelete="RESTRICT"), nullable=False)
     unidad_medida_id = Column(Integer, ForeignKey("unidades_medida.id", ondelete="RESTRICT"), nullable=False)
     
+    # Logística
+    peso_bruto = Column(Numeric(8, 3), nullable=True)  # Peso bruto en kg (producto + empaque). Usado para asignación de vehículos en delivery.
+
     # Costos y precios
     precio_compra = Column(Numeric(10, 2), nullable=True)  # Para materias primas
-    costo_fabricacion = Column(Numeric(10, 2), nullable=True)  # Calculado automÃƒÂ¡ticamente
+    costo_fabricacion = Column(Numeric(10, 2), nullable=True)  # Calculado automáticamente
     
     # Stock
     stock_minimo = Column(Integer, default=0)
@@ -814,6 +822,18 @@ class EstadoPedido(Base):
     pedidos = relationship("Pedido", back_populates="estado_pedido")
 
 
+class CanalVenta(Base):
+    """Canales de origen de una venta: POS, LANDING, WHATSAPP, TELEFONO, etc."""
+    __tablename__ = "canales_venta"
+
+    id = Column(Integer, primary_key=True, index=True)
+    codigo = Column(String, unique=True, nullable=False, index=True)
+    nombre = Column(String, nullable=False)
+    activo = Column(Boolean, default=True)
+
+    pedidos = relationship("Pedido", back_populates="canal_venta")
+
+
 class Pedido(Base):
     """Encabezado de pedidos/ventas."""
     __tablename__ = "pedidos"
@@ -827,11 +847,13 @@ class Pedido(Base):
     medio_pago_id = Column(Integer, ForeignKey("medios_pago.id", ondelete="RESTRICT"), nullable=True)  # Medio de pago utilizado
     tipo_pedido_id = Column(Integer, ForeignKey("tipos_pedido.id", ondelete="RESTRICT"), nullable=False, default=1)  # Tipo de inventario a usar
     tipo_documento_tributario_id = Column(Integer, ForeignKey("tipos_documento_tributario.id", ondelete="RESTRICT"), nullable=True, default=2)  # BOLETA por defecto (ID 2 = BOL)
-    usuario_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)  # Usuario que creÃƒÂ³ el pedido
+    usuario_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)  # Usuario que creó el pedido
+    canal_venta_id = Column(Integer, ForeignKey("canales_venta.id", ondelete="SET NULL"), nullable=True)  # Canal de origen de la venta
     fecha_pedido = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
     monto_total = Column(Float, default=0.00)
     estado_id = Column(Integer, ForeignKey("estados_pedido.id", ondelete="RESTRICT"), nullable=False, default=1)  # FK a estados_pedido
     es_pagado = Column(Boolean, default=False)
+    costo_delivery = Column(Numeric(10, 2), nullable=True, default=None)  # Costo de delivery (cobro aparte, no suma al total)
     inventario_descontado = Column(Boolean, default=False)  # Flag para evitar doble descuento
     notas = Column(Text, nullable=True)
     notas_admin = Column(Text, nullable=True)
@@ -867,6 +889,7 @@ class Pedido(Base):
     medio_pago = relationship("MedioPago", back_populates="pedidos")
     tipo_pedido = relationship("TipoPedido", back_populates="pedidos")
     tipo_documento_tributario = relationship("TipoDocumento", back_populates="pedidos")
+    canal_venta = relationship("CanalVenta", back_populates="pedidos")
     items = relationship("ItemPedido", back_populates="pedido", cascade="all, delete-orphan")
     cheques = relationship("Cheque", back_populates="pedido", cascade="all, delete-orphan")
     operacion_caja = relationship("OperacionCaja", back_populates="pedido", uselist=False)
@@ -938,14 +961,20 @@ class ItemPedido(Base):
 # --------------------------------------------------
 
 class Role(Base):
-    """Roles de usuario (e.g., admin, vendedor)."""
+    """Roles de usuario (e.g., admin, vendedor). Scoped por tenant."""
     __tablename__ = "roles"
 
     id = Column(Integer, primary_key=True, index=True)
-    nombre = Column(String, unique=True, nullable=False, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    nombre = Column(String, nullable=False, index=True)
     descripcion = Column(String)
 
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'nombre', name='uq_role_tenant_nombre'),
+    )
+
     # Relaciones
+    tenant = relationship("Tenant", foreign_keys=[tenant_id])
     users = relationship("User", back_populates="role")
     menus = relationship("MenuItem", secondary="role_menu_permissions", back_populates="roles")
 
@@ -1439,7 +1468,7 @@ class MovimientoStockCajas(Base):
     fecha_movimiento = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
     
     # Referencias adicionales para trazabilidad
-    lote_codigo = Column(String, nullable=True, index=True)  # CÃƒÂ³digo del lote especÃƒÂ­fico
+    lote_codigo = Column(String, nullable=True)  # Código del lote específico (índice en __table_args__)
     referencia_tipo = Column(String, nullable=True)  # PEDIDO, AJUSTE, etc.
     referencia_id = Column(Integer, nullable=True)  # ID de la referencia
     notas = Column(Text, nullable=True)
@@ -1624,6 +1653,13 @@ class HojaRuta(Base):
     fecha_retorno = Column(DateTime(timezone=True), nullable=True)
 
     notas = Column(Text, nullable=True)
+
+    # Cobro al chofer
+    tipo_cobro_chofer = Column(String(10), nullable=True)          # 'FIJO' o 'POR_KG'
+    tarifa_chofer = Column(Numeric(10, 2), nullable=True)          # monto fijo o tarifa por kg
+    monto_cobro_chofer = Column(Numeric(10, 2), nullable=True)     # monto total calculado
+    cobro_chofer_pagado = Column(Boolean, default=False, nullable=False, server_default='false')
+    fecha_pago_chofer = Column(DateTime(timezone=True), nullable=True)
 
     # Relaciones
     tenant = relationship("Tenant")

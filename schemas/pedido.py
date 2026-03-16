@@ -99,6 +99,13 @@ class PedidoCreateBackoffice(BaseModel):
     notas: Optional[str] = None
     # Puntos a usar (opcional)
     puntos_usar: Optional[int] = Field(default=0, ge=0, description="Puntos a usar para descuento")
+    # Delivery: si True el pedido queda CONFIRMADO para asignación de ruta (requiere cliente registrado)
+    requiere_delivery: bool = Field(default=False, description="Si True, el pedido queda CONFIRMADO en vez de ENTREGADO para programar delivery")
+    costo_delivery: Optional[float] = Field(default=None, ge=0, description="Costo de delivery acordado. Cobro aparte, no suma al total.")
+    # Canal de venta (1=POS, 2=LANDING, 3=WHATSAPP, 4=TELEFONO)
+    canal_venta_id: Optional[int] = Field(default=None, description="ID del canal de origen de la venta")
+    # tenant_id solo requerido cuando se usa X-API-Key (integraciones externas)
+    tenant_id: Optional[int] = Field(default=None, description="ID del tenant (requerido solo con X-API-Key)")
     items: List[ItemPedidoCreateBackoffice] = Field(..., min_length=1)
 
 
@@ -149,6 +156,9 @@ class PedidoResponse(BaseModel):
     puntos_ganados: Optional[int] = None
     puntos_usados: Optional[int] = None
     descuento_puntos: Optional[float] = None
+    # Delivery y canal de venta
+    costo_delivery: Optional[float] = None
+    canal_venta_id: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
 

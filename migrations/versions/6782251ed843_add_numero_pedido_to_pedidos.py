@@ -39,9 +39,8 @@ def upgrade() -> None:
         tenant_id = tenant_row[0]
         codigo_tenant = tenant_row[1]
         
-        # Convertir codigo a siglas (primeras letras de cada palabra)
-        partes = codigo_tenant.upper().replace('-', ' ').split()
-        siglas = ''.join([parte[0] for parte in partes])
+        # Usar el codigo completo en uppercase (garantiza unicidad ya que codigo es UNIQUE en tenants)
+        prefijo = codigo_tenant.upper()
         
         # Obtener pedidos de este tenant ordenados por fecha
         pedidos = connection.execute(text("""
@@ -55,7 +54,7 @@ def upgrade() -> None:
         # Generar numero_pedido para cada pedido
         for idx, pedido_row in enumerate(pedidos, start=1):
             pedido_id = pedido_row[0]
-            numero_pedido = f"{siglas}-{year}-{idx:05d}"
+            numero_pedido = f"{prefijo}-{year}-{idx:05d}"
             
             connection.execute(text("""
                 UPDATE pedidos 

@@ -21,7 +21,7 @@ from schemas.pedido import (
     EstadoPedido
 )
 
-from routers.auth import get_current_active_user
+from routers.auth import get_current_active_user, get_current_user_or_api_key, ApiKeyUser
 from services.boleta_service import generar_boleta_pedido
 from services.credito_service import CreditoService
 from services.puntos_service import PuntosService
@@ -711,7 +711,8 @@ def crear_pedido_frontend(
         es_pagado=False,
         notas=pedido_data.notas,
         puntos_usados=puntos_usar,
-        descuento_puntos=descuento_puntos
+        descuento_puntos=descuento_puntos,
+        canal_venta_id=2  # LANDING — pedidos desde la tienda online
     )
     db.add(db_pedido)
     db.flush()  # Para obtener el ID
@@ -760,9 +761,9 @@ def crear_pedido_frontend(
 
 @router.post("/backoffice", response_model=dict, status_code=status.HTTP_201_CREATED)
 def crear_pedido_backoffice(
-    pedido_data: PedidoCreateBackoffice, 
+    pedido_data: PedidoCreateBackoffice,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_active_user)
+    current_user = Depends(get_current_user_or_api_key)
 ):
     """
     Crea un nuevo pedido desde el backoffice.
@@ -774,10 +775,21 @@ def crear_pedido_backoffice(
     4. Crea los items del pedido con los precios especificados
     5. Calcula el monto total
     
-    **Uso:** Backoffice - Crear pedido manual
+    **Uso:** Backoffice - Crear pedido manual / Integraciones externas (n8n via X-API-Key)
     """
+    # Resolver tenant_id: desde el usuario JWT o desde el body (cuando es API Key)
+    if isinstance(current_user, ApiKeyUser):
+        if not pedido_data.canal_venta_id or not getattr(pedido_data, 'tenant_id', None):
+            # Para API Key, el tenant_id debe venir en el body — usamos el del cliente
+            pass  # Se resolverá por el cliente_id más abajo
+        tenant_id_efectivo = getattr(pedido_data, 'tenant_id', None)
+        if not tenant_id_efectivo:
+            raise HTTPException(status_code=400, detail="Se requiere tenant_id en el body cuando se usa X-API-Key")
+    else:
+        tenant_id_efectivo = current_user.tenant_id
+
     # 1. Validar que el cliente exista y pertenezca al tenant
-    cliente = db.query(Cliente).filter(Cliente.id == pedido_data.cliente_id, Cliente.tenant_id == current_user.tenant_id).first()
+    cliente = db.query(Cliente).filter(Cliente.id == pedido_data.cliente_id, Cliente.tenant_id == tenant_id_efectivo).first()
     if not cliente:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -785,7 +797,7 @@ def crear_pedido_backoffice(
         )
     
     # 2. Validar que el local exista y pertenezca al tenant
-    local = db.query(Local).filter(Local.id == pedido_data.local_id, Local.tenant_id == current_user.tenant_id).first()
+    local = db.query(Local).filter(Local.id == pedido_data.local_id, Local.tenant_id == tenant_id_efectivo).first()
     if not local:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -832,6 +844,21 @@ def crear_pedido_backoffice(
         # Redondear subtotal individual para evitar centavos
         subtotal = round(item_data.precio_unitario_venta * item_data.cantidad)
         monto_total += subtotal
+
+    # 4.2.5. Si requiere delivery, validar que todos los productos tienen peso_bruto configurado
+    requiere_delivery_check = getattr(pedido_data, 'requiere_delivery', False)
+    if requiere_delivery_check:
+        productos_sin_peso = []
+        for item_data in pedido_data.items:
+            prod = db.query(Producto).filter(Producto.id == item_data.producto_id).first()
+            if prod and (prod.peso_bruto is None or prod.peso_bruto <= 0):
+                productos_sin_peso.append(f"{prod.sku} - {prod.nombre}")
+        if productos_sin_peso:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Los siguientes productos no tienen peso bruto configurado y no pueden incluirse en un pedido con delivery: {', '.join(productos_sin_peso)}"
+            )
+
     # 4.3. Procesar uso de puntos si se especificó
     descuento_puntos = 0.0
     puntos_usar = pedido_data.puntos_usar or 0
@@ -870,8 +897,8 @@ def crear_pedido_backoffice(
             )
     
     # 5. Generar numero_pedido único para el tenant
-    numero_pedido = obtener_siguiente_numero_pedido(db, current_user.tenant_id)
-    
+    numero_pedido = obtener_siguiente_numero_pedido(db, tenant_id_efectivo)
+
     # 5.5. Obtener estado PENDIENTE
     from database.models import EstadoPedido as EstadoPedidoModel
     estado_pendiente = db.query(EstadoPedidoModel).filter(EstadoPedidoModel.codigo == 'PENDIENTE').first()
@@ -880,23 +907,25 @@ def crear_pedido_backoffice(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Estado PENDIENTE no configurado en el sistema"
         )
-    
+
     # 6. Crear pedido
     db_pedido = Pedido(
-        tenant_id=current_user.tenant_id,
+        tenant_id=tenant_id_efectivo,
         numero_pedido=numero_pedido,
         cliente_id=cliente.id,
         local_id=local.id,
         medio_pago_id=medio_pago.id,
         tipo_pedido_id=pedido_data.tipo_pedido_id,
         tipo_documento_tributario_id=pedido_data.tipo_documento_tributario_id,
-        usuario_id=current_user.id,  # Usuario que creó el pedido
+        usuario_id=current_user.id if not isinstance(current_user, ApiKeyUser) else None,
         monto_total=monto_total,
         estado_id=estado_pendiente.id,
         es_pagado=False,
         notas=pedido_data.notas,
         puntos_usados=puntos_usar,
-        descuento_puntos=descuento_puntos
+        descuento_puntos=descuento_puntos,
+        canal_venta_id=getattr(pedido_data, 'canal_venta_id', None),
+        costo_delivery=getattr(pedido_data, 'costo_delivery', None)
     )
     db.add(db_pedido)
     db.flush()  # Para obtener el ID
@@ -1043,6 +1072,9 @@ def crear_pedido_backoffice(
         tipo_codigo == 'PRODUCTOS'  # Solo productos regulares, no cajas variables
     )
     
+    # Si el vendedor marcó delivery, el pedido queda solo CONFIRMADO (no ENTREGADO)
+    requiere_delivery = getattr(pedido_data, 'requiere_delivery', False)
+    
     estado_final_id = estado_pendiente.id
     mensaje_final = f"Pedido creado exitosamente con medio de pago: {medio_pago.nombre}"
     
@@ -1100,12 +1132,19 @@ def crear_pedido_backoffice(
         # Registrar venta en caja
         registrar_venta_en_caja(db_pedido, current_user.id, db)
         
-        # Marcar como ENTREGADO (saltea EN_PREPARACION)
-        db_pedido.estado_id = estado_entregado.id
-        estado_final_id = estado_entregado.id
+        # Marcar como ENTREGADO (saltea EN_PREPARACION) o solo CONFIRMADO si requiere delivery
+        if requiere_delivery:
+            db_pedido.estado_id = estado_confirmado.id
+            estado_final_id = estado_confirmado.id
+        else:
+            db_pedido.estado_id = estado_entregado.id
+            estado_final_id = estado_entregado.id
         
         # Marcar como pagado según medio de pago
-        if medio_pago.permite_cheque:
+        if requiere_delivery:
+            db_pedido.es_pagado = False
+            mensaje_final = f"Pedido creado y confirmado. Pendiente de delivery."
+        elif medio_pago.permite_cheque:
             db_pedido.es_pagado = False
             mensaje_final = f"Pedido creado y entregado. Pendiente de pago con cheque."
         else:

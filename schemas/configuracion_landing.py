@@ -83,6 +83,11 @@ class ConfiguracionLandingBase(BaseModel):
     mostrar_stock: bool = Field(default=True, description="Si se muestra el stock disponible")
     habilitar_carrito: bool = Field(default=True, description="Si se habilita el carrito de compras")
 
+    # Configuración de Delivery
+    costo_fijo_delivery: Optional[float] = Field(None, ge=0, description="Costo fijo de delivery en pesos CLP")
+    costo_por_km_delivery: Optional[float] = Field(None, ge=0, description="Costo adicional por kilómetro en pesos CLP")
+    monto_minimo_delivery_gratis: Optional[float] = Field(None, ge=0, description="Monto mínimo de compra para delivery gratuito")
+
 
 class ConfiguracionLandingCreate(ConfiguracionLandingBase):
     """Schema para crear ConfiguracionLanding."""
@@ -129,6 +134,11 @@ class ConfiguracionLandingUpdate(BaseModel):
     mostrar_precios: Optional[bool] = None
     mostrar_stock: Optional[bool] = None
     habilitar_carrito: Optional[bool] = None
+
+    # Configuración de Delivery
+    costo_fijo_delivery: Optional[float] = Field(None, ge=0)
+    costo_por_km_delivery: Optional[float] = Field(None, ge=0)
+    monto_minimo_delivery_gratis: Optional[float] = Field(None, ge=0)
 
 
 class ConfiguracionLandingResponse(ConfiguracionLandingBase):

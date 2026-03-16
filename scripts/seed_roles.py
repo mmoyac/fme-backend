@@ -6,7 +6,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from database.models import Role, User
+from database.models import Role, User, Tenant
 from utils.security import get_password_hash
 from dotenv import load_dotenv
 
@@ -14,13 +14,22 @@ load_dotenv()
 
 DATABASE_URL = "postgresql://fme:fme@db:5432/fme_database"
 
-def seed():
+def seed(tenant_id: int = None):
     print("Iniciando seed de roles y usuarios...")
     engine = create_engine(DATABASE_URL)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     db = SessionLocal()
 
     try:
+        # Determinar tenant_id
+        if tenant_id is None:
+            first_tenant = db.query(Tenant).order_by(Tenant.id).first()
+            if not first_tenant:
+                print("ERROR: No existe ningún tenant. Crea uno primero.")
+                return
+            tenant_id = first_tenant.id
+            print(f"Usando tenant_id={tenant_id} ({first_tenant.nombre})")
+
         # 1. Definir roles
         roles_data = [
             {"nombre": "administrador", "descripcion": "Dueño del negocio - Acceso total operativo"},
@@ -31,15 +40,15 @@ def seed():
         roles_map = {} # nombre -> id
 
         # Rol admin/superadmin ya existe presuntamente, lo obtenemos
-        existing_admin = db.query(Role).filter(Role.nombre == "admin").first()
+        existing_admin = db.query(Role).filter(Role.nombre == "admin", Role.tenant_id == tenant_id).first()
         if existing_admin:
             print(f"Rol existente: admin (ID: {existing_admin.id})")
             roles_map["admin"] = existing_admin.id
         
         for r_data in roles_data:
-            role = db.query(Role).filter(Role.nombre == r_data["nombre"]).first()
+            role = db.query(Role).filter(Role.nombre == r_data["nombre"], Role.tenant_id == tenant_id).first()
             if not role:
-                role = Role(nombre=r_data["nombre"], descripcion=r_data["descripcion"])
+                role = Role(nombre=r_data["nombre"], descripcion=r_data["descripcion"], tenant_id=tenant_id)
                 db.add(role)
                 db.commit()
                 db.refresh(role)
@@ -93,4 +102,6 @@ def seed():
         db.close()
 
 if __name__ == "__main__":
-    seed()
+    # Opcional: pasar tenant_id como argumento: python seed_roles.py 2
+    tid = int(sys.argv[1]) if len(sys.argv) > 1 else None
+    seed(tenant_id=tid)

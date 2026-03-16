@@ -94,6 +94,7 @@ def obtener_catalogo_local(
             Producto.unidad_medida_id,
             Producto.es_vendible,
             Producto.activo,
+            Producto.peso_bruto,
             CategoriaProducto.nombre.label('categoria_nombre'),
             CategoriaProducto.puntos_fidelidad.label('categoria_puntos'),
             Precio.monto_precio.label('precio_base'),
@@ -145,6 +146,7 @@ def obtener_catalogo_local(
                 'unidad_medida_id': row.unidad_medida_id,
                 'es_vendible': row.es_vendible,
                 'activo': row.activo,
+                'peso_bruto': float(row.peso_bruto) if row.peso_bruto is not None else None,
                 'stock_local': row.stock_local or 0,
                 'precios': []
             }
@@ -232,6 +234,7 @@ def listar_productos(
             'unidad_medida_id': p.unidad_medida_id,
             'precio_compra': p.precio_compra,
             'costo_fabricacion': p.costo_fabricacion,
+            'peso_bruto': p.peso_bruto,
             'es_vendible': p.es_vendible,
             'es_vendible_web': p.es_vendible_web,
             'es_ingrediente': p.es_ingrediente,
@@ -300,6 +303,7 @@ def obtener_producto(producto_id: int, db: Session = Depends(get_db), current_us
         'unidad_medida_id': producto.unidad_medida_id,
         'precio_compra': producto.precio_compra,
         'costo_fabricacion': producto.costo_fabricacion,
+        'peso_bruto': producto.peso_bruto,
         'es_vendible': producto.es_vendible,
         'es_vendible_web': producto.es_vendible_web,
         'es_ingrediente': producto.es_ingrediente,

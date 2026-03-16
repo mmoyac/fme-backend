@@ -42,8 +42,8 @@ def listar_roles(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
 ):
-    """Listar todos los roles disponibles."""
-    return db.query(Role).all()
+    """Listar roles del tenant actual."""
+    return db.query(Role).filter(Role.tenant_id == current_user.tenant_id).all()
 
 @router.post("/roles", response_model=RoleSchema, status_code=status.HTTP_201_CREATED)
 def crear_rol(
@@ -51,12 +51,15 @@ def crear_rol(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
 ):
-    """Crear un nuevo rol."""
-    existing = db.query(Role).filter(Role.nombre == role.nombre).first()
+    """Crear un nuevo rol para el tenant actual."""
+    existing = db.query(Role).filter(
+        Role.nombre == role.nombre,
+        Role.tenant_id == current_user.tenant_id
+    ).first()
     if existing:
         raise HTTPException(status_code=400, detail=f"El rol '{role.nombre}' ya existe")
     
-    db_role = Role(nombre=role.nombre, descripcion=role.descripcion)
+    db_role = Role(nombre=role.nombre, descripcion=role.descripcion, tenant_id=current_user.tenant_id)
     db.add(db_role)
     db.commit()
     db.refresh(db_role)
@@ -130,8 +133,11 @@ def obtener_menu_rol(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
 ):
-    """Obtener items asignados a un rol."""
-    role = db.query(Role).filter(Role.id == role_id).first()
+    """Obtener items asignados a un rol del tenant actual."""
+    role = db.query(Role).filter(
+        Role.id == role_id,
+        Role.tenant_id == current_user.tenant_id
+    ).first()
     if not role:
         raise HTTPException(status_code=404, detail="Rol no encontrado")
     return role.menus
@@ -143,8 +149,11 @@ def actualizar_menu_rol(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
 ):
-    """Actualizar permisos de menú para un rol."""
-    role = db.query(Role).filter(Role.id == role_id).first()
+    """Actualizar permisos de menú para un rol del tenant actual."""
+    role = db.query(Role).filter(
+        Role.id == role_id,
+        Role.tenant_id == current_user.tenant_id
+    ).first()
     if not role:
         raise HTTPException(status_code=404, detail="Rol no encontrado")
     
@@ -186,8 +195,11 @@ def crear_usuario(
     ).first():
         raise HTTPException(status_code=400, detail="El email ya está registrado")
     
-    # Verificar que el rol exista
-    role = db.query(Role).filter(Role.id == user.role_id).first()
+    # Verificar que el rol exista y pertenezca al tenant
+    role = db.query(Role).filter(
+        Role.id == user.role_id,
+        Role.tenant_id == current_user.tenant_id
+    ).first()
     if not role:
         raise HTTPException(status_code=400, detail="El Rol ID especificado no existe")
     
@@ -235,9 +247,12 @@ def actualizar_usuario(
     if not user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     
-    # Validar rol si se proporciona
+    # Validar rol si se proporciona (debe pertenecer al tenant)
     if user_update.role_id is not None:
-        role = db.query(Role).filter(Role.id == user_update.role_id).first()
+        role = db.query(Role).filter(
+            Role.id == user_update.role_id,
+            Role.tenant_id == current_user.tenant_id
+        ).first()
         if not role:
             raise HTTPException(status_code=400, detail="Rol no encontrado")
         user.role_id = user_update.role_id
