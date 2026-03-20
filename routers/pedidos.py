@@ -1224,10 +1224,13 @@ def listar_pedidos(
     from database.models import EstadoPedido as EstadoPedidoModel, Despacho
     
     # Filtrar por tenant y por local asignado al usuario (local_defecto_id)
-    query = db.query(Pedido).join(Cliente).filter(
-        Cliente.tenant_id == current_user.tenant_id,
-        Pedido.local_id == current_user.local_defecto_id
-    ).options(
+    # El admin ve todos los locales
+    es_admin = current_user.role and current_user.role.nombre.lower() == 'admin'
+    filtros_base = [Cliente.tenant_id == current_user.tenant_id]
+    if not es_admin and current_user.local_defecto_id:
+        filtros_base.append(Pedido.local_id == current_user.local_defecto_id)
+
+    query = db.query(Pedido).join(Cliente).filter(*filtros_base).options(
         joinedload(Pedido.cliente),
         joinedload(Pedido.items).joinedload(ItemPedido.producto),
         joinedload(Pedido.medio_pago),

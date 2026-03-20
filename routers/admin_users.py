@@ -210,6 +210,7 @@ def crear_usuario(
         nombre_completo=user.nombre_completo,
         is_active=user.is_active,
         role_id=user.role_id,
+        local_defecto_id=user.local_defecto_id,
         tenant_id=current_user.tenant_id
     )
     db.add(db_user)

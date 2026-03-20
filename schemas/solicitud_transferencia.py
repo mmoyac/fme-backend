@@ -46,7 +46,7 @@ class SolicitudTransferenciaResponse(BaseModel):
     nota: Optional[str] = None
     fecha_creacion: datetime
     fecha_actualizacion: datetime
-    recibido: bool
+    recibido: bool = False
     usuario_receptor_id: Optional[int] = None
     fecha_recepcion: Optional[datetime] = None
     items: List[ItemSolicitudTransferenciaResponse]

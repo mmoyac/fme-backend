@@ -4,7 +4,7 @@ controla capacidad en kg y permite marcar entregas.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, text
+from sqlalchemy import func, text, or_, and_
 from typing import List, Optional
 from pydantic import BaseModel
 from datetime import datetime
@@ -186,6 +186,7 @@ def _build_hoja_response(hoja: HojaRuta, db: Session) -> dict:
 
 @router.get("/pedidos-disponibles")
 def listar_pedidos_disponibles(
+    todos_locales: bool = False,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
@@ -198,7 +199,7 @@ def listar_pedidos_disponibles(
     if not estado_confirmado:
         return []
 
-    pedidos = (
+    q_pedidos = (
         db.query(Pedido)
         .join(Cliente)
         .filter(
@@ -206,6 +207,20 @@ def listar_pedidos_disponibles(
             Pedido.estado_id == estado_confirmado.id,
             ~Pedido.id.in_(asignados_ids) if asignados_ids else True,
         )
+    )
+
+    # Filtrar por local del usuario salvo que sea admin o se pidan todos los locales
+    es_admin = current_user.role and current_user.role.nombre.lower() == 'admin'
+    if not todos_locales and not es_admin and current_user.local_defecto_id:
+        q_pedidos = q_pedidos.filter(
+            or_(
+                Pedido.local_despacho_id == current_user.local_defecto_id,
+                and_(Pedido.local_despacho_id == None, Pedido.local_id == current_user.local_defecto_id),
+            )
+        )
+
+    pedidos = (
+        q_pedidos
         .options(
             joinedload(Pedido.cliente),
             joinedload(Pedido.items).joinedload(ItemPedido.producto),
@@ -225,6 +240,7 @@ def listar_pedidos_disponibles(
             "cliente_telefono": p.cliente.telefono if p.cliente else None,
             "direccion": p.cliente.direccion if p.cliente else None,
             "monto_total": float(p.monto_total) if p.monto_total else 0,
+            "costo_delivery": float(p.costo_delivery) if p.costo_delivery else 0,
             "es_pagado": p.es_pagado,
             "kg_brutos": round(kg, 3),
             "items_count": len(p.items) if p.items else 0,
@@ -353,13 +369,31 @@ def crear_hoja_ruta(
 @router.get("/")
 def listar_hojas_ruta(
     estado: Optional[str] = None,
+    todos_locales: bool = False,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    """Lista todas las hojas de ruta del tenant."""
+    """Lista todas las hojas de ruta del tenant, filtradas por local del usuario."""
     q = db.query(HojaRuta).filter(HojaRuta.tenant_id == current_user.tenant_id)
     if estado:
         q = q.filter(HojaRuta.estado == EstadoHojaRuta(estado))
+
+    # Filtrar por local del usuario salvo que sea admin o se pidan todos los locales
+    es_admin = current_user.role and current_user.role.nombre.lower() == 'admin'
+    if not todos_locales and not es_admin and current_user.local_defecto_id:
+        hoja_ids_local = (
+            db.query(HojaRutaItem.hoja_ruta_id)
+            .join(Pedido, HojaRutaItem.pedido_id == Pedido.id)
+            .filter(
+                or_(
+                    Pedido.local_despacho_id == current_user.local_defecto_id,
+                    and_(Pedido.local_despacho_id == None, Pedido.local_id == current_user.local_defecto_id),
+                )
+            )
+            .distinct()
+            .subquery()
+        )
+        q = q.filter(HojaRuta.id.in_(hoja_ids_local))
 
     hojas = (
         q.options(

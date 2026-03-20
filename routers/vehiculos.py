@@ -8,7 +8,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 from database.database import get_db
-from database.models import Vehiculo, TipoVehiculo
+from database.models import Vehiculo, TipoVehiculo, User
 from routers.auth import get_current_active_user
 
 router = APIRouter(prefix="/api/vehiculos", tags=["Vehículos"])
@@ -141,6 +141,21 @@ def crear_vehiculo(
 
     v = db.query(Vehiculo).filter(Vehiculo.id == v.id).options(joinedload(Vehiculo.tipo_vehiculo)).first()
     return _vehiculo_out(v)
+
+
+@router.get("/choferes")
+def listar_choferes(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user),
+):
+    """Lista usuarios activos del tenant para usar como choferes."""
+    users = (
+        db.query(User)
+        .filter(User.tenant_id == current_user.tenant_id, User.is_active == True)
+        .order_by(User.nombre_completo)
+        .all()
+    )
+    return [{"id": u.id, "nombre_completo": u.nombre_completo, "email": u.email, "is_active": u.is_active} for u in users]
 
 
 @router.get("/{vehiculo_id}")

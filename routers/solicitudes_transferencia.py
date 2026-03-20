@@ -64,11 +64,18 @@ def crear_solicitud_transferencia(data: SolicitudTransferenciaCreate, db: Sessio
         )
 
 @router.get("/", response_model=List[SolicitudTransferenciaResponse])
-def listar_solicitudes_transferencia(request: Request, db: Session = Depends(get_db)):
+def listar_solicitudes_transferencia(request: Request, db: Session = Depends(get_db), current_user: User = Depends(get_current_active_user)):
     tenant = get_tenant_from_request(request, db)
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
-    solicitudes = db.query(SolicitudTransferencia).filter(SolicitudTransferencia.tenant_id == tenant.id).all()
+    es_admin = current_user.role and current_user.role.nombre.lower() == 'admin'
+    q = db.query(SolicitudTransferencia).filter(SolicitudTransferencia.tenant_id == tenant.id)
+    if not es_admin and current_user.local_defecto_id:
+        q = q.filter(
+            (SolicitudTransferencia.local_origen_id == current_user.local_defecto_id) |
+            (SolicitudTransferencia.local_destino_id == current_user.local_defecto_id)
+        )
+    solicitudes = q.order_by(SolicitudTransferencia.solicitud_id.desc()).all()
     result = []
     for s in solicitudes:
         result.append(SolicitudTransferenciaResponse(
@@ -146,16 +153,45 @@ def actualizar_solicitud_transferencia(
         if current_user.local_defecto_id != s.local_destino_id:
             raise HTTPException(status_code=403, detail="Solo el local destino puede registrar la recepción.")
         # Permitir registrar o actualizar la recepción (incluso si ya estaba recibida)
+        era_recibido = s.recibido  # guardar estado antes de modificar
         s.recibido = True
         s.usuario_receptor_id = current_user.id
         from datetime import datetime as dt
         s.fecha_recepcion = dt.now()
-        # Actualizar cantidades recibidas por ítem
+        # Actualizar cantidades recibidas por ítem y ajustar inventario por diferencia
         if data.items is not None:
             for item_data in data.items:
                 item_db = next((i for i in s.items if i.producto_id == item_data.producto_id), None)
                 if item_db and item_data.cantidad_recibida is not None:
-                    item_db.cantidad_recibida = item_data.cantidad_recibida
+                    aprobada = item_db.cantidad_aprobada or 0
+                    recibida_anterior = item_db.cantidad_recibida or 0
+                    recibida_nueva = item_data.cantidad_recibida
+                    diferencia = aprobada - recibida_nueva
+                    ajuste = recibida_anterior - recibida_nueva  # ajuste por actualización
+
+                    if not era_recibido:
+                        # Primera recepción: devolver diferencia al origen
+                        if diferencia > 0:
+                            inv_origen = db.query(Inventario).filter_by(producto_id=item_db.producto_id, local_id=s.local_origen_id).first()
+                            if not inv_origen:
+                                inv_origen = Inventario(producto_id=item_db.producto_id, local_id=s.local_origen_id, cantidad_stock=0)
+                                db.add(inv_origen)
+                            inv_origen.cantidad_stock = (inv_origen.cantidad_stock or 0) + diferencia
+
+                            inv_destino = db.query(Inventario).filter_by(producto_id=item_db.producto_id, local_id=s.local_destino_id).first()
+                            if inv_destino:
+                                inv_destino.cantidad_stock = (inv_destino.cantidad_stock or 0) - diferencia
+                    else:
+                        # Actualización de recepción ya registrada: ajustar por cambio
+                        if ajuste != 0:
+                            inv_origen = db.query(Inventario).filter_by(producto_id=item_db.producto_id, local_id=s.local_origen_id).first()
+                            if inv_origen:
+                                inv_origen.cantidad_stock = (inv_origen.cantidad_stock or 0) + ajuste
+                            inv_destino = db.query(Inventario).filter_by(producto_id=item_db.producto_id, local_id=s.local_destino_id).first()
+                            if inv_destino:
+                                inv_destino.cantidad_stock = (inv_destino.cantidad_stock or 0) - ajuste
+
+                    item_db.cantidad_recibida = recibida_nueva
         db.commit()
         db.refresh(s)
         return obtener_solicitud_transferencia(solicitud_id, db)
@@ -207,6 +243,12 @@ def actualizar_solicitud_transferencia(
         if data.estado_id == ESTADO_FINALIZADO:
             s.estado_id = ESTADO_FINALIZADO
             s.usuario_finalizador_id = current_user.id
+            # Actualizar cantidad_aprobada desde el payload antes de procesar inventario
+            if data.items:
+                for item_data in data.items:
+                    item_db = next((i for i in s.items if i.producto_id == item_data.producto_id), None)
+                    if item_db and item_data.cantidad_aprobada is not None:
+                        item_db.cantidad_aprobada = item_data.cantidad_aprobada
             # Realizar movimientos de inventario por cada item aprobado
             db.flush()  # Asegura que s.items esté actualizado
             for item in s.items:
