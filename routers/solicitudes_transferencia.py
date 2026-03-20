@@ -240,8 +240,8 @@ def actualizar_solicitud_transferencia(
         else:
             raise HTTPException(status_code=403, detail="No tienes permisos para editar esta solicitud.")
 
-    # Si está EN_PROCESO y el usuario es del local origen, puede editar cantidades aprobadas y finalizar
-    if s.estado_id == ESTADO_EN_PROCESO and current_user.local_defecto_id == s.local_origen_id:
+    # Si está EN_PROCESO y el usuario es del local origen (o admin), puede editar cantidades aprobadas y finalizar
+    if s.estado_id == ESTADO_EN_PROCESO and (es_admin or current_user.local_defecto_id == s.local_origen_id):
         if data.estado_id == ESTADO_FINALIZADO:
             s.estado_id = ESTADO_FINALIZADO
             s.usuario_finalizador_id = current_user.id
