@@ -143,25 +143,24 @@ def actualizar_solicitud_transferencia(
     if not s:
         raise HTTPException(status_code=404, detail="Solicitud no encontrada")
 
-    # Obtener IDs de estados dinámicamente desde la BD
-    estados = {e.codigo: e.id for e in db.query(EstadoEnrolamiento).all()}
-    ESTADO_PENDIENTE = estados.get("PENDIENTE", 1)
-    ESTADO_EN_PROCESO = estados.get("EN_PROCESO", 2)
-    ESTADO_FINALIZADO = estados.get("FINALIZADO", 3)
+    # Resolver códigos de estado actual y nuevo desde la BD (nunca IDs hardcodeados)
+    estados_map = {e.id: e.codigo for e in db.query(EstadoEnrolamiento).all()}
+    codigos_map = {v: k for k, v in estados_map.items()}  # codigo -> id
+
+    estado_actual = estados_map.get(s.estado_id)
+    estado_nuevo = estados_map.get(data.estado_id) if data.estado_id else None
 
     es_admin = current_user.role and current_user.role.nombre.lower() == 'admin'
 
-    # Si está FINALIZADO, solo el local destino (o admin) puede registrar/actualizar la recepción
-    if s.estado_id == ESTADO_FINALIZADO:
+    # FINALIZADO: solo local destino (o admin) puede registrar la recepción
+    if estado_actual == 'FINALIZADO':
         if not es_admin and current_user.local_defecto_id != s.local_destino_id:
             raise HTTPException(status_code=403, detail="Solo el local destino puede registrar la recepción.")
-        # Permitir registrar o actualizar la recepción (incluso si ya estaba recibida)
-        era_recibido = s.recibido  # guardar estado antes de modificar
+        era_recibido = s.recibido
         s.recibido = True
         s.usuario_receptor_id = current_user.id
         from datetime import datetime as dt
         s.fecha_recepcion = dt.now()
-        # Actualizar cantidades recibidas por ítem y ajustar inventario por diferencia
         if data.items is not None:
             for item_data in data.items:
                 item_db = next((i for i in s.items if i.producto_id == item_data.producto_id), None)
@@ -170,22 +169,18 @@ def actualizar_solicitud_transferencia(
                     recibida_anterior = item_db.cantidad_recibida or 0
                     recibida_nueva = item_data.cantidad_recibida
                     diferencia = aprobada - recibida_nueva
-                    ajuste = recibida_anterior - recibida_nueva  # ajuste por actualización
-
+                    ajuste = recibida_anterior - recibida_nueva
                     if not era_recibido:
-                        # Primera recepción: devolver diferencia al origen
                         if diferencia > 0:
                             inv_origen = db.query(Inventario).filter_by(producto_id=item_db.producto_id, local_id=s.local_origen_id).first()
                             if not inv_origen:
                                 inv_origen = Inventario(producto_id=item_db.producto_id, local_id=s.local_origen_id, cantidad_stock=0)
                                 db.add(inv_origen)
                             inv_origen.cantidad_stock = (inv_origen.cantidad_stock or 0) + diferencia
-
                             inv_destino = db.query(Inventario).filter_by(producto_id=item_db.producto_id, local_id=s.local_destino_id).first()
                             if inv_destino:
                                 inv_destino.cantidad_stock = (inv_destino.cantidad_stock or 0) - diferencia
                     else:
-                        # Actualización de recepción ya registrada: ajustar por cambio
                         if ajuste != 0:
                             inv_origen = db.query(Inventario).filter_by(producto_id=item_db.producto_id, local_id=s.local_origen_id).first()
                             if inv_origen:
@@ -193,22 +188,28 @@ def actualizar_solicitud_transferencia(
                             inv_destino = db.query(Inventario).filter_by(producto_id=item_db.producto_id, local_id=s.local_destino_id).first()
                             if inv_destino:
                                 inv_destino.cantidad_stock = (inv_destino.cantidad_stock or 0) - ajuste
-
                     item_db.cantidad_recibida = recibida_nueva
         db.commit()
         db.refresh(s)
         return obtener_solicitud_transferencia(solicitud_id, db)
 
-    # Si está EN_PROCESO, solo el local origen (o admin) puede editar (responder y finalizar)
-    if s.estado_id == ESTADO_EN_PROCESO:
-        if not es_admin and current_user.local_defecto_id != s.local_origen_id:
-            raise HTTPException(status_code=403, detail="Solo el local origen puede editar una solicitud en proceso.")
-
-    # Si está PENDIENTE, solo el local destino (solicitante) o admin puede editar
-    if s.estado_id == ESTADO_PENDIENTE:
-        if es_admin or current_user.local_defecto_id == s.local_destino_id:
-            # Puede editar nota/items, pero no cantidades aprobadas ni estado
-            if data.estado_id is not None and data.estado_id != ESTADO_PENDIENTE:
+    # PENDIENTE: local destino edita, local origen inicia atención, admin puede todo
+    if estado_actual == 'PENDIENTE':
+        if es_admin or current_user.local_defecto_id == s.local_origen_id:
+            # Admin o local origen: puede mover a EN_PROCESO
+            if estado_nuevo == 'EN_PROCESO':
+                s.estado_id = codigos_map['EN_PROCESO']
+                db.commit()
+                db.refresh(s)
+                return obtener_solicitud_transferencia(solicitud_id, db)
+            if data.nota is not None:
+                s.nota = data.nota
+            db.commit()
+            db.refresh(s)
+            return obtener_solicitud_transferencia(solicitud_id, db)
+        elif current_user.local_defecto_id == s.local_destino_id:
+            # Local destino: puede editar nota/items, no cambiar estado ni aprobar
+            if estado_nuevo is not None and estado_nuevo != 'PENDIENTE':
                 raise HTTPException(status_code=403, detail="No puedes cambiar el estado de la solicitud.")
             if data.items is not None:
                 for item in data.items:
@@ -219,44 +220,33 @@ def actualizar_solicitud_transferencia(
             if data.items is not None:
                 db.query(ItemSolicitudTransferencia).filter_by(solicitud_id=solicitud_id).delete()
                 for item in data.items:
-                    item_obj = ItemSolicitudTransferencia(
+                    db.add(ItemSolicitudTransferencia(
                         solicitud_id=s.solicitud_id,
                         producto_id=item.producto_id,
                         cantidad_solicitada=item.cantidad_solicitada,
                         cantidad_aprobada=None
-                    )
-                    db.add(item_obj)
+                    ))
             db.commit()
             db.refresh(s)
             return obtener_solicitud_transferencia(solicitud_id, db)
-        elif current_user.local_defecto_id == s.local_origen_id:
-            # El local origen puede mover a EN_PROCESO (toma la solicitud)
-            if data.estado_id == ESTADO_EN_PROCESO:
-                s.estado_id = ESTADO_EN_PROCESO
-                db.commit()
-                db.refresh(s)
-                return obtener_solicitud_transferencia(solicitud_id, db)
-            else:
-                raise HTTPException(status_code=400, detail="Solo puedes tomar la solicitud (EN_PROCESO) desde el local origen.")
         else:
             raise HTTPException(status_code=403, detail="No tienes permisos para editar esta solicitud.")
 
-    # Si está EN_PROCESO y el usuario es del local origen (o admin), puede editar cantidades aprobadas y finalizar
-    if s.estado_id == ESTADO_EN_PROCESO and (es_admin or current_user.local_defecto_id == s.local_origen_id):
-        if data.estado_id == ESTADO_FINALIZADO:
-            s.estado_id = ESTADO_FINALIZADO
+    # EN_PROCESO: local origen (o admin) aprueba cantidades y finaliza
+    if estado_actual == 'EN_PROCESO':
+        if not es_admin and current_user.local_defecto_id != s.local_origen_id:
+            raise HTTPException(status_code=403, detail="Solo el local origen puede editar una solicitud en proceso.")
+        if estado_nuevo == 'FINALIZADO':
+            s.estado_id = codigos_map['FINALIZADO']
             s.usuario_finalizador_id = current_user.id
-            # Actualizar cantidad_aprobada desde el payload antes de procesar inventario
             if data.items:
                 for item_data in data.items:
                     item_db = next((i for i in s.items if i.producto_id == item_data.producto_id), None)
                     if item_db and item_data.cantidad_aprobada is not None:
                         item_db.cantidad_aprobada = item_data.cantidad_aprobada
-            # Realizar movimientos de inventario por cada item aprobado
-            db.flush()  # Asegura que s.items esté actualizado
+            db.flush()
             for item in s.items:
                 if item.cantidad_aprobada and item.cantidad_aprobada > 0:
-                    # Crear movimiento de inventario tipo TRANSFERENCIA
                     movimiento = MovimientoInventario(
                         producto_id=item.producto_id,
                         local_origen_id=s.local_origen_id,
@@ -268,22 +258,19 @@ def actualizar_solicitud_transferencia(
                         usuario=str(current_user.id)
                     )
                     db.add(movimiento)
-                    db.flush()  # Para obtener el ID
-                    # Actualizar inventario origen
+                    db.flush()
                     inv_origen = db.query(Inventario).filter_by(producto_id=item.producto_id, local_id=s.local_origen_id).first()
                     if not inv_origen:
                         inv_origen = Inventario(producto_id=item.producto_id, local_id=s.local_origen_id, cantidad_stock=0)
                         db.add(inv_origen)
                         db.flush()
                     inv_origen.cantidad_stock = (inv_origen.cantidad_stock or 0) - item.cantidad_aprobada
-                    # Actualizar inventario destino
                     inv_destino = db.query(Inventario).filter_by(producto_id=item.producto_id, local_id=s.local_destino_id).first()
                     if not inv_destino:
                         inv_destino = Inventario(producto_id=item.producto_id, local_id=s.local_destino_id, cantidad_stock=0)
                         db.add(inv_destino)
                         db.flush()
                     inv_destino.cantidad_stock = (inv_destino.cantidad_stock or 0) + item.cantidad_aprobada
-                    # Asignar movimiento al item
                     item.movimiento_inventario_id = movimiento.id
             db.commit()
             db.refresh(s)
@@ -293,13 +280,12 @@ def actualizar_solicitud_transferencia(
         if data.items is not None:
             db.query(ItemSolicitudTransferencia).filter_by(solicitud_id=solicitud_id).delete()
             for item in data.items:
-                item_obj = ItemSolicitudTransferencia(
+                db.add(ItemSolicitudTransferencia(
                     solicitud_id=s.solicitud_id,
                     producto_id=item.producto_id,
                     cantidad_solicitada=item.cantidad_solicitada,
                     cantidad_aprobada=item.cantidad_aprobada
-                )
-                db.add(item_obj)
+                ))
         db.commit()
         db.refresh(s)
         return obtener_solicitud_transferencia(solicitud_id, db)
