@@ -7,7 +7,7 @@ from routers.auth import get_current_active_user
 from sqlalchemy.orm import Session
 from typing import List
 from database.database import get_db
-from database.models import SolicitudTransferencia, ItemSolicitudTransferencia, MovimientoInventario, Inventario
+from database.models import SolicitudTransferencia, ItemSolicitudTransferencia, MovimientoInventario, Inventario, EstadoEnrolamiento
 from services.tenant_service import get_tenant_from_request
 from schemas.solicitud_transferencia import (
     SolicitudTransferenciaCreate,
@@ -143,10 +143,11 @@ def actualizar_solicitud_transferencia(
     if not s:
         raise HTTPException(status_code=404, detail="Solicitud no encontrada")
 
-    # Estados: 1=PENDIENTE, 2=EN_PROCESO, 3=FINALIZADO (ajusta según tus IDs reales)
-    ESTADO_PENDIENTE = 1
-    ESTADO_EN_PROCESO = 2
-    ESTADO_FINALIZADO = 3
+    # Obtener IDs de estados dinámicamente desde la BD
+    estados = {e.codigo: e.id for e in db.query(EstadoEnrolamiento).all()}
+    ESTADO_PENDIENTE = estados.get("PENDIENTE", 1)
+    ESTADO_EN_PROCESO = estados.get("EN_PROCESO", 2)
+    ESTADO_FINALIZADO = estados.get("FINALIZADO", 3)
 
     es_admin = current_user.role and current_user.role.nombre.lower() == 'admin'
 
