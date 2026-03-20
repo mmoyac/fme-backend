@@ -148,9 +148,11 @@ def actualizar_solicitud_transferencia(
     ESTADO_EN_PROCESO = 2
     ESTADO_FINALIZADO = 3
 
-    # Si está FINALIZADO, solo el local destino puede registrar/actualizar la recepción
+    es_admin = current_user.role and current_user.role.nombre.lower() == 'admin'
+
+    # Si está FINALIZADO, solo el local destino (o admin) puede registrar/actualizar la recepción
     if s.estado_id == ESTADO_FINALIZADO:
-        if current_user.local_defecto_id != s.local_destino_id:
+        if not es_admin and current_user.local_defecto_id != s.local_destino_id:
             raise HTTPException(status_code=403, detail="Solo el local destino puede registrar la recepción.")
         # Permitir registrar o actualizar la recepción (incluso si ya estaba recibida)
         era_recibido = s.recibido  # guardar estado antes de modificar
@@ -196,14 +198,14 @@ def actualizar_solicitud_transferencia(
         db.refresh(s)
         return obtener_solicitud_transferencia(solicitud_id, db)
 
-    # Si está EN_PROCESO, solo el local origen puede editar (responder y finalizar)
+    # Si está EN_PROCESO, solo el local origen (o admin) puede editar (responder y finalizar)
     if s.estado_id == ESTADO_EN_PROCESO:
-        if current_user.local_defecto_id != s.local_origen_id:
+        if not es_admin and current_user.local_defecto_id != s.local_origen_id:
             raise HTTPException(status_code=403, detail="Solo el local origen puede editar una solicitud en proceso.")
 
-    # Si está PENDIENTE, solo el local destino (solicitante) puede editar (nota/items, sin cantidades aprobadas)
+    # Si está PENDIENTE, solo el local destino (solicitante) o admin puede editar
     if s.estado_id == ESTADO_PENDIENTE:
-        if current_user.local_defecto_id == s.local_destino_id:
+        if es_admin or current_user.local_defecto_id == s.local_destino_id:
             # Puede editar nota/items, pero no cantidades aprobadas ni estado
             if data.estado_id is not None and data.estado_id != ESTADO_PENDIENTE:
                 raise HTTPException(status_code=403, detail="No puedes cambiar el estado de la solicitud.")
