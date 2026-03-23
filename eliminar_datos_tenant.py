@@ -47,7 +47,8 @@ from database.models import (
     Precio, PuntosCliente, TurnoCaja, OperacionCaja,
     HojaRutaItem, HojaRuta,
     SolicitudTransferencia, ItemSolicitudTransferencia,
-    Comision, LiquidacionComision
+    Comision, LiquidacionComision,
+    Receta, IngredienteReceta
 )
 
 # ─── Argumentos ───────────────────────────────────────────────────────────────
@@ -55,12 +56,15 @@ parser = argparse.ArgumentParser(description="Eliminar datos operativos de un te
 parser.add_argument("--tenant-id", type=int, required=True, help="ID del tenant a limpiar")
 parser.add_argument("--eliminar-clientes", action="store_true",
                     help="También eliminar clientes y sus puntos de fidelización (por defecto se conservan)")
+parser.add_argument("--eliminar-productos", action="store_true",
+                    help="También eliminar productos (por defecto se conservan)")
 parser.add_argument("--si", action="store_true",
                     help="Confirmar automáticamente sin prompt interactivo")
 args = parser.parse_args()
 
 TENANT_ID = args.tenant_id
 CONSERVAR_CLIENTES = not args.eliminar_clientes
+CONSERVAR_PRODUCTOS = not args.eliminar_productos
 AUTO_CONFIRM = args.si
 
 
@@ -145,7 +149,10 @@ def eliminar_datos(tenant_id: int, conservar_clientes: bool = False):
 
         counts["productos"] = db.query(Producto).filter(Producto.tenant_id == tenant.id).count()
 
+        conservar_productos = CONSERVAR_PRODUCTOS
         total_a_eliminar = sum(v for k, v in counts.items() if k != "productos")
+        if not conservar_productos:
+            total_a_eliminar += counts["productos"]
         if conservar_clientes:
             total_a_eliminar -= counts["clientes"] + counts["puntos_clientes"]
 
@@ -167,7 +174,10 @@ def eliminar_datos(tenant_id: int, conservar_clientes: bool = False):
             print(f"   👥 Clientes:                   CONSERVADOS ({counts['clientes']})")
         else:
             print(f"   👥 Clientes / Puntos:          {counts['clientes']} / {counts['puntos_clientes']}")
-        print(f"\n   📦 Productos:                  CONSERVADOS ({counts['productos']})")
+        if conservar_productos:
+            print(f"\n   📦 Productos:                  CONSERVADOS ({counts['productos']})")
+        else:
+            print(f"\n   📦 Productos:                  {counts['productos']} (SE ELIMINARÁN)")
         print("=" * 70)
 
         if total_a_eliminar == 0:
@@ -291,15 +301,69 @@ def eliminar_datos(tenant_id: int, conservar_clientes: bool = False):
         else:
             print(f"   ⏭ Clientes CONSERVADOS")
 
+        # Productos (opcional)
+        if not conservar_productos:
+            # Recolectar IDs de productos del tenant
+            productos_ids = [p.id for p in db.query(Producto).filter(Producto.tenant_id == tenant.id).all()]
+            if productos_ids:
+                # 1. IngredienteReceta (FK RESTRICT producto_ingrediente_id)
+                n = db.query(IngredienteReceta).filter(
+                    IngredienteReceta.producto_ingrediente_id.in_(productos_ids)
+                ).delete(synchronize_session=False)
+                if n:
+                    print(f"   ✓ {n} ingredientes de receta (como ingrediente)")
+
+                # 2. Recetas propias del producto (con cascade en ingredientes)
+                recetas_ids = [r.id for r in db.query(Receta).filter(Receta.producto_id.in_(productos_ids)).all()]
+                if recetas_ids:
+                    n = db.query(IngredienteReceta).filter(IngredienteReceta.receta_id.in_(recetas_ids)).delete(synchronize_session=False)
+                    if n:
+                        print(f"   ✓ {n} ingredientes de receta (de recetas propias)")
+                    n = db.query(Receta).filter(Receta.id.in_(recetas_ids)).delete(synchronize_session=False)
+                    print(f"   ✓ {n} recetas")
+
+                # 3. DetalleOrdenProduccion (FK RESTRICT producto_id)
+                from database.models import OrdenProduccion, DetalleOrdenProduccion
+                ordenes_ids = [o.id for o in db.query(OrdenProduccion).filter(OrdenProduccion.local_id.in_(locales_ids)).all()] if locales_ids else []
+                n = db.query(DetalleOrdenProduccion).filter(
+                    DetalleOrdenProduccion.producto_id.in_(productos_ids)
+                ).delete(synchronize_session=False)
+                if n:
+                    print(f"   ✓ {n} detalles de orden de producción")
+                if ordenes_ids:
+                    n = db.query(OrdenProduccion).filter(OrdenProduccion.id.in_(ordenes_ids)).delete(synchronize_session=False)
+                    if n:
+                        print(f"   ✓ {n} órdenes de producción")
+
+                # 4. ItemSolicitudTransferencia (FK RESTRICT producto_id) — por si acaso
+                from database.models import ItemSolicitudTransferencia
+                n = db.query(ItemSolicitudTransferencia).filter(
+                    ItemSolicitudTransferencia.producto_id.in_(productos_ids)
+                ).delete(synchronize_session=False)
+                if n:
+                    print(f"   ✓ {n} items de solicitud de transferencia")
+
+                # 5. MovimientoStockCajas residuales (FK RESTRICT producto_id)
+                n = db.query(MovimientoStockCajas).filter(
+                    MovimientoStockCajas.producto_id.in_(productos_ids)
+                ).delete(synchronize_session=False)
+                if n:
+                    print(f"   ✓ {n} movimientos stock cajas residuales")
+
+            n = db.query(Producto).filter(Producto.tenant_id == tenant.id).delete(synchronize_session=False)
+            print(f"   ✓ {n} productos")
+        else:
+            print(f"   ⏭ Productos CONSERVADOS")
+
         db.commit()
         print(f"\n✅ Reset completo del tenant [{tenant.id}] {tenant.nombre}")
 
         # Verificación
-        restantes_pedidos = db.query(Pedido).join(Cliente).filter(Cliente.tenant_id == tenant.id).count()
+        restantes_pedidos = db.query(Pedido).join(Cliente).filter(Cliente.tenant_id == tenant.id).count() if conservar_clientes else 0
         restantes_productos = db.query(Producto).filter(Producto.tenant_id == tenant.id).count()
         restantes_clientes = db.query(Cliente).filter(Cliente.tenant_id == tenant.id).count()
         print(f"   Pedidos restantes:   {restantes_pedidos}")
-        print(f"   Productos:           {restantes_productos} (conservados)")
+        print(f"   Productos:           {restantes_productos}{'  (conservados)' if conservar_productos else ''}")
         print(f"   Clientes restantes:  {restantes_clientes}")
 
     except Exception as e:
@@ -323,7 +387,13 @@ if __name__ == "__main__":
         print("   Clientes: CONSERVADOS (comportamiento por defecto)")
     else:
         print("   Clientes y puntos de fidelización (--eliminar-clientes activo)")
-    print("\n✅ Se CONSERVAN: Productos, Locales, Proveedores, Usuarios, Roles")
+    if CONSERVAR_PRODUCTOS:
+        print("   Productos: CONSERVADOS (comportamiento por defecto)")
+    else:
+        print("   Productos (--eliminar-productos activo)")
+    print("\n✅ Se CONSERVAN: Locales, Proveedores, Usuarios, Roles")
+    if CONSERVAR_PRODUCTOS:
+        print("✅ Se CONSERVAN también: Productos")
     print("\n⚠️  La operación es IRREVERSIBLE\n")
 
     if not AUTO_CONFIRM:

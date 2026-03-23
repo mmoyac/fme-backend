@@ -19,6 +19,7 @@ Flags:
     --limpiar      Limpiar datos antes de importar (se pregunta si se omite)
     --solo-limpiar Solo limpiar, no importar
     --eliminar-clientes   Con --limpiar: también elimina clientes y puntos (por defecto se conservan)
+    --eliminar-productos  Con --limpiar: también elimina productos (por defecto se conservan)
     --si           Confirma todas las preguntas automáticamente
 
 Nota: si --user/--password no se proveen, se usan los defaults del entorno.
@@ -69,6 +70,7 @@ parser.add_argument("--password", type=str, default=None, help="Contraseña del 
 parser.add_argument("--limpiar",       action="store_true", help="Limpiar antes de importar")
 parser.add_argument("--solo-limpiar",  action="store_true", help="Solo limpiar, no importar")
 parser.add_argument("--eliminar-clientes", action="store_true", help="Con --limpiar: eliminar también clientes y puntos")
+parser.add_argument("--eliminar-productos", action="store_true", help="Con --limpiar: eliminar también productos (por defecto se conservan)")
 parser.add_argument("--si", action="store_true", help="Auto-confirmar todo")
 args = parser.parse_args()
 
@@ -207,6 +209,8 @@ if HACER_LIMPIEZA:
     delete_cmd = ["python", "eliminar_datos_tenant.py", f"--tenant-id={TENANT_ID}", "--si"]
     if args.eliminar_clientes:
         delete_cmd.append("--eliminar-clientes")
+    if args.eliminar_productos:
+        delete_cmd.append("--eliminar-productos")
 
     if ENV["docker_compose"]:
         cmd = ["docker", "compose", "exec", "backend"] + delete_cmd
@@ -231,11 +235,25 @@ if args.solo_limpiar:
 # ═══════════════════════════════════════════════════════════════════════════════
 # PASO 4 — Determinar Google Sheet ID
 # ═══════════════════════════════════════════════════════════════════════════════
+def extraer_sheet_id(raw: str) -> str:
+    """Extrae solo el ID base de una URL completa de Google Sheets o de un ID puro."""
+    import re as _re
+    raw = raw.strip()
+    # Caso: URL completa tipo https://docs.google.com/spreadsheets/d/{ID}/edit...
+    m = _re.search(r"spreadsheets/d/([a-zA-Z0-9_-]+)", raw)
+    if m:
+        return m.group(1)
+    # Caso: ID seguido de /edit?... o /edit#...
+    m = _re.match(r"([a-zA-Z0-9_-]+)(?:[/?#].*)?$", raw)
+    if m:
+        return m.group(1)
+    return raw
+
 if args.sheet:
-    SHEET_ID = args.sheet.strip()
+    SHEET_ID = extraer_sheet_id(args.sheet)
     print(f"\n📄 Sheet ID: {SHEET_ID}  (vía argumento)")
 elif TENANT.get("google_sheet_id"):
-    SHEET_ID = TENANT["google_sheet_id"]
+    SHEET_ID = extraer_sheet_id(TENANT["google_sheet_id"])
     print(f"\n📄 Sheet ID: {SHEET_ID}  (desde BD)")
 else:
     print(f"\n⚠️  El tenant '{TENANT['nombre']}' no tiene Sheet ID en la BD.")
@@ -503,6 +521,10 @@ for prod in productos_data:
         "tipo_producto_id":  int(prod["tipo_producto_id"].strip()) if prod.get("tipo_producto_id", "").strip() else 1,
         "unidad_medida_id":  int(prod["unidad_medida_id"].strip()) if prod.get("unidad_medida_id", "").strip() else 1,
         "codigo_barra":      prod.get("codigo_barra", "").strip() or None,
+        "stock_minimo":      int(prod.get("stock_minimo", "0").strip() or "0"),
+        "stock_critico":     int(prod.get("stock_critico", "0").strip() or "0"),
+        "es_vendible":       prod.get("es_vendible", "true").strip().lower() not in ("false", "0", "no"),
+        "peso_bruto":        float(prod.get("peso_bruto", "").strip()) if prod.get("peso_bruto", "").strip() else None,
     }
     # Solo incluir categoria_id si fue resuelto (evita NOT NULL violation)
     if categoria_id:
@@ -546,6 +568,7 @@ print(f"\n   ➕ {len(resultados['creados'])} creados  🔄 {len(resultados['act
 # PASO 8 — Importar precios
 # ═══════════════════════════════════════════════════════════════════════════════
 res_precios = {"exitosos": [], "fallidos": []}
+skus_faltantes_precios = set()  # SKUs en sheet de precios pero ausentes en productos
 
 if precios_data and productos_creados:
     print(f"\n{SEP}")
@@ -565,9 +588,9 @@ if precios_data and productos_creados:
         pid      = productos_creados.get(sku)
         local_id = locales_map.get(codigo_local)
         if not pid:
-            err = f"SKU '{sku}' no importado"
+            err = f"SKU '{sku}' no en sheet de productos"
             res_precios["fallidos"].append({"sku": sku, "local": codigo_local, "error": err})
-            print(f"    ❌ {err}")
+            skus_faltantes_precios.add(sku)
             continue
         if not local_id:
             print(f"    ⚠️  Local '{codigo_local}' no existe, creando...")
@@ -604,6 +627,8 @@ if precios_data and productos_creados:
             print(f"    ❌ {e}")
 
     print(f"\n   ✅ {len(res_precios['exitosos'])} precios  ❌ {len(res_precios['fallidos'])} fallidos")
+    if skus_faltantes_precios:
+        print(f"   ⚠️  SKUs referenciados en precios pero ausentes en sheet de productos: {', '.join(sorted(skus_faltantes_precios))}")
 else:
     print("\n⚠️  Precios: saltados (sin datos o sin productos importados)")
 
@@ -611,6 +636,7 @@ else:
 # PASO 9 — Importar inventario
 # ═══════════════════════════════════════════════════════════════════════════════
 res_inventario = {"exitosos": [], "fallidos": []}
+skus_faltantes_inventario = set()  # SKUs en sheet de inventario pero ausentes en productos
 
 if inventario_data and productos_creados:
     print(f"\n{SEP}")
@@ -627,9 +653,9 @@ if inventario_data and productos_creados:
         pid      = productos_creados.get(sku)
         local_id = locales_map.get(codigo_local)
         if not pid:
-            err = f"SKU '{sku}' no importado"
+            err = f"SKU '{sku}' no en sheet de productos"
             res_inventario["fallidos"].append({"sku": sku, "local": codigo_local, "error": err})
-            print(f"    ❌ {err}")
+            skus_faltantes_inventario.add(sku)
             continue
         if not local_id:
             local_id = locales_map.get(codigo_local)  # puede haber sido creado en paso precios
@@ -660,6 +686,8 @@ if inventario_data and productos_creados:
             print(f"    ❌ {e}")
 
     print(f"\n   ✅ {len(res_inventario['exitosos'])} inventarios  ❌ {len(res_inventario['fallidos'])} fallidos")
+    if skus_faltantes_inventario:
+        print(f"   ⚠️  SKUs referenciados en inventario pero ausentes en sheet de productos: {', '.join(sorted(skus_faltantes_inventario))}")
 else:
     print("\n⚠️  Inventario: saltado (sin datos o sin productos importados)")
 
@@ -992,6 +1020,18 @@ if resultados["fallidos"]:
     print("\n   ❌ Fallidos:")
     for p in resultados["fallidos"]:
         print(f"      • {p['sku']:<15} — {p['error']}")
+
+skus_huerfanos = skus_faltantes_precios | skus_faltantes_inventario
+if skus_huerfanos:
+    print(f"\n   ⚠️  SKUs huérfanos (en precios/inventario pero NO en sheet 'productos'):")
+    for sku in sorted(skus_huerfanos):
+        en = []
+        if sku in skus_faltantes_precios:
+            en.append("precios")
+        if sku in skus_faltantes_inventario:
+            en.append("inventario")
+        print(f"      • {sku:<15} — referenciado en: {', '.join(en)}")
+    print(f"\n      👉 Agregar estos SKUs a la hoja 'productos' del Google Sheet y re-sincronizar.")
 
 print(f"\n{SEP}")
 print("🎯 SINCRONIZACIÓN COMPLETADA")

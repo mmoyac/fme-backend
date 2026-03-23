@@ -211,6 +211,7 @@ class MedioPagoBase(BaseModel):
     descripcion: Optional[str] = None
     permite_cheque: bool = Field(default=False, description="Si permite ingresar datos de cheque")
     es_contado: bool = Field(default=False, description="Si este medio es al contado (aplica descuento contado en preventas)")
+    plazo_dias: int = Field(default=0, description="Días de plazo de pago (0 = contado, >0 = crédito diferido)")
     activo: bool = True
 
 
@@ -224,6 +225,7 @@ class MedioPagoUpdate(BaseModel):
     descripcion: Optional[str] = None
     permite_cheque: Optional[bool] = None
     es_contado: Optional[bool] = None
+    plazo_dias: Optional[int] = None
     activo: Optional[bool] = None
 
 

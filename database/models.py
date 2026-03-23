@@ -87,6 +87,7 @@ class Tenant(Base):
         passive_deletes=True
     )
     proveedores = relationship("Proveedor", back_populates="tenant", passive_deletes=True)
+    cobros_pendientes = relationship("CobroPendiente", back_populates="tenant", passive_deletes=True)
 
 
 class ConfiguracionLanding(Base):
@@ -129,7 +130,9 @@ class ConfiguracionLanding(Base):
     direccion = Column(Text, nullable=True)
     texto_footer_descripcion = Column(Text, nullable=True)
     texto_copyright = Column(String(200), nullable=True)
-    
+    razon_social = Column(String(200), nullable=True)
+    resolucion_sanitaria = Column(String(200), nullable=True)
+
     # SEO Metadata
     meta_title = Column(String(100), nullable=True)
     meta_description = Column(Text, nullable=True)
@@ -334,6 +337,7 @@ class MedioPago(Base):
     descripcion = Column(String)
     permite_cheque = Column(Boolean, default=False)  # Si permite ingresar datos de cheque
     es_contado = Column(Boolean, default=False, nullable=False, server_default='false')  # Si aplica descuento contado
+    plazo_dias = Column(Integer, default=0, nullable=False, server_default='0')  # Días de plazo de pago (0 = contado, >0 = crédito diferido)
     activo = Column(Boolean, default=True)
 
     # Relaciones
@@ -496,13 +500,29 @@ class InformacionNutricional(Base):
     fibra_g = Column(Numeric(10, 2))  # Fibra dietÃƒÂ©tica en gramos
     sodio_mg = Column(Numeric(10, 2))  # Sodio en miligramos
     
+    # Grasas adicionales
+    grasas_monoinsaturadas_g = Column(Numeric(10, 2))
+    grasas_poliinsaturadas_g = Column(Numeric(10, 2))
+
     # Campos adicionales opcionales
     colesterol_mg = Column(Numeric(10, 2))  # Colesterol en miligramos
     calcio_mg = Column(Numeric(10, 2))  # Calcio en miligramos
     hierro_mg = Column(Numeric(10, 2))  # Hierro en miligramos
     vitamina_a_mcg = Column(Numeric(10, 2))  # Vitamina A en microgramos
     vitamina_c_mg = Column(Numeric(10, 2))  # Vitamina C en miligramos
-    
+
+    # Porción y envase
+    porciones_por_envase = Column(Integer, nullable=True)
+    porcion_peso_g = Column(Numeric(10, 2), nullable=True)  # Peso de la porción en gramos
+    contenido_neto = Column(String(50), nullable=True)  # Ej: "1.400g"
+
+    # Texto etiqueta
+    ingredientes = Column(Text, nullable=True)
+    alergenos = Column(Text, nullable=True)
+    modo_uso = Column(Text, nullable=True)
+    condiciones_almacenamiento = Column(Text, nullable=True)
+    plazo_duracion = Column(Text, nullable=True)
+
     # Metadata
     fecha_actualizacion = Column(DateTime, default=func.now(), onupdate=func.now())
     
@@ -892,6 +912,7 @@ class Pedido(Base):
     canal_venta = relationship("CanalVenta", back_populates="pedidos")
     items = relationship("ItemPedido", back_populates="pedido", cascade="all, delete-orphan")
     cheques = relationship("Cheque", back_populates="pedido", cascade="all, delete-orphan")
+    cobros_pendientes = relationship("CobroPendiente", back_populates="pedido", cascade="all, delete-orphan")
     operacion_caja = relationship("OperacionCaja", back_populates="pedido", uselist=False)
     comision = relationship("Comision", back_populates="pedido", uselist=False, cascade="all, delete-orphan")
     despacho = relationship("Despacho", back_populates="pedido", uselist=False)
@@ -928,6 +949,29 @@ class Cheque(Base):
     pedido = relationship("Pedido", back_populates="cheques")
     estado = relationship("EstadoCheque", back_populates="cheques")
     banco_rel = relationship("Banco", back_populates="cheques")
+
+class CobroPendiente(Base):
+    """Cobros pendientes para medios de pago diferidos no-cheque (ej: transferencia 30 días)."""
+    __tablename__ = "cobros_pendientes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    pedido_id = Column(Integer, ForeignKey("pedidos.id", ondelete="CASCADE"), nullable=False)
+
+    monto = Column(Numeric(10, 2), nullable=False)
+    fecha_vencimiento = Column(DateTime(timezone=True), nullable=False)  # fecha_pedido + plazo_dias
+
+    # Estado: PENDIENTE | RECIBIDO | VENCIDO | ANULADO
+    estado = Column(String, default="PENDIENTE", nullable=False)
+
+    fecha_recepcion = Column(DateTime(timezone=True), nullable=True)  # Cuando llegó el pago
+    observaciones = Column(Text, nullable=True)
+    fecha_creacion = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relaciones
+    pedido = relationship("Pedido", back_populates="cobros_pendientes")
+    tenant = relationship("Tenant", back_populates="cobros_pendientes")
+
 
 class ItemPedido(Base):
     """Detalle de items en cada pedido."""

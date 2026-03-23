@@ -73,11 +73,13 @@ class ConfiguracionLandingBase(BaseModel):
     direccion: Optional[str] = None
     texto_footer_descripcion: Optional[str] = None
     texto_copyright: Optional[str] = Field(None, max_length=200)
-    
+    razon_social: Optional[str] = Field(None, max_length=200)
+    resolucion_sanitaria: Optional[str] = Field(None, max_length=200)
+
     # SEO Metadata
     meta_title: Optional[str] = Field(None, max_length=100)
     meta_description: Optional[str] = None
-    
+
     # Opciones de Visualización (Modo Catálogo)
     mostrar_precios: bool = Field(default=True, description="Si se muestran los precios en la landing")
     mostrar_stock: bool = Field(default=True, description="Si se muestra el stock disponible")
@@ -125,11 +127,13 @@ class ConfiguracionLandingUpdate(BaseModel):
     direccion: Optional[str] = None
     texto_footer_descripcion: Optional[str] = None
     texto_copyright: Optional[str] = Field(None, max_length=200)
-    
+    razon_social: Optional[str] = Field(None, max_length=200)
+    resolucion_sanitaria: Optional[str] = Field(None, max_length=200)
+
     # SEO Metadata
     meta_title: Optional[str] = Field(None, max_length=100)
     meta_description: Optional[str] = None
-    
+
     # Opciones de Visualización (Modo Catálogo)
     mostrar_precios: Optional[bool] = None
     mostrar_stock: Optional[bool] = None

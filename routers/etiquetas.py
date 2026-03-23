@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from database.database import get_db
-from database.models import SelloAdvertencia, InformacionNutricional, Producto, ProductoSello
+from database.models import SelloAdvertencia, InformacionNutricional, Producto, ProductoSello, ConfiguracionLanding
 from schemas.etiquetas import (
     SelloAdvertenciaResponse,
     InformacionNutricionalCreate,
@@ -240,12 +240,22 @@ def obtener_etiqueta_completa(
         for ps in producto_sellos
     ]
     sellos = [s for s in sellos if s]  # Filtrar None
-    
+
+    # Obtener info empresa del tenant
+    config_landing = db.query(ConfiguracionLanding).filter(
+        ConfiguracionLanding.tenant_id == producto.tenant_id
+    ).first()
+
     return {
         "producto_id": producto.id,
         "producto_nombre": producto.nombre,
         "producto_sku": producto.sku,
         "codigo_barra": producto.codigo_barra,
         "informacion_nutricional": info_nutricional,
-        "sellos": sellos
+        "sellos": sellos,
+        "empresa_razon_social": config_landing.razon_social if config_landing else None,
+        "empresa_direccion": config_landing.direccion if config_landing else None,
+        "empresa_resolucion_sanitaria": config_landing.resolucion_sanitaria if config_landing else None,
+        "empresa_email": config_landing.email if config_landing else None,
+        "empresa_telefono": config_landing.telefono if config_landing else None,
     }

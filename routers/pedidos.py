@@ -10,7 +10,7 @@ import io
 from decimal import Decimal
 
 from database.database import get_db
-from database.models import Pedido, ItemPedido, Cliente, Producto, Local, Inventario, MovimientoInventario, TurnoCaja, OperacionCaja, TipoOperacionCaja, EstadoTurnoCaja, TipoPedido, StockCajasProveedor, MedioPago
+from database.models import Pedido, ItemPedido, Cliente, Producto, Local, Inventario, MovimientoInventario, TurnoCaja, OperacionCaja, TipoOperacionCaja, EstadoTurnoCaja, TipoPedido, StockCajasProveedor, MedioPago, CobroPendiente
 from schemas.pedido import (
     PedidoCreateFrontend,
     PedidoCreateBackoffice,
@@ -885,8 +885,9 @@ def crear_pedido_backoffice(
         if monto_total < 0:
             monto_total = 0
     
-    # 4.5. Validar crédito si el medio de pago permite cheques
-    if medio_pago.permite_cheque:
+    # 4.5. Validar crédito si el medio de pago es diferido (cheque o plazo_dias > 0)
+    es_pago_diferido = medio_pago.permite_cheque or (medio_pago.plazo_dias or 0) > 0
+    if es_pago_diferido:
         es_valido, mensaje = CreditoService.validar_credito_disponible(
             cliente.id, monto_total, db
         )
@@ -1141,25 +1142,44 @@ def crear_pedido_backoffice(
             estado_final_id = estado_entregado.id
         
         # Marcar como pagado según medio de pago
+        _es_diferido = medio_pago.permite_cheque or (medio_pago.plazo_dias or 0) > 0
         if requiere_delivery:
             db_pedido.es_pagado = False
             mensaje_final = f"Pedido creado y confirmado. Pendiente de delivery."
-        elif medio_pago.permite_cheque:
+        elif _es_diferido:
             db_pedido.es_pagado = False
-            mensaje_final = f"Pedido creado y entregado. Pendiente de pago con cheque."
+            if medio_pago.permite_cheque:
+                mensaje_final = f"Pedido creado y entregado. Pendiente de pago con cheque."
+            else:
+                mensaje_final = f"Pedido creado y entregado. Pago diferido a {medio_pago.plazo_dias} días con {medio_pago.nombre}."
         else:
             db_pedido.es_pagado = True
             mensaje_final = f"Pedido creado, entregado y pagado con {medio_pago.nombre}"
-    
+
     # NOTA: Para pedidos WEB o CAJAS_VARIABLES, quedan en PENDIENTE
     # Los puntos NO se usan aquí, solo cuando se confirma manualmente
-    
+
     db.commit()
     db.refresh(db_pedido)
-    
-    # 7.5. Ocupar crédito si el medio de pago permite cheques
-    if medio_pago.permite_cheque:
+
+    # 7.5. Ocupar crédito y crear registro de cobro si el pago es diferido
+    _es_diferido_post = medio_pago.permite_cheque or (medio_pago.plazo_dias or 0) > 0
+    if _es_diferido_post:
         CreditoService.ocupar_credito(cliente.id, monto_total, db)
+        # Para pagos diferidos no-cheque, crear CobroPendiente
+        if not medio_pago.permite_cheque and (medio_pago.plazo_dias or 0) > 0:
+            from datetime import timedelta, timezone as tz
+            fecha_venc = db_pedido.fecha_pedido + timedelta(days=medio_pago.plazo_dias)
+            monto_cobro = monto_total + float(db_pedido.costo_delivery or 0)
+            cobro = CobroPendiente(
+                tenant_id=db_pedido.tenant_id,
+                pedido_id=db_pedido.id,
+                monto=monto_cobro,
+                fecha_vencimiento=fecha_venc,
+                estado="PENDIENTE",
+            )
+            db.add(cobro)
+            db.commit()
     
     # 8. Retornar respuesta
     return {
@@ -1597,8 +1617,9 @@ def actualizar_pedido(
                 
                 # Marcar como pagado automáticamente según medio de pago
                 if pedido.medio_pago:
-                    if pedido.medio_pago.permite_cheque:
-                        # Si es cheque, NO marcar como pagado (se paga después al cobrar)
+                    _diferido = pedido.medio_pago.permite_cheque or (pedido.medio_pago.plazo_dias or 0) > 0
+                    if _diferido:
+                        # Pago diferido (cheque o transferencia a plazo): queda impago
                         pedido.es_pagado = False
                     else:
                         # Para efectivo, tarjeta, etc: marcar como pagado
@@ -1624,6 +1645,16 @@ def actualizar_pedido(
             
             # Devolver inventario si había sido descontado
             devolver_inventario(pedido, db)
+
+            # Liberar crédito si el pago era diferido y el pedido no estaba pagado
+            if pedido.medio_pago and not pedido.es_pagado:
+                _era_diferido = pedido.medio_pago.permite_cheque or (pedido.medio_pago.plazo_dias or 0) > 0
+                if _era_diferido:
+                    CreditoService.liberar_credito(pedido.cliente_id, float(pedido.monto_total), db)
+                    # Anular cobros pendientes asociados
+                    for cobro in pedido.cobros_pendientes:
+                        if cobro.estado in ("PENDIENTE", "VENCIDO"):
+                            cobro.estado = "ANULADO"
             
             # Devolver puntos ganados si habían sido otorgados y el pedido estaba confirmado/entregado
             # Estados que implican confirmación: CONFIRMADO, EN_PREPARACION, ENTREGADO
@@ -1976,14 +2007,17 @@ def registrar_pago(
         raise HTTPException(status_code=404, detail=f"Medio de pago {medio_pago_id} no encontrado")
 
     # --- Lógica de crédito ---
-    # Si el pedido ya tenía un medio de pago cheque anterior, liberar ese crédito primero
-    medio_pago_anterior = None
+    nuevo_es_diferido = medio_pago.permite_cheque or (medio_pago.plazo_dias or 0) > 0
+
+    # Si el pedido ya tenía un medio de pago diferido anterior, liberar ese crédito primero
     if pedido.medio_pago_id and pedido.medio_pago_id != medio_pago.id:
         medio_pago_anterior = db.query(MedioPago).filter(MedioPago.id == pedido.medio_pago_id).first()
-        if medio_pago_anterior and medio_pago_anterior.permite_cheque:
-            CreditoService.liberar_credito(pedido.cliente_id, float(pedido.monto_total), db)
+        if medio_pago_anterior:
+            anterior_era_diferido = medio_pago_anterior.permite_cheque or (medio_pago_anterior.plazo_dias or 0) > 0
+            if anterior_era_diferido:
+                CreditoService.liberar_credito(pedido.cliente_id, float(pedido.monto_total), db)
 
-    if medio_pago.permite_cheque:
+    if nuevo_es_diferido:
         # Validar que el cliente tiene crédito disponible
         cliente = db.query(Cliente).filter(Cliente.id == pedido.cliente_id).first()
         if not cliente:
@@ -1993,7 +2027,7 @@ def registrar_pago(
             raise HTTPException(
                 status_code=400,
                 detail=f"El cliente '{cliente.nombre}' no tiene línea de crédito configurada. "
-                       "Para pagar con cheque se requiere un límite de crédito asignado."
+                       "Para pago a plazo se requiere un límite de crédito asignado."
             )
 
         es_valido, mensaje_credito = CreditoService.validar_credito_disponible(
@@ -2002,7 +2036,7 @@ def registrar_pago(
         if not es_valido:
             raise HTTPException(
                 status_code=400,
-                detail=f"Pago con cheque rechazado: {mensaje_credito}"
+                detail=f"Pago diferido rechazado: {mensaje_credito}"
             )
 
         # Ocupar crédito
@@ -2010,10 +2044,29 @@ def registrar_pago(
 
         pedido.medio_pago_id = medio_pago.id
         pedido.es_pagado = False
-        mensaje = f"Medio de pago registrado como Cheque. Pago pendiente de acreditación."
+
+        # Si es diferido no-cheque, crear CobroPendiente
+        if not medio_pago.permite_cheque and (medio_pago.plazo_dias or 0) > 0:
+            from datetime import timedelta, timezone as tz
+            from datetime import datetime as dt
+            fecha_venc = dt.now(tz.utc) + timedelta(days=medio_pago.plazo_dias)
+            monto_cobro = float(pedido.monto_total) + float(pedido.costo_delivery or 0)
+            cobro = CobroPendiente(
+                tenant_id=pedido.tenant_id,
+                pedido_id=pedido.id,
+                monto=monto_cobro,
+                fecha_vencimiento=fecha_venc,
+                estado="PENDIENTE",
+            )
+            db.add(cobro)
+
+        if medio_pago.permite_cheque:
+            mensaje = f"Medio de pago registrado como Cheque. Pago pendiente de acreditación."
+        else:
+            mensaje = f"Pago diferido registrado con {medio_pago.nombre}. Vence en {medio_pago.plazo_dias} días."
     else:
         pedido.medio_pago_id = medio_pago.id
-        # Efectivo, transferencia, tarjeta, etc.: pago inmediato
+        # Efectivo, transferencia contado, tarjeta, etc.: pago inmediato
         pedido.es_pagado = True
         mensaje = f"Pago registrado con {medio_pago.nombre}."
 

@@ -43,6 +43,8 @@ class InformacionNutricionalBase(BaseModel):
     azucares_g: Optional[Decimal] = Field(None, ge=0)
     grasas_totales_g: Optional[Decimal] = Field(None, ge=0)
     grasas_saturadas_g: Optional[Decimal] = Field(None, ge=0)
+    grasas_monoinsaturadas_g: Optional[Decimal] = Field(None, ge=0)
+    grasas_poliinsaturadas_g: Optional[Decimal] = Field(None, ge=0)
     grasas_trans_g: Optional[Decimal] = Field(None, ge=0)
     fibra_g: Optional[Decimal] = Field(None, ge=0)
     sodio_mg: Optional[Decimal] = Field(None, ge=0)
@@ -51,6 +53,14 @@ class InformacionNutricionalBase(BaseModel):
     hierro_mg: Optional[Decimal] = Field(None, ge=0)
     vitamina_a_mcg: Optional[Decimal] = Field(None, ge=0)
     vitamina_c_mg: Optional[Decimal] = Field(None, ge=0)
+    porciones_por_envase: Optional[int] = Field(None, ge=1)
+    porcion_peso_g: Optional[Decimal] = Field(None, ge=0)
+    contenido_neto: Optional[str] = Field(None, max_length=50)
+    ingredientes: Optional[str] = None
+    alergenos: Optional[str] = None
+    modo_uso: Optional[str] = None
+    condiciones_almacenamiento: Optional[str] = None
+    plazo_duracion: Optional[str] = None
 
 
 class InformacionNutricionalCreate(InformacionNutricionalBase):
@@ -67,6 +77,8 @@ class InformacionNutricionalUpdate(BaseModel):
     azucares_g: Optional[Decimal] = Field(None, ge=0)
     grasas_totales_g: Optional[Decimal] = Field(None, ge=0)
     grasas_saturadas_g: Optional[Decimal] = Field(None, ge=0)
+    grasas_monoinsaturadas_g: Optional[Decimal] = Field(None, ge=0)
+    grasas_poliinsaturadas_g: Optional[Decimal] = Field(None, ge=0)
     grasas_trans_g: Optional[Decimal] = Field(None, ge=0)
     fibra_g: Optional[Decimal] = Field(None, ge=0)
     sodio_mg: Optional[Decimal] = Field(None, ge=0)
@@ -75,6 +87,14 @@ class InformacionNutricionalUpdate(BaseModel):
     hierro_mg: Optional[Decimal] = Field(None, ge=0)
     vitamina_a_mcg: Optional[Decimal] = Field(None, ge=0)
     vitamina_c_mg: Optional[Decimal] = Field(None, ge=0)
+    porciones_por_envase: Optional[int] = Field(None, ge=1)
+    porcion_peso_g: Optional[Decimal] = Field(None, ge=0)
+    contenido_neto: Optional[str] = Field(None, max_length=50)
+    ingredientes: Optional[str] = None
+    alergenos: Optional[str] = None
+    modo_uso: Optional[str] = None
+    condiciones_almacenamiento: Optional[str] = None
+    plazo_duracion: Optional[str] = None
 
 
 class InformacionNutricionalResponse(InformacionNutricionalBase):
@@ -97,12 +117,19 @@ class EtiquetaProductoResponse(BaseModel):
     producto_nombre: str
     producto_sku: str
     codigo_barra: Optional[str] = None
-    
+
     # Información nutricional (puede ser None si no está configurada)
     informacion_nutricional: Optional[InformacionNutricionalResponse] = None
-    
+
     # Sellos de advertencia asociados
     sellos: List[SelloAdvertenciaResponse] = []
+
+    # Info empresa (del tenant)
+    empresa_razon_social: Optional[str] = None
+    empresa_direccion: Optional[str] = None
+    empresa_resolucion_sanitaria: Optional[str] = None
+    empresa_email: Optional[str] = None
+    empresa_telefono: Optional[str] = None
 
     class Config:
         from_attributes = True

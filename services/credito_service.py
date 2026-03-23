@@ -110,20 +110,28 @@ class CreditoService:
         if not estado_cobrado:
             return 0.0
         
-        # Obtener pedidos con cheques no completamente cobrados
+        # Obtener pedidos diferidos no cobrados (cheque o plazo_dias > 0)
         pedidos_pendientes = db.query(Pedido).filter(
             Pedido.cliente_id == cliente_id,
-            Pedido.medio_pago.has(permite_cheque=True),
             Pedido.es_pagado == False
         ).all()
-        
+
         credito_usado_calculado = 0.0
         for pedido in pedidos_pendientes:
-            # Solo contar pedidos que tienen cheques sin cobrar completamente
-            if pedido.cheques:
-                cheques_cobrados = sum(1 for c in pedido.cheques if c.estado_id == estado_cobrado.id)
-                if cheques_cobrados < len(pedido.cheques):
-                    credito_usado_calculado += float(pedido.monto_total)
+            if not pedido.medio_pago:
+                continue
+            es_diferido = pedido.medio_pago.permite_cheque or (pedido.medio_pago.plazo_dias or 0) > 0
+            if not es_diferido:
+                continue
+            # Para cheques: solo contar si tienen cheques sin cobrar
+            if pedido.medio_pago.permite_cheque:
+                if pedido.cheques:
+                    cheques_cobrados = sum(1 for c in pedido.cheques if c.estado_id == estado_cobrado.id)
+                    if cheques_cobrados < len(pedido.cheques):
+                        credito_usado_calculado += float(pedido.monto_total)
+            else:
+                # Transferencias diferidas: contar directamente
+                credito_usado_calculado += float(pedido.monto_total)
         
         # Actualizar en base de datos
         cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
