@@ -1821,3 +1821,27 @@ class NotaCredito(Base):
     pedido = relationship("Pedido", back_populates="notas_credito")
     tipo_documento = relationship("TipoDocumento", back_populates="notas_credito")
     devolucion = relationship("Devolucion", back_populates="nota_credito", uselist=False)
+
+
+# --------------------------------------------------
+# NOTIFICACIONES
+# --------------------------------------------------
+
+class Notification(Base):
+    """Notificaciones internas del sistema."""
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)  # NULL = broadcast al tenant
+    type = Column(String(50), nullable=False)          # 'solicitud_creada', 'pedido_pagado', etc.
+    title = Column(String(255), nullable=False)
+    body = Column(Text, nullable=True)
+    payload = Column(JSON, nullable=True)              # datos extra: {solicitud_id: 5, local: "..."}
+    action_url = Column(String(500), nullable=True)    # link directo al recurso
+    read_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Relaciones
+    tenant = relationship("Tenant")
+    user = relationship("User")

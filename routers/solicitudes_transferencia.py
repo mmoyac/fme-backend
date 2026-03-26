@@ -7,7 +7,8 @@ from routers.auth import get_current_active_user
 from sqlalchemy.orm import Session
 from typing import List
 from database.database import get_db
-from database.models import SolicitudTransferencia, ItemSolicitudTransferencia, MovimientoInventario, Inventario, EstadoEnrolamiento
+from database.models import SolicitudTransferencia, ItemSolicitudTransferencia, MovimientoInventario, Inventario, EstadoEnrolamiento, Local
+from services import notification_service
 from services.tenant_service import get_tenant_from_request
 from schemas.solicitud_transferencia import (
     SolicitudTransferenciaCreate,
@@ -42,6 +43,19 @@ def crear_solicitud_transferencia(data: SolicitudTransferenciaCreate, db: Sessio
         items.append(item_obj)
     db.commit()
     db.refresh(solicitud)
+
+    # Notificar a admins del local origen y superadmins
+    local_origen = db.query(Local).filter(Local.id == data.local_origen_id).first()
+    solicitante = db.query(User).filter(User.id == data.usuario_solicitante_id).first()
+    notification_service.notify_solicitud_creada(
+        db=db,
+        tenant_id=data.tenant_id,
+        local_origen_id=data.local_origen_id,
+        local_origen_nombre=local_origen.nombre if local_origen else f"Local {data.local_origen_id}",
+        solicitud_id=solicitud.solicitud_id,
+        solicitante_nombre=solicitante.nombre_completo if solicitante else "Usuario",
+    )
+
     return SolicitudTransferenciaResponse(
         solicitud_id=solicitud.solicitud_id,
         tenant_id=solicitud.tenant_id,
@@ -201,6 +215,14 @@ def actualizar_solicitud_transferencia(
                 s.estado_id = codigos_map['EN_PROCESO']
                 db.commit()
                 db.refresh(s)
+                local_origen = db.query(Local).filter(Local.id == s.local_origen_id).first()
+                notification_service.notify_solicitud_en_proceso(
+                    db=db,
+                    tenant_id=s.tenant_id,
+                    local_destino_id=s.local_destino_id,
+                    solicitud_id=s.solicitud_id,
+                    local_origen_nombre=local_origen.nombre if local_origen else f"Local {s.local_origen_id}",
+                )
                 return obtener_solicitud_transferencia(solicitud_id, db)
             if data.nota is not None:
                 s.nota = data.nota
@@ -274,6 +296,14 @@ def actualizar_solicitud_transferencia(
                     item.movimiento_inventario_id = movimiento.id
             db.commit()
             db.refresh(s)
+            local_origen = db.query(Local).filter(Local.id == s.local_origen_id).first()
+            notification_service.notify_solicitud_finalizada(
+                db=db,
+                tenant_id=s.tenant_id,
+                local_destino_id=s.local_destino_id,
+                solicitud_id=s.solicitud_id,
+                local_origen_nombre=local_origen.nombre if local_origen else f"Local {s.local_origen_id}",
+            )
             return obtener_solicitud_transferencia(solicitud_id, db)
         if data.nota is not None:
             s.nota = data.nota

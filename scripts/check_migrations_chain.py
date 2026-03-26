@@ -12,8 +12,8 @@ MIGRATIONS_DIR = Path("migrations/versions")
 
 def get_staged_migration_files():
     result = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-        capture_output=True, text=True
+        ["git", "-c", "core.quotepath=false", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace"
     )
     return [
         Path(f) for f in result.stdout.splitlines()
@@ -26,11 +26,14 @@ def get_all_known_revisions():
 
     # Commiteadas
     result = subprocess.run(
-        ["git", "ls-files", str(MIGRATIONS_DIR)],
-        capture_output=True, text=True
+        ["git", "-c", "core.quotepath=false", "ls-files", str(MIGRATIONS_DIR)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace"
     )
     for filepath in result.stdout.splitlines():
-        content = Path(filepath).read_text(encoding="utf-8")
+        try:
+            content = Path(filepath).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
         match = re.search(r"^Revision ID:\s*(\w+)", content, re.MULTILINE)
         if match:
             revisions.add(match.group(1))
