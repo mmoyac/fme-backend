@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: check-alembic-chain
+        name: Verificar cadena de migraciones Alembic
+        entry: python scripts/check_migrations_chain.py
+        language: system
+        pass_filenames: false
+        always_run: true
