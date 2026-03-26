@@ -27,6 +27,8 @@ def _build_pedido_payload(pedido: Pedido, db: Session) -> dict:
     seguimiento_url = f"https://seguimiento.lexastech.cl/{pedido.token_seguimiento}" if pedido.token_seguimiento else None
     fecha_cl = pedido.fecha_pedido.astimezone(tz_cl).strftime("%d/%m/%Y %H:%M") if pedido.fecha_pedido else None
 
+    tenant_nombre = pedido.tenant.nombre if pedido.tenant else "Nuestra tienda"
+
     return {
         "pedido_id": pedido.id,
         "numero_pedido": pedido.numero_pedido,
@@ -35,6 +37,7 @@ def _build_pedido_payload(pedido: Pedido, db: Session) -> dict:
         "cliente_nombre": f"{cliente.nombre} {cliente.apellido or ''}".strip() if cliente else "Cliente",
         "cliente_email": cliente.email if cliente else None,
         "cliente_telefono": cliente.telefono if cliente else None,
+        "tenant_nombre": tenant_nombre,
         "unsub_url": unsub_url,
         "seguimiento_url": seguimiento_url,
         "items": [
