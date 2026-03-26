@@ -2321,6 +2321,59 @@ def seguimiento_pedido(token: str, db: Session = Depends(get_db)):
     """)
 
 
+@router.get("/seguimiento-data/{token}")
+def seguimiento_pedido_data(token: str, db: Session = Depends(get_db)):
+    """Endpoint público JSON para la página de seguimiento del frontend."""
+    from database.models import HojaRutaItem
+
+    pedido = db.query(Pedido).filter(Pedido.token_seguimiento == token).first()
+    if not pedido:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+
+    from zoneinfo import ZoneInfo
+    tz_cl = ZoneInfo("America/Santiago")
+    fecha_str = pedido.fecha_pedido.astimezone(tz_cl).strftime("%d/%m/%Y %H:%M") if pedido.fecha_pedido else "—"
+
+    estado_codigo = pedido.estado_pedido.codigo if pedido.estado_pedido else "PENDIENTE"
+    estado_nombre = pedido.estado_pedido.nombre if pedido.estado_pedido else "Pendiente"
+    color_estado = pedido.estado_pedido.color if pedido.estado_pedido else "#64748b"
+
+    hoja_item = db.query(HojaRutaItem).filter(HojaRutaItem.pedido_id == pedido.id).first()
+    tiene_delivery = hoja_item is not None or bool(pedido.costo_delivery and float(pedido.costo_delivery) > 0)
+
+    despacho = None
+    if tiene_delivery:
+        if hoja_item and hoja_item.entregado:
+            despacho = {"estado": "entregado", "label": "Entregado", "descripcion": "Tu pedido fue entregado."}
+        elif hoja_item and hoja_item.hoja_ruta and hoja_item.hoja_ruta.estado == "EN_RUTA":
+            despacho = {"estado": "en_ruta", "label": "En ruta", "descripcion": "Tu pedido está en camino hacia ti."}
+        elif hoja_item and hoja_item.hoja_ruta:
+            despacho = {"estado": "listo", "label": "Listo para despachar", "descripcion": "Tu pedido está listo y será despachado pronto."}
+        else:
+            despacho = {"estado": "pendiente", "label": "Pendiente de despacho", "descripcion": "Tu pedido será asignado a una ruta de despacho."}
+
+    return {
+        "numero_pedido": pedido.numero_pedido,
+        "fecha_pedido": fecha_str,
+        "cliente_nombre": pedido.cliente.nombre if pedido.cliente else "—",
+        "monto_total": float(pedido.monto_total or 0),
+        "estado_codigo": estado_codigo,
+        "estado_nombre": estado_nombre,
+        "color_estado": color_estado,
+        "tiene_delivery": tiene_delivery,
+        "despacho": despacho,
+        "items": [
+            {
+                "producto": item.producto.nombre if item.producto else f"Producto {item.producto_id}",
+                "cantidad": item.cantidad,
+                "precio_unitario": float(item.precio_unitario_venta or 0),
+                "subtotal": float((item.precio_unitario_venta or 0) * item.cantidad),
+            }
+            for item in (pedido.items or [])
+        ],
+    }
+
+
 @router.get("/estado/{pedido_id}")
 def estado_pedido_api(
     pedido_id: int,
@@ -2355,5 +2408,5 @@ def estado_pedido_api(
         "cliente_nombre": f"{pedido.cliente.nombre} {pedido.cliente.apellido or ''}".strip() if pedido.cliente else None,
         "cliente_email": pedido.cliente.email if pedido.cliente else None,
         "cliente_telefono": pedido.cliente.telefono if pedido.cliente else None,
-        "seguimiento_url": f"https://api.masasestacion.cl/api/pedidos/seguimiento/{pedido.token_seguimiento}" if pedido.token_seguimiento else None,
+        "seguimiento_url": f"https://seguimiento.lexastech.cl/{pedido.token_seguimiento}" if pedido.token_seguimiento else None,
     }

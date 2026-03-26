@@ -24,7 +24,7 @@ def _build_pedido_payload(pedido: Pedido, db: Session) -> dict:
     cliente = pedido.cliente
     token_unsub = notification_preferences_service.get_token(db, cliente.id, "email") if cliente else None
     unsub_url = f"{API_BASE_URL}/api/clientes/unsubscribe?token={token_unsub}" if token_unsub else None
-    seguimiento_url = f"{API_BASE_URL}/api/pedidos/seguimiento/{pedido.token_seguimiento}" if pedido.token_seguimiento else None
+    seguimiento_url = f"https://seguimiento.lexastech.cl/{pedido.token_seguimiento}" if pedido.token_seguimiento else None
     fecha_cl = pedido.fecha_pedido.astimezone(tz_cl).strftime("%d/%m/%Y %H:%M") if pedido.fecha_pedido else None
 
     return {
