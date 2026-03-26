@@ -2,7 +2,7 @@
 Router para endpoints de Pedidos.
 """
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, status, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
@@ -28,6 +28,8 @@ from services.puntos_service import PuntosService
 from services.comisiones_service import generar_comision
 from services.tenant_service import obtener_siguiente_numero_pedido, get_tenant_from_request
 from services.notas_credito_service import NotasCreditoService
+from services.webhook_service import trigger_pedido_confirmado
+import secrets as _secrets
 
 router = APIRouter()
 
@@ -726,6 +728,7 @@ def crear_pedido_frontend(
         monto_total=monto_total,
         estado_id=estado_pendiente.id,
         es_pagado=False,
+        token_seguimiento=_secrets.token_hex(32),
         notas=pedido_data.notas,
         puntos_usados=puntos_usar,
         descuento_puntos=descuento_puntos,
@@ -939,7 +942,8 @@ def crear_pedido_backoffice(
         usuario_id=current_user.id if not isinstance(current_user, ApiKeyUser) else None,
         monto_total=monto_total,
         estado_id=estado_pendiente.id,
-        es_pagado=False,
+        es_pagado=not es_pago_diferido,  # Auto-pago para medios no diferidos (efectivo, transferencia, tarjeta)
+        token_seguimiento=_secrets.token_hex(32),
         notas=pedido_data.notas,
         puntos_usados=puntos_usar,
         descuento_puntos=descuento_puntos,
@@ -1175,13 +1179,45 @@ def crear_pedido_backoffice(
             db_pedido.es_pagado = True
             mensaje_final = f"Pedido creado, entregado y pagado con {medio_pago.nombre}"
 
-    # NOTA: Para pedidos WEB o CAJAS_VARIABLES, quedan en PENDIENTE
-    # Los puntos NO se usan aquí, solo cuando se confirma manualmente
+    elif not es_pago_diferido and tipo_codigo == 'PRODUCTOS':
+        # 📞 PEDIDO BACKOFFICE PAGADO: Confirmar automáticamente y descontar stock
+        # Aplica a pedidos TELEFONO, WEB-pagado, etc. con medio de pago inmediato
+        estado_confirmado = db.query(EstadoPedidoModel).filter(EstadoPedidoModel.codigo == 'CONFIRMADO').first()
+        if estado_confirmado:
+            db_pedido.local_despacho_id = local.id
+            descontar_inventario(db_pedido, local.id, db)
+
+            # Usar puntos si aplica
+            if puntos_usar > 0:
+                from decimal import Decimal
+                exito, mensaje_puntos, _ = PuntosService.usar_puntos_en_pedido(
+                    db, cliente.id, db_pedido.id, puntos_usar, Decimal(str(descuento_puntos))
+                )
+                if not exito:
+                    db.rollback()
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Error al usar puntos: {mensaje_puntos}")
+
+            # Otorgar puntos ganados
+            if puntos_ganados > 0:
+                PuntosService.otorgar_puntos_por_pedido(
+                    db, cliente.id, db_pedido.id, puntos_ganados,
+                    f"Puntos ganados por pedido {db_pedido.numero_pedido}"
+                )
+
+            db_pedido.estado_id = estado_confirmado.id
+            estado_final_id = estado_confirmado.id
+            mensaje_final = f"Pedido confirmado y pagado con {medio_pago.nombre}"
+
+    # NOTA: CAJAS_VARIABLES y pagos diferidos quedan en PENDIENTE hasta confirmación manual
 
     db.commit()
     db.refresh(db_pedido)
 
-    # 7.5. Ocupar crédito y crear registro de cobro si el pago es diferido
+    # 7.5. Disparar webhook de confirmación si el pedido quedó pagado
+    if db_pedido.es_pagado:
+        trigger_pedido_confirmado(db_pedido, db)
+
+    # 7.6. Ocupar crédito y crear registro de cobro si el pago es diferido
     _es_diferido_post = medio_pago.permite_cheque or (medio_pago.plazo_dias or 0) > 0
     if _es_diferido_post:
         CreditoService.ocupar_credito(cliente.id, monto_total, db)
@@ -2161,5 +2197,163 @@ def eliminar_pedido(
     # Eliminar el pedido
     db.delete(pedido)
     db.commit()
-    
+
     return None
+
+
+# ---------------------------------------------------------------------------
+# Endpoints públicos de seguimiento de pedido
+# ---------------------------------------------------------------------------
+
+@router.get("/seguimiento/{token}")
+def seguimiento_pedido(token: str, db: Session = Depends(get_db)):
+    """
+    Endpoint público para que el cliente consulte el estado de su pedido.
+    No requiere autenticación — el token identifica al pedido.
+    """
+    from fastapi.responses import HTMLResponse
+    from database.models import HojaRutaItem
+
+    pedido = db.query(Pedido).filter(Pedido.token_seguimiento == token).first()
+    if not pedido:
+        return HTMLResponse(content="""
+        <html><body style="font-family:Arial;text-align:center;padding:40px">
+            <h2>❌ Link inválido</h2>
+            <p>Este enlace no es válido o ha expirado.</p>
+        </body></html>
+        """, status_code=404)
+
+    from zoneinfo import ZoneInfo
+    tz_cl = ZoneInfo("America/Santiago")
+    fecha_str = pedido.fecha_pedido.astimezone(tz_cl).strftime("%d/%m/%Y %H:%M") if pedido.fecha_pedido else "—"
+
+    estado_codigo = pedido.estado_pedido.codigo if pedido.estado_pedido else "PENDIENTE"
+    estado_nombre = pedido.estado_pedido.nombre if pedido.estado_pedido else "Pendiente"
+    color_estado = pedido.estado_pedido.color if pedido.estado_pedido else "#64748b"
+
+    # Verificar si tiene despacho (está en una hoja de ruta)
+    hoja_item = db.query(HojaRutaItem).filter(HojaRutaItem.pedido_id == pedido.id).first()
+    tiene_delivery = hoja_item is not None or (pedido.costo_delivery and float(pedido.costo_delivery) > 0)
+
+    # Estado del despacho
+    despacho_html = ""
+    if tiene_delivery:
+        if hoja_item and hoja_item.entregado:
+            despacho_estado = ("✅", "Entregado", "#22c55e", "Tu pedido fue entregado.")
+        elif hoja_item and hoja_item.hoja_ruta and hoja_item.hoja_ruta.estado == "EN_RUTA":
+            despacho_estado = ("🚚", "En ruta", "#f59e0b", "Tu pedido está en camino hacia ti.")
+        elif hoja_item and hoja_item.hoja_ruta:
+            despacho_estado = ("📦", "Listo para despachar", "#3b82f6", "Tu pedido está listo y será despachado pronto.")
+        else:
+            despacho_estado = ("⏳", "Pendiente de despacho", "#94a3b8", "Tu pedido será asignado a una ruta de despacho.")
+
+        icono, label, color, desc = despacho_estado
+        despacho_html = f"""
+        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:16px;margin:16px 0">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:24px">{icono}</span>
+            <div>
+              <div style="font-weight:bold;color:{color}">{label}</div>
+              <div style="font-size:13px;color:#64748b;margin-top:2px">{desc}</div>
+            </div>
+          </div>
+        </div>"""
+
+    # Pasos del progreso según si tiene delivery o no
+    orden_estados = ["PENDIENTE", "CONFIRMADO", "EN_PREPARACION", "EN_RUTA", "ENTREGADO"]
+    paso_actual = orden_estados.index(estado_codigo) if estado_codigo in orden_estados else 0
+    etiquetas = ["Recibido", "Confirmado", "En preparación", "En ruta", "Entregado"]
+
+    pasos_html = '<div style="display:flex;justify-content:space-between;margin:20px 0;position:relative">'
+    pasos_html += '<div style="position:absolute;top:16px;left:0;right:0;height:2px;background:#e2e8f0;z-index:0"></div>'
+    for i, etiqueta in enumerate(etiquetas):
+        if i < paso_actual:
+            color_paso, bg = "#22c55e", "#22c55e"
+            simbolo = "✓"
+        elif i == paso_actual:
+            color_paso, bg = "white", "#3b82f6"
+            simbolo = str(i + 1)
+        else:
+            color_paso, bg = "#94a3b8", "#e2e8f0"
+            simbolo = str(i + 1)
+        pasos_html += f"""
+        <div style="display:flex;flex-direction:column;align-items:center;z-index:1;flex:1">
+          <div style="width:32px;height:32px;border-radius:50%;background:{bg};color:{color_paso};display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:13px">{simbolo}</div>
+          <div style="font-size:11px;color:#64748b;margin-top:4px;text-align:center">{etiqueta}</div>
+        </div>"""
+    pasos_html += "</div>"
+
+    items_html = "".join(
+        f"<tr><td style='padding:6px 12px'>{item.producto.nombre if item.producto else f'Producto {item.producto_id}'}</td>"
+        f"<td style='padding:6px 12px;text-align:center'>{item.cantidad}</td>"
+        f"<td style='padding:6px 12px;text-align:right'>${float(item.precio_unitario_venta or 0):,.0f}</td></tr>"
+        for item in (pedido.items or [])
+    )
+
+    return HTMLResponse(content=f"""
+    <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+    <body style="font-family:Arial,sans-serif;background:#f8fafc;padding:20px">
+      <div style="max-width:520px;margin:0 auto;background:white;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,0.08);overflow:hidden">
+        <div style="background:#1e293b;padding:24px;text-align:center">
+          <h2 style="color:white;margin:0">Seguimiento de Pedido</h2>
+          <p style="color:#94a3b8;margin:4px 0 0">{pedido.numero_pedido}</p>
+        </div>
+        <div style="padding:24px">
+          <p style="color:#64748b;font-size:13px;margin:0 0 4px">Fecha del pedido: <strong>{fecha_str}</strong></p>
+          <p style="color:#64748b;font-size:13px;margin:0 0 16px">Cliente: <strong>{pedido.cliente.nombre if pedido.cliente else '—'}</strong></p>
+          {pasos_html}
+          {despacho_html}
+          <h3 style="color:#1e293b;font-size:14px;margin:20px 0 8px">Detalle del pedido</h3>
+          <table style="width:100%;border-collapse:collapse;font-size:14px">
+            <thead><tr style="background:#f1f5f9">
+              <th style="padding:8px 12px;text-align:left">Producto</th>
+              <th style="padding:8px 12px">Cant.</th>
+              <th style="padding:8px 12px;text-align:right">Precio</th>
+            </tr></thead>
+            <tbody>{items_html}</tbody>
+          </table>
+          <div style="border-top:2px solid #e2e8f0;margin-top:12px;padding-top:12px;text-align:right">
+            <strong>Total: ${float(pedido.monto_total or 0):,.0f}</strong>
+          </div>
+        </div>
+      </div>
+    </body></html>
+    """)
+
+
+@router.get("/estado/{pedido_id}")
+def estado_pedido_api(
+    pedido_id: int,
+    x_api_key: str = Header(None, alias="X-API-Key"),
+    db: Session = Depends(get_db),
+):
+    """
+    Endpoint con API Key para consulta de estado por integraciones (n8n, WhatsApp, etc.).
+    Retorna JSON con el estado actual del pedido.
+    """
+    import os
+    api_key = os.getenv("INTEGRATION_API_KEY")
+    if not api_key or x_api_key != api_key:
+        raise HTTPException(status_code=401, detail="No autorizado")
+
+    pedido = db.query(Pedido).filter(Pedido.id == pedido_id).first()
+    if not pedido:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+
+    from zoneinfo import ZoneInfo
+    tz_cl = ZoneInfo("America/Santiago")
+    fecha_str = pedido.fecha_pedido.astimezone(tz_cl).strftime("%d/%m/%Y %H:%M") if pedido.fecha_pedido else None
+
+    return {
+        "pedido_id": pedido.id,
+        "numero_pedido": pedido.numero_pedido,
+        "estado": pedido.estado_pedido.nombre if pedido.estado_pedido else None,
+        "estado_codigo": pedido.estado_pedido.codigo if pedido.estado_pedido else None,
+        "es_pagado": pedido.es_pagado,
+        "fecha_pedido": fecha_str,
+        "monto_total": float(pedido.monto_total or 0),
+        "cliente_nombre": f"{pedido.cliente.nombre} {pedido.cliente.apellido or ''}".strip() if pedido.cliente else None,
+        "cliente_email": pedido.cliente.email if pedido.cliente else None,
+        "cliente_telefono": pedido.cliente.telefono if pedido.cliente else None,
+        "seguimiento_url": f"https://api.masasestacion.cl/api/pedidos/seguimiento/{pedido.token_seguimiento}" if pedido.token_seguimiento else None,
+    }

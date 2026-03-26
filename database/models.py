@@ -902,6 +902,7 @@ class Pedido(Base):
     monto_total = Column(Float, default=0.00)
     estado_id = Column(Integer, ForeignKey("estados_pedido.id", ondelete="RESTRICT"), nullable=False, default=1)  # FK a estados_pedido
     es_pagado = Column(Boolean, default=False)
+    token_seguimiento = Column(String(64), nullable=True, unique=True, index=True)  # Token público para consulta de estado
     costo_delivery = Column(Numeric(10, 2), nullable=True, default=None)  # Costo de delivery (cobro aparte, no suma al total)
     inventario_descontado = Column(Boolean, default=False)  # Flag para evitar doble descuento
     notas = Column(Text, nullable=True)

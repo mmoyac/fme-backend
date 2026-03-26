@@ -15,6 +15,7 @@ from database.models import (
     Pedido, ItemPedido, AsignacionPicking,
     EstadoPedido, Cliente, Vehiculo, User, Producto,
 )
+from services.webhook_service import trigger_pedido_entregado
 from routers.auth import get_current_active_user
 
 router = APIRouter(prefix="/api/hojas-ruta", tags=["Hojas de Ruta"])
@@ -339,6 +340,7 @@ def crear_hoja_ruta(
     db.add(hoja)
     db.flush()
 
+    estado_en_prep = db.query(EstadoPedido).filter(EstadoPedido.codigo == "EN_PREPARACION").first()
     for orden, pedido_id in enumerate(data.pedido_ids):
         item = HojaRutaItem(
             hoja_ruta_id=hoja.id,
@@ -346,6 +348,11 @@ def crear_hoja_ruta(
             orden=orden,
         )
         db.add(item)
+        # Avanzar estado del pedido a EN_PREPARACION
+        if estado_en_prep:
+            pedido_obj = db.query(Pedido).filter(Pedido.id == pedido_id).first()
+            if pedido_obj:
+                pedido_obj.estado_id = estado_en_prep.id
 
     db.commit()
     db.refresh(hoja)
@@ -515,6 +522,14 @@ def marcar_en_ruta(
 
     hoja.estado = EstadoHojaRuta.EN_RUTA
     hoja.fecha_salida = datetime.now()
+
+    # Avanzar todos los pedidos de la ruta a EN_RUTA
+    estado_en_ruta = db.query(EstadoPedido).filter(EstadoPedido.codigo == "EN_RUTA").first()
+    if estado_en_ruta:
+        for hi in hoja.items:
+            if hi.pedido and not hi.entregado:
+                hi.pedido.estado_id = estado_en_ruta.id
+
     db.commit()
     return {"ok": True, "estado": "EN_RUTA", "fecha_salida": hoja.fecha_salida.isoformat()}
 
@@ -555,10 +570,9 @@ def marcar_entregado(
 
     # Cambiar estado del pedido a ENTREGADO
     estado_entregado = db.query(EstadoPedido).filter(EstadoPedido.codigo == "ENTREGADO").first()
-    if estado_entregado:
-        pedido = db.query(Pedido).filter(Pedido.id == hi.pedido_id).first()
-        if pedido:
-            pedido.estado_id = estado_entregado.id
+    pedido = db.query(Pedido).filter(Pedido.id == hi.pedido_id).first()
+    if estado_entregado and pedido:
+        pedido.estado_id = estado_entregado.id
 
     # Si todos los items están entregados → completar hoja de ruta
     todos_entregados = db.query(HojaRutaItem).filter(
@@ -573,6 +587,11 @@ def marcar_entregado(
             hoja.fecha_retorno = datetime.now()
 
     db.commit()
+
+    # Disparar webhook de entrega
+    if pedido:
+        trigger_pedido_entregado(pedido, db, fecha_entrega=hi.fecha_entrega)
+
     return {
         "ok": True,
         "item_id": item_id,
