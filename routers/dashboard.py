@@ -10,7 +10,7 @@ from sqlalchemy import func, and_, case
 import pytz
 
 from database.database import get_db
-from database.models import Pedido, ItemPedido, Producto, Inventario, Cliente, Local, TurnoCaja, OperacionCaja, User, TipoOperacionCaja, EstadoTurnoCaja
+from database.models import Pedido, ItemPedido, Producto, Inventario, Cliente, Local, TurnoCaja, OperacionCaja, User, TipoOperacionCaja, EstadoTurnoCaja, NotaCredito
 from routers.auth import get_current_active_user
 
 router = APIRouter()
@@ -45,15 +45,25 @@ def obtener_estadisticas_dashboard(db: Session = Depends(get_db), current_user =
         EstadoPedidoModel.codigo == 'CANCELADO'
     ).first()
 
+    # Subquery: total acreditado por notas de crédito por pedido
+    nc_sq = db.query(
+        NotaCredito.pedido_id,
+        func.coalesce(func.sum(NotaCredito.monto), 0).label('total_nc')
+    ).group_by(NotaCredito.pedido_id).subquery()
+
+    def monto_neto():
+        """Expresión SQLAlchemy para monto_total menos notas de crédito."""
+        return Pedido.monto_total - func.coalesce(nc_sq.c.total_nc, 0)
+
     # --- Ventas del día (filtrado por tenant, excluye CANCELADO) ---
-    ventas_hoy = db.query(func.sum(Pedido.monto_total)).join(Cliente).filter(
+    ventas_hoy = db.query(func.sum(monto_neto())).join(Cliente).outerjoin(nc_sq, nc_sq.c.pedido_id == Pedido.id).filter(
         func.date(Pedido.fecha_pedido) == hoy,
         Cliente.tenant_id == current_user.tenant_id,
         Pedido.estado_id != estado_cancelado.id if estado_cancelado else True,
     ).scalar() or 0
-    
+
     # --- Ventas del mes (filtrado por tenant, excluye CANCELADO) ---
-    ventas_mes = db.query(func.sum(Pedido.monto_total)).join(Cliente).filter(
+    ventas_mes = db.query(func.sum(monto_neto())).join(Cliente).outerjoin(nc_sq, nc_sq.c.pedido_id == Pedido.id).filter(
         func.date(Pedido.fecha_pedido) >= inicio_mes,
         Cliente.tenant_id == current_user.tenant_id,
         Pedido.estado_id != estado_cancelado.id if estado_cancelado else True,
@@ -66,7 +76,10 @@ def obtener_estadisticas_dashboard(db: Session = Depends(get_db), current_user =
         Cliente.tenant_id == current_user.tenant_id
     ).all()
     
-    monto_por_cobrar = sum(p.monto_total for p in pedidos_sin_pagar)
+    monto_por_cobrar = sum(
+        float(p.monto_total) - sum(float(nc.monto) for nc in p.notas_credito)
+        for p in pedidos_sin_pagar
+    )
     cantidad_sin_pagar = len(pedidos_sin_pagar)
     
     # --- Pedidos por estado (filtrado por tenant) ---
@@ -151,7 +164,7 @@ def obtener_estadisticas_dashboard(db: Session = Depends(get_db), current_user =
     ventas_por_dia = []
     for i in range(7):
         fecha = hoy - timedelta(days=6-i)
-        ventas_dia = db.query(func.sum(Pedido.monto_total)).join(Cliente).filter(
+        ventas_dia = db.query(func.sum(monto_neto())).join(Cliente).outerjoin(nc_sq, nc_sq.c.pedido_id == Pedido.id).filter(
             func.date(Pedido.fecha_pedido) == fecha,
             Cliente.tenant_id == current_user.tenant_id,
             Pedido.estado_id != estado_cancelado.id if estado_cancelado else True,
@@ -207,9 +220,10 @@ def obtener_estadisticas_dashboard(db: Session = Depends(get_db), current_user =
             else_='tienda'
         ).label('canal'),
         func.count(Pedido.id).label('cantidad'),
-        func.sum(Pedido.monto_total).label('ventas')
+        func.sum(monto_neto()).label('ventas')
     ).join(Cliente, Pedido.cliente_id == Cliente.id)\
      .join(Local, Pedido.local_id == Local.id)\
+     .outerjoin(nc_sq, nc_sq.c.pedido_id == Pedido.id)\
      .filter(
         Cliente.tenant_id == current_user.tenant_id,
         Pedido.estado_id != estado_cancelado.id if estado_cancelado else True
@@ -234,15 +248,16 @@ def obtener_estadisticas_dashboard(db: Session = Depends(get_db), current_user =
         Local.nombre,
         Local.codigo,
         func.count(Pedido.id).label('cantidad'),
-        func.sum(Pedido.monto_total).label('ventas')
+        func.sum(monto_neto()).label('ventas')
     ).join(Cliente, Pedido.cliente_id == Cliente.id)\
      .join(Local, Pedido.local_id == Local.id)\
+     .outerjoin(nc_sq, nc_sq.c.pedido_id == Pedido.id)\
      .filter(
         Cliente.tenant_id == current_user.tenant_id,
         Local.codigo != 'WEB',
         Pedido.estado_id != estado_cancelado.id if estado_cancelado else True
     ).group_by(Local.id, Local.nombre, Local.codigo)\
-     .order_by(func.sum(Pedido.monto_total).desc())\
+     .order_by(func.sum(monto_neto()).desc())\
      .all()
     
     locales_detalle = [
@@ -262,17 +277,18 @@ def obtener_estadisticas_dashboard(db: Session = Depends(get_db), current_user =
         User.nombre_completo,
         User.email,
         func.count(Pedido.id).label('cantidad'),
-        func.sum(Pedido.monto_total).label('ventas')
+        func.sum(monto_neto()).label('ventas')
     ).join(Pedido, User.id == Pedido.usuario_id)\
      .join(Cliente, Pedido.cliente_id == Cliente.id)\
+     .outerjoin(nc_sq, nc_sq.c.pedido_id == Pedido.id)\
      .filter(
         Cliente.tenant_id == current_user.tenant_id,
         Pedido.estado_id != estado_cancelado.id if estado_cancelado else True,
-        Pedido.usuario_id.isnot(None)  # Solo pedidos con usuario asignado
+        Pedido.usuario_id.isnot(None)
     ).group_by(User.id, User.nombre_completo, User.email)\
-     .order_by(func.sum(Pedido.monto_total).desc())\
+     .order_by(func.sum(monto_neto()).desc())\
      .all()
-    
+
     vendedores_detalle = [
         {
             'usuario_id': vendedor.id,
@@ -283,7 +299,7 @@ def obtener_estadisticas_dashboard(db: Session = Depends(get_db), current_user =
         }
         for vendedor in ventas_por_vendedor
     ]
-    
+
     # --- Ventas por medio de pago ---
     from database.models import MedioPago
     ventas_por_medio_pago = db.query(
@@ -291,14 +307,15 @@ def obtener_estadisticas_dashboard(db: Session = Depends(get_db), current_user =
         MedioPago.nombre,
         MedioPago.codigo,
         func.count(Pedido.id).label('cantidad'),
-        func.sum(Pedido.monto_total).label('ventas')
+        func.sum(monto_neto()).label('ventas')
     ).join(Pedido, MedioPago.id == Pedido.medio_pago_id)\
      .join(Cliente, Pedido.cliente_id == Cliente.id)\
+     .outerjoin(nc_sq, nc_sq.c.pedido_id == Pedido.id)\
      .filter(
         Cliente.tenant_id == current_user.tenant_id,
         Pedido.estado_id != estado_cancelado.id if estado_cancelado else True
     ).group_by(MedioPago.id, MedioPago.nombre, MedioPago.codigo)\
-     .order_by(func.sum(Pedido.monto_total).desc())\
+     .order_by(func.sum(monto_neto()).desc())\
      .all()
     
     medios_pago_detalle = [

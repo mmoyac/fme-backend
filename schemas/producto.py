@@ -24,9 +24,11 @@ class ProductoBase(BaseModel):
     es_ingrediente: bool = False
     tiene_receta: bool = False
     activo: bool = True
-    stock_minimo: Optional[int] = 0
-    stock_critico: Optional[int] = 0
+    stock_minimo: Optional[float] = 0
+    stock_critico: Optional[float] = 0
     precio_incluye_iva: bool = True  # True: precio ya tiene IVA incluido. False: precio es neto, se agrega 19%
+    unidad_compra_descripcion: Optional[str] = None
+    factor_conversion_compra: Optional[float] = 1
     descuento_contado: Optional[Decimal] = Field(None, ge=0, le=100, description="% de descuento aplicado cuando el pago es al contado")
 
 
@@ -53,16 +55,18 @@ class ProductoUpdate(BaseModel):
     es_ingrediente: Optional[bool] = None
     tiene_receta: Optional[bool] = None
     activo: Optional[bool] = None
-    stock_minimo: Optional[int] = None
-    stock_critico: Optional[int] = None
+    stock_minimo: Optional[float] = None
+    stock_critico: Optional[float] = None
     precio_incluye_iva: Optional[bool] = None
+    unidad_compra_descripcion: Optional[str] = None
+    factor_conversion_compra: Optional[float] = None
     descuento_contado: Optional[Decimal] = None
 
 
 class ProductoResponse(ProductoBase):
     """Schema de respuesta de Producto."""
     id: int
-    stock_actual: int = 0  # Campo calculado para visualización
+    stock_actual: float = 0  # Campo calculado para visualización
     # Información de categoría
     categoria_nombre: Optional[str] = None
     categoria_puntos_fidelidad: Optional[int] = None

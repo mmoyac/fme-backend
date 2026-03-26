@@ -824,7 +824,128 @@ backend:
 
 ---
 
-**Última Actualización:** 2026-01-07  
+---
+
+## 10. 🍽️ Sistema de Recetas y Producción
+
+### 10.1. Conceptos Clave
+
+El sistema conecta tres módulos: **Recetas** (qué ingredientes usa un producto), **Producción** (órdenes de fabricación) e **Inventario** (stock en kg/unidades decimales).
+
+### 10.2. Modelo de Datos
+
+```
+Producto (producto fabricado)
+ └─ Receta
+     ├─ rendimiento: Decimal   → cuántas unidades produce la receta
+     ├─ unidad_rendimiento_id  → unidad del rendimiento (ej: "unidad")
+     └─ IngredienteReceta[]
+         ├─ producto_ingrediente_id  → FK a Producto (materia prima)
+         ├─ cantidad: Numeric(10,3)  → cantidad en unidad de inventario del ingrediente
+         └─ unidad_medida_id        → unidad del ingrediente en la receta
+```
+
+### 10.3. Unidad de Compra vs Unidad de Inventario
+
+Las materias primas a granel (harina, almendras, aceite, etc.) se compran en una unidad (sacos, cajas, bidones) pero el inventario se gestiona en la **unidad base** (kg, litros, gramos).
+
+Campos en `Producto`:
+- `unidad_medida_id` → unidad de inventario (ej: kg)
+- `unidad_compra_descripcion` → texto libre (ej: "Saco 25 kg")
+- `factor_conversion_compra` → cuántas unidades de inventario contiene 1 unidad de compra (ej: 25)
+
+**Ejemplo:** Harina bio bio roja 25 kg
+- `unidad_medida` = kg
+- `unidad_compra_descripcion` = "Saco 25 kg"
+- `factor_conversion_compra` = 25
+
+Cuando se registra una compra de 1 saco → el sistema suma **25 kg** al inventario automáticamente.
+
+### 10.4. Cálculo de Costos en Receta
+
+El `precio_compra` del producto siempre se almacena en la **unidad de inventario** (ej: precio por kg).
+
+Al recibir una compra:
+```python
+# routers/compras.py
+factor = float(producto.factor_conversion_compra) or 1.0
+# Stock: se suman cantidad × factor unidades
+inventario.cantidad_stock += float(det.cantidad) * factor
+# Precio: se divide por factor para obtener precio por unidad de inventario
+producto.precio_compra = float(det.precio_unitario) / factor
+```
+
+**Ejemplo:** Compra 1 saco a $14.500
+- Stock: +25 kg
+- precio_compra: $14.500 / 25 = **$580/kg**
+
+El costo de un ingrediente en la receta se calcula:
+```
+costo_total = cantidad_ingrediente_kg × precio_compra_por_kg
+```
+Ej: 0.044 kg × $580 = **$25,52**
+
+### 10.5. Flujo de Producción
+
+1. Se crea una `OrdenProduccion` con los productos a fabricar y cantidades
+2. El sistema **valida stock** de todos los ingredientes antes de guardar:
+   ```
+   consumo_ingrediente = cantidad_ingrediente × (lote_a_producir / rendimiento_receta)
+   ```
+3. Al **finalizar** la orden, el sistema:
+   - **Descuenta** del inventario de cada ingrediente (en kg/unidad base)
+   - **Suma** al inventario del producto terminado (en su unidad)
+
+**Ejemplo:** Producir 10 sopaipillas (rendimiento receta = 1 unidad)
+- Harina requerida: 0.044 kg × (10 / 1) = **0.44 kg descontados**
+- Sopaipillas: +10 unidades al stock
+
+### 10.6. Inventario Decimal
+
+El inventario soporta cantidades decimales (`Numeric(10,3)`) en todos los campos relevantes:
+
+| Tabla | Campo | Tipo |
+|-------|-------|------|
+| `inventario` | `cantidad_stock` | Numeric(10,3) |
+| `movimientos_inventario` | `cantidad` | Numeric(10,3) |
+| `productos` | `stock_minimo`, `stock_critico` | Numeric(10,3) |
+| `items_solicitud_transferencia` | `cantidad_*` | Numeric(10,3) |
+| `picking_items` | `cantidad_*` | Numeric(10,3) |
+
+> ⚠️ Los schemas Pydantic usan `float` (no `Decimal`) para estos campos, para que el JSON serialice como número y no como string.
+
+### 10.7. Endpoints de Recetas
+
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| GET | `/api/recetas/productos/{id}/receta` | Obtener receta de un producto |
+| POST | `/api/recetas/productos/{id}/receta` | Crear receta |
+| DELETE | `/api/recetas/recetas/{id}` | Eliminar receta |
+| POST | `/api/recetas/recetas/{id}/recalcular` | Recalcular costos |
+| POST | `/api/recetas/recetas/{id}/ingredientes` | Agregar ingrediente |
+| DELETE | `/api/recetas/ingredientes/{id}` | Eliminar ingrediente |
+
+### 10.8. Endpoints de Producción
+
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| GET | `/api/produccion/chequear-insumos/{producto_id}` | Verificar stock antes de producir |
+| POST | `/api/produccion/ordenes` | Crear orden (valida stock) |
+| GET | `/api/produccion/ordenes` | Listar órdenes |
+| GET | `/api/produccion/ordenes/{id}` | Detalle de orden |
+| POST | `/api/produccion/ordenes/{id}/finalizar` | Finalizar y actualizar inventario |
+
+### 10.9. Reglas de Negocio Críticas
+
+- Un producto con `tiene_receta = True` debe tener exactamente una receta activa para poder producirse.
+- El stock de ingredientes se verifica **antes** de crear la orden; si falta stock, se rechaza con HTTP 400.
+- El `precio_compra` del ingrediente se actualiza automáticamente cada vez que se recibe una compra.
+- La receta almacena cantidades en la **unidad de inventario** del ingrediente (kg, no sacos).
+- El backoffice muestra el stock en kg y la equivalencia en unidades de compra cuando el producto tiene `unidad_compra_descripcion` configurado.
+
+---
+
+**Última Actualización:** 2026-01-07
 **Cambios Recientes:**
 - ✅ **Sistema Completo de Despachos implementado** (NUEVO)
 - ✅ **Modelos: Despacho, PickingItem con EstadoDespacho enum**
@@ -860,7 +981,180 @@ backend:
 - ✅ Despliegue en Docker Hub (mmoyac/masas-estacion-backend:latest).
 - ✅ Configuración de producción optimizada.
 
-**Repositorio:** `https://github.com/mmoyac/fme-backend.git`  
-**Docker Hub:** `https://hub.docker.com/r/mmoyac/masas-estacion-backend`  
-**API Producción:** `https://api.masasestacion.cl/docs`  
+**Repositorio:** `https://github.com/mmoyac/fme-backend.git`
+**Docker Hub:** `https://hub.docker.com/r/mmoyac/masas-estacion-backend`
+**API Producción:** `https://api.masasestacion.cl/docs`
+
+---
+
+## Módulo: Notas de Crédito y Devoluciones (implementado 2026-03-25)
+
+### Conceptos clave
+
+**Nota de crédito** es un documento tributario que anula total o parcialmente una boleta o factura. Se genera automáticamente en dos situaciones:
+1. Al **cancelar** un pedido con documento tributario asociado.
+2. Al **aprobar una devolución** parcial o total de un pedido entregado.
+
+**Devolución** es el flujo formal para registrar que el cliente devolvió productos. Es independiente del cancelado. Un pedido en estado `ENTREGADO` solo puede cancelarse si ya tiene una devolución en estado `APROBADA`.
+
+### Modelos de base de datos
+
+```python
+# database/models.py
+
+class NotaCredito(Base):
+    __tablename__ = "notas_credito"
+    id, tenant_id, pedido_id (FK, no unique → one-to-many),
+    tipo_documento_id (FK → NOTA_CREDITO_BOLETA o NOTA_CREDITO_FACTURA),
+    monto, folio_sii, estado_sii, motivo, fecha_emision
+
+class Devolucion(Base):
+    __tablename__ = "devoluciones"
+    id, tenant_id, pedido_id, nota_credito_id (FK nullable),
+    usuario_id, motivo, fecha_devolucion, estado (PENDIENTE/APROBADA/RECHAZADA)
+    items = relationship("ItemDevolucion", cascade="all, delete-orphan")
+
+class ItemDevolucion(Base):
+    __tablename__ = "items_devolucion"
+    id, devolucion_id, item_pedido_id, producto_id,
+    cantidad_devuelta, local_destino_id
+```
+
+La relación en `Pedido` es:
+```python
+notas_credito = relationship("NotaCredito", back_populates="pedido")  # lista, no uselist=False
+devoluciones = relationship("Devolucion", back_populates="pedido")
+```
+
+### Servicios
+
+**`services/notas_credito_service.py`**
+```python
+MAPA_NOTA_CREDITO = {"BOL": "NOTA_CREDITO_BOLETA", "FAC": "NOTA_CREDITO_FACTURA"}
+
+class NotasCreditoService:
+    def crear_si_corresponde(pedido, db):
+        # Calcula ya_acreditado = sum(nc.monto for nc in pedido.notas_credito)
+        # Solo crea NC por el monto pendiente (soporta NCs parciales previas)
+        # estado_sii = "ANULADO" si pedido no tiene folio_sii
+        # estado_sii = "PENDIENTE" si pedido ya tiene folio_sii registrado
+```
+
+**`services/devoluciones_service.py`**
+- Crea la devolución y sus items
+- Restaura stock por item en `local_destino_id`
+- Llama a `NotasCreditoService.crear_si_corresponde()` para NC parcial
+- Importa `MAPA_NOTA_CREDITO` desde `notas_credito_service` (fuente única)
+
+### Reglas de negocio críticas
+
+| Situación | Comportamiento |
+|---|---|
+| Cancelar pedido PENDIENTE/EN_PREPARACION | Genera NC si tiene doc. tributario. Devuelve stock si `inventario_descontado=True`. |
+| Cancelar pedido ENTREGADO | **Bloqueado** hasta tener una devolución `APROBADA`. |
+| Devolución parcial | Restaura solo las unidades devueltas. Genera NC por el monto proporcional. |
+| Devolución total → luego cancelar | La NC de cancelación calcula `ya_acreditado` y crea NC solo por diferencia. |
+| Factura sin folio SII | NC con `estado_sii = "ANULADO"` |
+| Factura con folio SII ya registrado | NC con `estado_sii = "PENDIENTE"` (requiere envío manual al SII) |
+
+### Restauración de stock en cancelación
+
+```python
+# routers/pedidos.py → _devolver_inventario_productos()
+# Calcula ya_devuelto por devoluciones APROBADAS previas
+# Solo restaura cantidad_pendiente = cantidad_original - ya_devuelto
+# Evita doble restauración cuando hay devolución previa + cancelación
+```
+
+### Canales de venta
+
+La tabla `canales_venta` tiene dos atributos que controlan el comportamiento del sistema:
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `entrega_inmediata` | bool | Si True, el pedido pasa automáticamente a ENTREGADO al crearse. Reemplaza el hardcode anterior basado en `local.codigo != 'WEB'`. |
+| `visible_en_pos` | bool | Si False, el canal no aparece en el selector del POS. |
+
+Valores por defecto:
+- `POS`: `entrega_inmediata=True`, `visible_en_pos=True`
+- `LANDING`: `entrega_inmediata=False`, `visible_en_pos=False`
+- `WHATSAPP`, `TELEFONO`: `entrega_inmediata=False`, `visible_en_pos=True`
+
+### Dashboard y Cobranza — montos netos
+
+Todos los montos en dashboard y cobranza descuentan las notas de crédito emitidas:
+
+```python
+# routers/dashboard.py
+nc_sq = db.query(
+    NotaCredito.pedido_id,
+    func.coalesce(func.sum(NotaCredito.monto), 0).label('total_nc')
+).group_by(NotaCredito.pedido_id).subquery()
+
+def monto_neto():
+    return Pedido.monto_total - func.coalesce(nc_sq.c.total_nc, 0)
+```
+
+El endpoint `GET /api/pedidos/` incluye el campo `total_notas_credito` en cada pedido para que el frontend pueda calcular montos netos sin consultas adicionales.
+
+### Casos de prueba validados (2026-03-25)
+
+Todos los siguientes casos fueron probados en entorno de desarrollo con datos reales:
+
+1. Devolución múltiples items distintos en un mismo pedido
+2. Devolución a local distinto al de origen (stock se restaura en destino)
+3. Pedido con cheque + devolución → NC correcta
+4. Intento de devolución sobre pedido ya cancelado → bloqueado
+5. Doble cancelación del mismo pedido → bloqueado
+6. Devolución total con boleta → NC por monto completo con `estado_sii=ANULADO`
+7. Cancelar en estado PENDIENTE con factura → NC generada, stock sin cambio (no se había descontado)
+8. Devolución total con factura → NC por monto completo
+9. Venta con stock exacto → sistema lo permite y deja stock en 0
+10. Venta con stock insuficiente → bloqueado en UI (botón `+` limitado al stock disponible)
+11. NC cuando factura ya tiene folio SII → `estado_sii = "PENDIENTE"` (no ANULADO)
 **Estado MVP:** ✅ **Desplegado y operativo en producción**
+
+## Módulo: Delivery — Configuración por Tenant (implementado 2026-03-25)
+
+### Modelo de datos
+
+Tabla `configuracion_landing` — campos de delivery:
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `costo_fijo_delivery` | `Numeric(10,2)` | Costo base fijo por pedido con delivery (CLP) |
+| `costo_por_km_delivery` | `Numeric(10,2)` | Costo adicional por kilómetro (CLP) |
+| `monto_minimo_delivery_gratis` | `Numeric(10,2)` | Si el pedido supera este monto, el delivery es gratuito. `NULL` = nunca gratis |
+| `max_km_delivery` | `Numeric(6,2)` | Distancia máxima en km para aceptar pedidos con delivery. `NULL` = sin límite |
+
+### Endpoint `/api/config/landing`
+
+Incluye estos valores bajo la clave `delivery` en la respuesta JSON:
+
+```python
+"delivery": {
+    "costo_fijo":        float(config.costo_fijo_delivery)         or None,
+    "costo_por_km":      float(config.costo_por_km_delivery)        or None,
+    "monto_minimo_gratis": float(config.monto_minimo_delivery_gratis) or None,
+    "max_km":            float(config.max_km_delivery)              or None,
+}
+```
+
+### Schemas Pydantic
+
+`ConfiguracionLandingBase` y `ConfiguracionLandingUpdate` en `schemas/configuracion_landing.py`:
+
+```python
+max_km_delivery: Optional[float] = Field(None, ge=0,
+    description="Distancia máxima en kilómetros para aceptar pedidos con delivery")
+```
+
+### Reglas de negocio
+
+- El campo `costo_delivery` en la tabla `pedidos` almacena el costo acordado con el cliente. **No se suma al `monto_total`** — es informativo y se cobra aparte.
+- La validación de `max_km` se realiza en el frontend (POS `EtapaFinalizacion`). El backend no rechaza pedidos por distancia; la restricción es UI.
+- Si `max_km_delivery = NULL`, no hay límite de distancia.
+
+### Migración
+
+`d1e2f3a4b5c6_add_max_km_delivery_to_configuracion_landing.py` — agrega columna `max_km_delivery` a `configuracion_landing`.

@@ -79,7 +79,8 @@ def listar_cobranza(
 
             if sin_cheques:
                 # Pedido con medio cheque pero sin cheques ingresados aún
-                monto_pendiente = float(pedido.monto_total)
+                descuento_nc = sum(float(nc.monto) for nc in pedido.notas_credito) if pedido.notas_credito else 0.0
+                monto_pendiente = float(pedido.monto_total) - descuento_nc
                 fecha_venc_proxima = datetime.now(timezone.utc) + timedelta(days=30)
                 dias_vencimiento = 30
                 entry_estado = "SIN_CHEQUES"
@@ -103,7 +104,7 @@ def listar_cobranza(
                 "cliente_nombre": pedido.cliente.nombre if pedido.cliente else None,
                 "local_id": pedido.local_id,
                 "local_nombre": pedido.local.nombre if pedido.local else None,
-                "monto_total": float(pedido.monto_total),
+                "monto_total": float(pedido.monto_total) - descuento_nc,
                 "monto_pendiente": monto_pendiente,
                 "cantidad_cheques": len(cheques_pendientes) if not sin_cheques else None,
                 "sin_cheques": sin_cheques,

@@ -89,6 +89,7 @@ class ConfiguracionLandingBase(BaseModel):
     costo_fijo_delivery: Optional[float] = Field(None, ge=0, description="Costo fijo de delivery en pesos CLP")
     costo_por_km_delivery: Optional[float] = Field(None, ge=0, description="Costo adicional por kilómetro en pesos CLP")
     monto_minimo_delivery_gratis: Optional[float] = Field(None, ge=0, description="Monto mínimo de compra para delivery gratuito")
+    max_km_delivery: Optional[float] = Field(None, ge=0, description="Distancia máxima en kilómetros para aceptar pedidos con delivery")
 
 
 class ConfiguracionLandingCreate(ConfiguracionLandingBase):
@@ -143,6 +144,7 @@ class ConfiguracionLandingUpdate(BaseModel):
     costo_fijo_delivery: Optional[float] = Field(None, ge=0)
     costo_por_km_delivery: Optional[float] = Field(None, ge=0)
     monto_minimo_delivery_gratis: Optional[float] = Field(None, ge=0)
+    max_km_delivery: Optional[float] = Field(None, ge=0)
 
 
 class ConfiguracionLandingResponse(ConfiguracionLandingBase):

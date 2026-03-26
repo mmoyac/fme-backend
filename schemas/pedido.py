@@ -244,6 +244,9 @@ class PedidoConRelaciones(BaseModel):
     # Resumen de cobro de cheques
     monto_cobrado_cheques: Optional[float] = Field(None, description="Suma de cheques en estado COBRADO")
 
+    # Notas de crédito
+    total_notas_credito: Optional[float] = Field(None, description="Suma de montos de notas de crédito emitidas")
+
     cliente: Optional["ClienteResponse"] = None
     items: List["ItemPedidoResponse"] = []
 

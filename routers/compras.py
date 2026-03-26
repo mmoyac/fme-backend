@@ -238,12 +238,18 @@ def recibir_compra(compra_id: int, db: Session = Depends(get_db), current_user =
             )
             db.add(inventario)
         
-        inventario.cantidad_stock = float(inventario.cantidad_stock) + float(det.cantidad)
-
-        # B. Actualizar Costo del Producto (Precio Compra)
+        # Aplicar factor de conversión si el producto se compra en una unidad diferente
+        # Ej: se compran 2 sacos de 25 kg → se suman 50 kg al inventario
         producto = db.query(models.Producto).filter(models.Producto.id == det.producto_id).first()
+        factor = float(producto.factor_conversion_compra) if (producto and producto.factor_conversion_compra) else 1.0
+        cantidad_en_unidad_inventario = float(det.cantidad) * factor
+        inventario.cantidad_stock = float(inventario.cantidad_stock) + cantidad_en_unidad_inventario
+
+        # B. Actualizar Costo del Producto
+        # Si tiene factor de conversión, el precio unitario es por unidad de compra (ej: saco)
+        # → hay que convertir a precio por unidad de inventario (ej: kg)
         if producto:
-            producto.precio_compra = det.precio_unitario
+            producto.precio_compra = float(det.precio_unitario) / factor
     
     db_compra.estado = "RECIBIDA"
     db.commit()

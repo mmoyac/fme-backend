@@ -20,6 +20,8 @@ class CanalVentaResponse(BaseModel):
     codigo: str
     nombre: str
     activo: bool
+    entrega_inmediata: bool
+    visible_en_pos: bool
 
     class Config:
         from_attributes = True
@@ -29,11 +31,15 @@ class CanalVentaCreate(BaseModel):
     codigo: str
     nombre: str
     activo: bool = True
+    entrega_inmediata: bool = False
+    visible_en_pos: bool = True
 
 
 class CanalVentaUpdate(BaseModel):
     nombre: Optional[str] = None
     activo: Optional[bool] = None
+    entrega_inmediata: Optional[bool] = None
+    visible_en_pos: Optional[bool] = None
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────
@@ -54,7 +60,7 @@ def crear_canal_venta(
 ):
     if db.query(CanalVenta).filter(CanalVenta.codigo == data.codigo.upper()).first():
         raise HTTPException(status_code=400, detail=f"Ya existe un canal con código '{data.codigo}'")
-    canal = CanalVenta(codigo=data.codigo.upper(), nombre=data.nombre, activo=data.activo)
+    canal = CanalVenta(codigo=data.codigo.upper(), nombre=data.nombre, activo=data.activo, entrega_inmediata=data.entrega_inmediata, visible_en_pos=data.visible_en_pos)
     db.add(canal)
     db.commit()
     db.refresh(canal)
@@ -75,6 +81,10 @@ def actualizar_canal_venta(
         canal.nombre = data.nombre
     if data.activo is not None:
         canal.activo = data.activo
+    if data.entrega_inmediata is not None:
+        canal.entrega_inmediata = data.entrega_inmediata
+    if data.visible_en_pos is not None:
+        canal.visible_en_pos = data.visible_en_pos
     db.commit()
     db.refresh(canal)
     return canal

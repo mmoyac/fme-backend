@@ -252,7 +252,10 @@ def listar_productos(
             'tipo_venta_codigo': p.categoria.tipo_venta.codigo if p.categoria and p.categoria.tipo_venta else None,
             'tipo_venta_nombre': p.categoria.tipo_venta.nombre if p.categoria and p.categoria.tipo_venta else None,
             # Unidad de medida simbólica
-            'unidad_medida_simbolo': unidad_medida_simbolo
+            'unidad_medida_simbolo': unidad_medida_simbolo,
+            # Unidad de compra (materias primas a granel)
+            'unidad_compra_descripcion': p.unidad_compra_descripcion,
+            'factor_conversion_compra': float(p.factor_conversion_compra) if p.factor_conversion_compra else 1,
         }
         result.append(producto_dict)
     return result
@@ -321,7 +324,10 @@ def obtener_producto(producto_id: int, db: Session = Depends(get_db), current_us
         'tipo_venta_codigo': producto.categoria.tipo_venta.codigo if producto.categoria and producto.categoria.tipo_venta else None,
         'tipo_venta_nombre': producto.categoria.tipo_venta.nombre if producto.categoria and producto.categoria.tipo_venta else None,
         # Unidad de medida simbólica
-        'unidad_medida_simbolo': unidad_medida_simbolo
+        'unidad_medida_simbolo': unidad_medida_simbolo,
+        # Unidad de compra (materias primas a granel)
+        'unidad_compra_descripcion': producto.unidad_compra_descripcion,
+        'factor_conversion_compra': float(producto.factor_conversion_compra) if producto.factor_conversion_compra else 1,
     }
 
 

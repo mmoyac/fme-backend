@@ -27,6 +27,7 @@ from services.credito_service import CreditoService
 from services.puntos_service import PuntosService
 from services.comisiones_service import generar_comision
 from services.tenant_service import obtener_siguiente_numero_pedido, get_tenant_from_request
+from services.notas_credito_service import NotasCreditoService
 
 router = APIRouter()
 
@@ -94,7 +95,7 @@ def _descontar_inventario_productos(pedido: Pedido, local_despacho_id: int, db: 
                 detail=f"Producto {item.producto.nombre} no tiene inventario en el local seleccionado"
             )
         
-        if inventario.cantidad_stock < item.cantidad:
+        if inventario.cantidad_stock < Decimal(str(item.cantidad)):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Stock insuficiente para {item.producto.nombre}. Disponible: {inventario.cantidad_stock}, Requerido: {item.cantidad}"
@@ -107,7 +108,7 @@ def _descontar_inventario_productos(pedido: Pedido, local_despacho_id: int, db: 
             Inventario.local_id == local_despacho_id
         ).first()
         
-        inventario.cantidad_stock -= item.cantidad
+        inventario.cantidad_stock -= Decimal(str(item.cantidad))
         
         # Registrar movimiento
         movimiento = MovimientoInventario(
@@ -348,24 +349,37 @@ def devolver_inventario(pedido: Pedido, db: Session):
 
 def _devolver_inventario_productos(pedido: Pedido, db: Session):
     """Devuelve inventario regular para productos normales."""
+    from database.models import Devolucion, ItemDevolucion
+
+    # Calcular cuánto ya fue devuelto por devoluciones parciales (aprobadas)
+    ya_devuelto: dict[int, Decimal] = {}
+    for dev in pedido.devoluciones:
+        if dev.estado == "APROBADA":
+            for item_dev in dev.items:
+                ya_devuelto[item_dev.producto_id] = ya_devuelto.get(item_dev.producto_id, Decimal('0')) + Decimal(str(item_dev.cantidad_devuelta))
+
     for item in pedido.items:
+        cantidad_pendiente = Decimal(str(item.cantidad)) - Decimal(str(ya_devuelto.get(item.producto_id, 0)))
+        if cantidad_pendiente <= 0:
+            continue  # Ya fue devuelto completamente vía devolución
+
         inventario = db.query(Inventario).filter(
             Inventario.producto_id == item.producto_id,
             Inventario.local_id == pedido.local_despacho_id
         ).first()
-        
+
         if inventario:
-            inventario.cantidad_stock += item.cantidad
-            
+            inventario.cantidad_stock += cantidad_pendiente
+
             # Registrar movimiento de devolución
             movimiento = MovimientoInventario(
                 producto_id=item.producto_id,
-                local_origen_id=None,  # NULL = entrada por devolución
+                local_origen_id=None,
                 local_destino_id=pedido.local_despacho_id,
-                cantidad=item.cantidad,
+                cantidad=cantidad_pendiente,
                 tipo_movimiento="AJUSTE",
                 referencia_id=pedido.id,
-                notas=f"Devolución por cancelación de pedido #{pedido.id}",
+                notas=f"Devolución por cancelación de pedido #{pedido.id} (unidades pendientes)",
                 usuario="sistema"
             )
             db.add(movimiento)
@@ -700,6 +714,9 @@ def crear_pedido_frontend(
         )
     
     # 5. Crear pedido
+    # Boleta por defecto para pedidos de la landing — nunca debe quedar sin documento
+    tipo_doc_boleta = db.query(TipoDocumento).filter(TipoDocumento.codigo == "BOL").first()
+
     db_pedido = Pedido(
         tenant_id=tenant_id,
         numero_pedido=numero_pedido,
@@ -712,7 +729,8 @@ def crear_pedido_frontend(
         notas=pedido_data.notas,
         puntos_usados=puntos_usar,
         descuento_puntos=descuento_puntos,
-        canal_venta_id=2  # LANDING — pedidos desde la tienda online
+        canal_venta_id=2,  # LANDING — pedidos desde la tienda online
+        tipo_documento_tributario_id=tipo_doc_boleta.id if tipo_doc_boleta else None,
     )
     db.add(db_pedido)
     db.flush()  # Para obtener el ID
@@ -1068,8 +1086,9 @@ def crear_pedido_backoffice(
     # Verificar tipo de pedido (ahora la relación está cargada)
     tipo_codigo = db_pedido.tipo_pedido.codigo if db_pedido.tipo_pedido else None
     
+    canal_venta = db_pedido.canal_venta
     es_pedido_pos_directo = (
-        local.codigo != 'WEB' and 
+        bool(canal_venta and canal_venta.entrega_inmediata) and
         tipo_codigo == 'PRODUCTOS'  # Solo productos regulares, no cajas variables
     )
     
@@ -1258,7 +1277,8 @@ def listar_pedidos(
         joinedload(Pedido.tipo_documento_tributario),
         joinedload(Pedido.usuario),
         joinedload(Pedido.estado_pedido),  # Cargar relación de estado
-        joinedload(Pedido.cheques)  # Para resumen de cobro
+        joinedload(Pedido.cheques),  # Para resumen de cobro
+        joinedload(Pedido.notas_credito)  # Para monto neto
     )
     
     if estado:
@@ -1346,6 +1366,8 @@ def listar_pedidos(
             'usuario_email': pedido.usuario.email if pedido.usuario else None,
             # Resumen de cobro de cheques (estado_id=3 es COBRADO)
             'monto_cobrado_cheques': sum(float(c.monto) for c in pedido.cheques if c.estado_id == 3) if pedido.cheques else 0.0,
+            # Suma de notas de crédito emitidas
+            'total_notas_credito': sum(float(nc.monto) for nc in pedido.notas_credito) if pedido.notas_credito else 0.0,
             # Serializar cliente correctamente
             'cliente': {
                 'id': pedido.cliente.id,
@@ -1638,10 +1660,12 @@ def actualizar_pedido(
                 )
             
             if estado_anterior_id == ID_ENTREGADO:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="No se puede cancelar un pedido que ya fue entregado. Los pedidos entregados son definitivos."
-                )
+                tiene_devoluciones = any(d.estado == "APROBADA" for d in pedido.devoluciones)
+                if not tiene_devoluciones:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="No se puede cancelar un pedido entregado sin una devolución previa. Registre primero la devolución de los productos."
+                    )
             
             # Devolver inventario si había sido descontado
             devolver_inventario(pedido, db)
@@ -1714,7 +1738,10 @@ def actualizar_pedido(
                 # Asegurar que no quede negativo
                 if puntos_cliente.puntos_totales_usados < 0:
                     puntos_cliente.puntos_totales_usados = 0
-        
+
+            # Crear nota de crédito si el pedido tenía boleta o factura emitida
+            NotasCreditoService.crear_si_corresponde(pedido, db)
+
         pedido.estado_id = nuevo_estado_id
 
         # Para CAJAS_VARIABLES: si el pedido ya estaba marcado como pagado ANTES de la
@@ -1932,7 +1959,7 @@ def actualizar_estado_sii(
     Estados válidos: PENDIENTE, ENVIADO, APROBADO, RECHAZADO
     """
     # Validar estados permitidos
-    estados_validos = ["PENDIENTE", "ENVIADO", "APROBADO", "RECHAZADO"]
+    estados_validos = ["PENDIENTE", "ENVIADO", "APROBADO", "RECHAZADO", "ANULADO"]
     if estado_sii not in estados_validos:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
