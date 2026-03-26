@@ -10,7 +10,7 @@ from starlette.responses import Response
 from routers.auth import get_current_active_user
 
 # Importar routers
-from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, admin_utils, payments, test_payments, maestras, recetas, produccion, compras, cheques, puntos, caja, enrolamiento, gemini_vision, precios_proveedor, stock_cajas, alertas, tipos_pedido, despachos, configuracion, debug_menu, admin_configuracion_landing, tenants, etiquetas, paleta_colores, solicitudes_transferencia, locales_cliente, preventa, hojas_ruta, vehiculos, comisiones, canales_venta, cobranza
+from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, admin_utils, payments, test_payments, maestras, recetas, produccion, compras, cheques, puntos, caja, enrolamiento, gemini_vision, precios_proveedor, stock_cajas, alertas, tipos_pedido, despachos, configuracion, debug_menu, admin_configuracion_landing, tenants, etiquetas, paleta_colores, solicitudes_transferencia, locales_cliente, preventa, hojas_ruta, vehiculos, comisiones, canales_venta, cobranza, notas_credito, devoluciones, superadmin, oauth
 
 
 app = FastAPI(
@@ -151,6 +151,8 @@ app.include_router(produccion.router, prefix="/api", tags=["Producción"])
 app.include_router(compras.router, prefix="/api", tags=["Compras"], dependencies=[Depends(get_current_active_user)])
 app.include_router(cheques.router, prefix="/api/cheques", tags=["Cheques"], dependencies=[Depends(get_current_active_user)])
 app.include_router(cobranza.router, prefix="/api/cobranza", tags=["Cobranza"], dependencies=[Depends(get_current_active_user)])
+app.include_router(notas_credito.router, prefix="/api/notas-credito", tags=["Notas de Crédito"], dependencies=[Depends(get_current_active_user)])
+app.include_router(devoluciones.router, prefix="/api/devoluciones", tags=["Devoluciones"], dependencies=[Depends(get_current_active_user)])
 app.include_router(puntos.router, tags=["Puntos"])
 app.include_router(caja.router, prefix="/api/caja", tags=["Caja"], dependencies=[Depends(get_current_active_user)])
 app.include_router(tipos_pedido.router, prefix="/api/tipos-pedido", tags=["Tipos de Pedido"])
@@ -165,6 +167,8 @@ app.include_router(despachos.router, prefix="/api/despachos", tags=["Despachos"]
 app.include_router(configuracion.router, prefix="/api/config", tags=["Configuración"])
 app.include_router(admin_configuracion_landing.router, prefix="/api/admin/configuracion-landing", tags=["Admin - Configuración Landing"], dependencies=[Depends(get_current_active_user)])
 app.include_router(tenants.router, prefix="/api/tenants", tags=["Tenants (Multi-tenant SaaS)"])
+app.include_router(superadmin.router, prefix="/api/superadmin", tags=["Super Admin (Plataforma)"])
+app.include_router(oauth.router, prefix="/api/auth", tags=["OAuth"])
 app.include_router(etiquetas.router, tags=["Etiquetas"], dependencies=[Depends(get_current_active_user)])
 app.include_router(paleta_colores.router, prefix="/api/paleta-colores", tags=["Paletas de Colores"], dependencies=[Depends(get_current_active_user)])
 app.include_router(debug_menu.router, prefix="/api/debug", tags=["Debug Menu"])

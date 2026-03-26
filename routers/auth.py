@@ -33,13 +33,13 @@ async def get_current_user(
         final_token = token
     elif auth:
         final_token = auth.credentials
-    
+
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    
+
     if not final_token:
         raise credentials_exception
 
@@ -47,16 +47,27 @@ async def get_current_user(
         payload = jwt.decode(final_token, SECRET_KEY, algorithms=[ALGORITHM])
         email: str = payload.get("sub")
         tenant_id: int = payload.get("tenant_id")
+        is_superadmin: bool = payload.get("is_superadmin", False)
         if email is None:
             raise credentials_exception
     except JWTError:
         raise credentials_exception
-    
-    # Buscar usuario por email Y tenant_id (si está en el token)
+
+    # Superadmin: buscar solo por email (sin filtro de tenant)
+    if is_superadmin:
+        user = db.query(User).filter(User.email == email).first()
+        if user is None or not user.is_superadmin:
+            raise credentials_exception
+        # Si el token tiene tenant_id (modo "operando en tenant"), inyectarlo en el objeto
+        if tenant_id:
+            user.tenant_id = tenant_id
+        return user
+
+    # Usuario normal: buscar por email Y tenant_id
     query = db.query(User).filter(User.email == email)
     if tenant_id:
         query = query.filter(User.tenant_id == tenant_id)
-    
+
     user = query.first()
     if user is None:
         raise credentials_exception
@@ -65,6 +76,16 @@ async def get_current_user(
 async def get_current_active_user(current_user: Annotated[User, Depends(get_current_user)]):
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
+    return current_user
+
+
+async def get_current_superadmin(current_user: Annotated[User, Depends(get_current_active_user)]):
+    """Dependencia que exige que el usuario sea superadmin de plataforma."""
+    if not current_user.is_superadmin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acceso restringido a superadministradores de la plataforma"
+        )
     return current_user
 
 
@@ -109,10 +130,19 @@ async def get_current_user_or_api_key(
         payload = jwt.decode(final_token, SECRET_KEY, algorithms=[ALGORITHM])
         email: str = payload.get("sub")
         tenant_id: int = payload.get("tenant_id")
+        is_superadmin: bool = payload.get("is_superadmin", False)
         if email is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
+
+    if is_superadmin:
+        user = db.query(User).filter(User.email == email).first()
+        if user is None or not user.is_active or not user.is_superadmin:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario no encontrado o inactivo")
+        if tenant_id:
+            user.tenant_id = tenant_id
+        return user
 
     query = db.query(User).filter(User.email == email)
     if tenant_id:
@@ -169,17 +199,32 @@ async def login_for_access_token(
         not hostname.replace(".", "").replace(":", "").isdigit()  # No es IP
     )
     
+    # Siempre verificar primero si es superadmin (puede ingresar desde cualquier dominio)
+    superadmin_candidate = db.query(User).filter(
+        User.email == form_data.username,
+        User.is_superadmin == True
+    ).first()
+    if superadmin_candidate and verify_password(form_data.password, superadmin_candidate.hashed_password):
+        if not superadmin_candidate.is_active:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Usuario inactivo")
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": superadmin_candidate.email, "is_superadmin": True},
+            expires_delta=access_token_expires
+        )
+        return {"access_token": access_token, "token_type": "bearer"}
+
     if is_hostname_useful:
         # Modo WEB: Hostname específico detectado (ej: elolivo.masasestacion.cl)
         # Buscar usuario por email Y tenant_id del hostname
         tenant = tenant_from_request
         tenant_service.validar_tenant_activo(tenant)
-        
+
         user = db.query(User).filter(
             User.email == form_data.username,
             User.tenant_id == tenant.id
         ).first()
-        
+
         if not user or not verify_password(form_data.password, user.hashed_password):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -187,33 +232,33 @@ async def login_for_access_token(
                 headers={"WWW-Authenticate": "Bearer"},
             )
     else:
-        # Modo MOBILE: Hostname es IP o localhost en fallback
-        # Buscar usuario solo por email y usar su tenant_id
+        # Modo MOBILE / Superadmin: Hostname es IP o localhost
+        # Buscar usuario solo por email
         user = db.query(User).filter(
             User.email == form_data.username
         ).first()
-        
+
         if not user or not verify_password(form_data.password, user.hashed_password):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect username or password",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        
-        # Obtener tenant del usuario
+
+        # Usuario normal: obtener tenant
         tenant = db.query(Tenant).filter(
             Tenant.id == user.tenant_id
         ).first()
-        
+
         if not tenant:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Tenant del usuario no encontrado"
             )
-        
+
         tenant_service.validar_tenant_activo(tenant)
-    
-    # Generar token con tenant_id correcto
+
+    # Generar token con tenant_id correcto (usuarios normales)
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": user.email, "role": user.role.nombre if user.role else None, "tenant_id": tenant.id},
@@ -276,6 +321,7 @@ async def read_users_me(current_user: Annotated[User, Depends(get_current_active
         "email": current_user.email,
         "nombre_completo": current_user.nombre_completo,
         "is_active": current_user.is_active,
+        "is_superadmin": current_user.is_superadmin,
         "local_defecto_id": current_user.local_defecto_id,
         "tenant_id": current_user.tenant_id,
         "tenant_nombre": tenant.nombre if tenant else None,

@@ -146,6 +146,7 @@ class ConfiguracionLanding(Base):
     costo_fijo_delivery = Column(Numeric(10, 2), nullable=True, default=None)
     costo_por_km_delivery = Column(Numeric(10, 2), nullable=True, default=None)
     monto_minimo_delivery_gratis = Column(Numeric(10, 2), nullable=True, default=None)
+    max_km_delivery = Column(Numeric(6, 2), nullable=True, default=None)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -234,6 +235,7 @@ class TipoDocumento(Base):
     # Relaciones
     compras = relationship("Compra", back_populates="tipo_documento_rel")
     pedidos = relationship("Pedido", back_populates="tipo_documento_tributario")
+    notas_credito = relationship("NotaCredito", back_populates="tipo_documento")
 
 
 class TipoVenta(Base):
@@ -403,8 +405,14 @@ class Producto(Base):
     costo_fabricacion = Column(Numeric(10, 2), nullable=True)  # Calculado automáticamente
     
     # Stock
-    stock_minimo = Column(Integer, default=0)
-    stock_critico = Column(Integer, default=0)
+    stock_minimo = Column(Numeric(10, 3), default=0)
+    stock_critico = Column(Numeric(10, 3), default=0)
+
+    # Unidad de compra (para materias primas a granel)
+    # Ej: unidad_compra_descripcion="Saco 25 kg", factor_conversion_compra=25
+    # → el usuario compra en sacos, el stock se acumula en kg automáticamente
+    unidad_compra_descripcion = Column(String(100), nullable=True)
+    factor_conversion_compra = Column(Numeric(10, 4), nullable=True, default=1)
     
     # Configuración tributaria
     precio_incluye_iva = Column(Boolean, default=True, nullable=False, server_default='true')  # True: precio ya incluye IVA (calcular neto hacia atrás). False: precio es neto (agregar IVA 19%)
@@ -598,9 +606,9 @@ class ItemSolicitudTransferencia(Base):
     solicitud_item_id = Column(Integer, primary_key=True, index=True)
     solicitud_id = Column(Integer, ForeignKey("solicitudes_transferencia.solicitud_id", ondelete="CASCADE"), nullable=False)
     producto_id = Column(Integer, ForeignKey("productos.id", ondelete="RESTRICT"), nullable=False)
-    cantidad_solicitada = Column(Integer, nullable=False)
-    cantidad_aprobada = Column(Integer, nullable=True)
-    cantidad_recibida = Column(Integer, nullable=True)
+    cantidad_solicitada = Column(Numeric(10, 3), nullable=False)
+    cantidad_aprobada = Column(Numeric(10, 3), nullable=True)
+    cantidad_recibida = Column(Numeric(10, 3), nullable=True)
     movimiento_inventario_id = Column(Integer, ForeignKey("movimientos_inventario.id", ondelete="SET NULL"), nullable=True)
 
     # Relaciones
@@ -742,7 +750,7 @@ class Inventario(Base):
     id = Column(Integer, primary_key=True, index=True)
     producto_id = Column(Integer, ForeignKey("productos.id", ondelete="CASCADE"), nullable=False)
     local_id = Column(Integer, ForeignKey("locales.id", ondelete="CASCADE"), nullable=False)
-    cantidad_stock = Column(Integer, nullable=False, default=0)
+    cantidad_stock = Column(Numeric(10, 3), nullable=False, default=0)
     
     # Relaciones
     producto = relationship("Producto", back_populates="inventarios")
@@ -762,7 +770,7 @@ class MovimientoInventario(Base):
     producto_id = Column(Integer, ForeignKey("productos.id", ondelete="RESTRICT"), nullable=False)
     local_origen_id = Column(Integer, ForeignKey("locales.id", ondelete="RESTRICT"), nullable=True)  # NULL = entrada inicial
     local_destino_id = Column(Integer, ForeignKey("locales.id", ondelete="RESTRICT"), nullable=True)  # NULL = salida/ajuste
-    cantidad = Column(Integer, nullable=False)
+    cantidad = Column(Numeric(10, 3), nullable=False)
     tipo_movimiento = Column(String, nullable=False)  # TRANSFERENCIA, AJUSTE, PEDIDO, ENTRADA_INICIAL
     referencia_id = Column(Integer, nullable=True)  # ID del pedido si es por pedido
     notas = Column(String)
@@ -850,6 +858,8 @@ class CanalVenta(Base):
     codigo = Column(String, unique=True, nullable=False, index=True)
     nombre = Column(String, nullable=False)
     activo = Column(Boolean, default=True)
+    entrega_inmediata = Column(Boolean, nullable=False, default=False)
+    visible_en_pos = Column(Boolean, nullable=False, default=True)
 
     pedidos = relationship("Pedido", back_populates="canal_venta")
 
@@ -916,6 +926,8 @@ class Pedido(Base):
     operacion_caja = relationship("OperacionCaja", back_populates="pedido", uselist=False)
     comision = relationship("Comision", back_populates="pedido", uselist=False, cascade="all, delete-orphan")
     despacho = relationship("Despacho", back_populates="pedido", uselist=False)
+    notas_credito = relationship("NotaCredito", back_populates="pedido")
+    devoluciones = relationship("Devolucion", back_populates="pedido")
 
 
 class Cheque(Base):
@@ -1053,12 +1065,13 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     email = Column(String, unique=True, nullable=False, index=True)
-    hashed_password = Column(String, nullable=False)
+    hashed_password = Column(String, nullable=True)  # Nullable para usuarios OAuth (sin contraseña)
     nombre_completo = Column(String)
     is_active = Column(Boolean, default=True)
     role_id = Column(Integer, ForeignKey("roles.id", ondelete="RESTRICT"), nullable=False)
     local_defecto_id = Column(Integer, ForeignKey("locales.id", ondelete="SET NULL"), nullable=True)
     porcentaje_comision = Column(Numeric(5, 2), nullable=True, default=None)  # % comisión sobre neto; NULL = sin comisión
+    is_superadmin = Column(Boolean, default=False, nullable=False, server_default='false')
 
     # Relaciones
     tenant = relationship("Tenant", back_populates="usuarios")
@@ -1066,6 +1079,25 @@ class User(Base):
     local_defecto = relationship("Local", foreign_keys=[local_defecto_id])
     turnos_caja = relationship("TurnoCaja", back_populates="vendedor", cascade="all, delete-orphan")
     comisiones = relationship("Comision", back_populates="vendedor", cascade="all, delete-orphan")
+    oauth_accounts = relationship("UserOAuthAccount", back_populates="user", cascade="all, delete-orphan")
+
+
+class UserOAuthAccount(Base):
+    """Cuentas OAuth vinculadas a un usuario (Google, Microsoft, etc.)."""
+    __tablename__ = "user_oauth_accounts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    provider = Column(String(50), nullable=False)       # 'google', 'microsoft', 'github'
+    provider_id = Column(String(255), nullable=False)   # ID estable del proveedor (Google sub)
+    email = Column(String(255), nullable=True)          # Email reportado por el proveedor
+    created_at = Column(DateTime, nullable=False, default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_id", name="uq_oauth_provider_id"),
+    )
+
+    user = relationship("User", back_populates="oauth_accounts")
 
 
 # --------------------------------------------------
@@ -1585,8 +1617,8 @@ class PickingItem(Base):
     usuario_picking_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     
     # Cantidades para productos regulares
-    cantidad_solicitada = Column(Integer, nullable=True)
-    cantidad_pickeada = Column(Integer, nullable=True)
+    cantidad_solicitada = Column(Numeric(10, 3), nullable=True)
+    cantidad_pickeada = Column(Numeric(10, 3), nullable=True)
     
     # Datos especÃƒÂ­ficos para cajas variables
     lote_codigo = Column(String, nullable=True)  # Para cajas variables
@@ -1729,3 +1761,63 @@ class HojaRutaItem(Base):
     # Relaciones
     hoja_ruta = relationship("HojaRuta", back_populates="items")
     pedido = relationship("Pedido")
+
+
+class Devolucion(Base):
+    """Devolución parcial o total de un pedido entregado."""
+    __tablename__ = "devoluciones"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    pedido_id = Column(Integer, ForeignKey("pedidos.id", ondelete="RESTRICT"), nullable=False, index=True)
+    nota_credito_id = Column(Integer, ForeignKey("notas_credito.id", ondelete="SET NULL"), nullable=True)
+    usuario_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    motivo = Column(Text, nullable=True)
+    fecha_devolucion = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    estado = Column(String, nullable=False, default="APROBADA")  # PENDIENTE, APROBADA, RECHAZADA
+
+    # Relaciones
+    tenant = relationship("Tenant")
+    pedido = relationship("Pedido", back_populates="devoluciones")
+    nota_credito = relationship("NotaCredito", back_populates="devolucion")
+    usuario = relationship("User", foreign_keys=[usuario_id])
+    items = relationship("ItemDevolucion", back_populates="devolucion", cascade="all, delete-orphan")
+
+
+class ItemDevolucion(Base):
+    """Detalle de productos devueltos en una devolución."""
+    __tablename__ = "items_devolucion"
+
+    id = Column(Integer, primary_key=True, index=True)
+    devolucion_id = Column(Integer, ForeignKey("devoluciones.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_pedido_id = Column(Integer, ForeignKey("items_pedido.id", ondelete="RESTRICT"), nullable=False)
+    producto_id = Column(Integer, ForeignKey("productos.id", ondelete="RESTRICT"), nullable=False)
+    cantidad_devuelta = Column(Numeric(10, 3), nullable=False)
+    local_destino_id = Column(Integer, ForeignKey("locales.id", ondelete="RESTRICT"), nullable=False)
+
+    # Relaciones
+    devolucion = relationship("Devolucion", back_populates="items")
+    item_pedido = relationship("ItemPedido")
+    producto = relationship("Producto")
+    local_destino = relationship("Local", foreign_keys=[local_destino_id])
+
+
+class NotaCredito(Base):
+    """Nota de crédito asociada a un pedido cancelado que tenía boleta o factura emitida."""
+    __tablename__ = "notas_credito"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    pedido_id = Column(Integer, ForeignKey("pedidos.id", ondelete="RESTRICT"), nullable=False, index=True)
+    tipo_documento_id = Column(Integer, ForeignKey("tipos_documento_tributario.id", ondelete="RESTRICT"), nullable=False)
+    monto = Column(Numeric(12, 2), nullable=False)
+    motivo = Column(Text, nullable=True)
+    folio_sii = Column(String, nullable=True, index=True)
+    fecha_emision = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    estado_sii = Column(String, nullable=False, default="PENDIENTE")  # PENDIENTE, ENVIADO, APROBADO, RECHAZADO
+
+    # Relaciones
+    tenant = relationship("Tenant")
+    pedido = relationship("Pedido", back_populates="notas_credito")
+    tipo_documento = relationship("TipoDocumento", back_populates="notas_credito")
+    devolucion = relationship("Devolucion", back_populates="nota_credito", uselist=False)

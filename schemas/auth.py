@@ -38,6 +38,7 @@ class User(UserBase):
     tenant_id: int
     tenant_nombre: Optional[str] = None
     tenant_dominio: Optional[str] = None
+    is_superadmin: bool = False
     role: Role
 
     class Config:

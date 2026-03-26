@@ -18,28 +18,29 @@ router = APIRouter()
 @router.get("/landing")
 async def get_landing_config(
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    tenant_id: int = None,
 ):
     """
     Obtener configuración de landing page para un tenant.
-    
+
     Endpoint público (sin autenticación) que detecta el tenant automáticamente
     basándose en el dominio de la petición.
-    
-    Si la configuración tiene paleta_id, retorna los colores de la paleta.
-    Si no tiene paleta_id, retorna los colores custom del campo colores.
-    
-    Ejemplos:
-    - masasestacion.cl → Tenant 1
-    - elolivo.masasestacion.cl → Tenant 2
-    - localhost → Tenant 1 (desarrollo)
+
+    Acepta ?tenant_id=X para superadmin que opera en un tenant específico.
     """
     from database.models import Tenant, ConfiguracionLanding, PaletaColores
-    
-    # Detectar tenant por dominio
-    tenant = tenant_service.get_tenant_from_request(request, db)
-    if not tenant:
-        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+
+    # Si viene tenant_id explícito (superadmin), usarlo directamente
+    if tenant_id:
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        if not tenant:
+            raise HTTPException(status_code=404, detail="Tenant no encontrado")
+    else:
+        # Detectar tenant por dominio
+        tenant = tenant_service.get_tenant_from_request(request, db)
+        if not tenant:
+            raise HTTPException(status_code=404, detail="Tenant no encontrado")
     
     # Validar que el tenant esté activo
     tenant_service.validar_tenant_activo(tenant)
@@ -117,7 +118,8 @@ async def get_landing_config(
         "delivery": {
             "costo_fijo": float(config.costo_fijo_delivery) if config.costo_fijo_delivery is not None else None,
             "costo_por_km": float(config.costo_por_km_delivery) if config.costo_por_km_delivery is not None else None,
-            "monto_minimo_gratis": float(config.monto_minimo_delivery_gratis) if config.monto_minimo_delivery_gratis is not None else None
+            "monto_minimo_gratis": float(config.monto_minimo_delivery_gratis) if config.monto_minimo_delivery_gratis is not None else None,
+            "max_km": float(config.max_km_delivery) if config.max_km_delivery is not None else None
         }
     }
 
