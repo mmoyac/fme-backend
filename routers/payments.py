@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from database.database import get_db
 from database.models import Pedido
 from services.payment_service import payment_service
+from services.webhook_service import trigger_pedido_confirmado
 from routers.auth import get_current_active_user
 from routers.pedidos import descontar_inventario
 
@@ -63,6 +64,8 @@ async def process_payment(request: Request, db: Session = Depends(get_db)):
                     pedido.mp_payment_id = str(payment_result.get("id"))
                     pedido.mp_status = "approved"
                     db.commit()
+                    db.refresh(pedido)
+                    trigger_pedido_confirmado(pedido)
         
         return payment_result
     except Exception as e:
@@ -107,20 +110,9 @@ async def mercado_pago_webhook(request: Request, db: Session = Depends(get_db)):
                     if status_detail == "approved" and not pedido.es_pagado:
                         pedido.es_pagado = True
                         pedido.estado = "CONFIRMADO"
-                        
-                        # Descontar inventario automáticamente
-                        # Nota: Asumimos un local de despacho por defecto o lógica interna
-                        # Si es venta web, puede que el despacho sea desde un centro de distribución.
-                        # Por ahora usamos el local_id del pedido (que suele ser WEB) o habría que definir lógica.
-                        # Si definimos que venta web descuenta de un local físico específico (ej. Matriz), se asigna aquí.
-                        
-                        # IMPORTANTE: Para MVP, solo marcamos pagado. El descuento de inventario
-                        # requiere asignar local de despacho físico. Si la lógica de negocio permite
-                        # asignar automáticamnete el local con más stock, se haría aquí.
-                        # Por ahora: Solo marcar Pagado. El admin asignará local y confirmará despacho.
-                        # OJO: Si queremos confirmación automática completa, necesitamos asignar local.
-                        
-                        pass 
+                        db.flush()
+                        db.refresh(pedido)
+                        trigger_pedido_confirmado(pedido)
 
                     db.commit()
                     return {"status": "ok"}
