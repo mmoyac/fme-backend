@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from database.database import get_db
 from database.models import Cliente, Pedido
+from services import notification_preferences_service
 from schemas.cliente import ClienteCreate, ClienteUpdate, ClienteResponse
 from services.puntos_service import PuntosService
 from routers.auth import get_current_active_user
@@ -130,6 +131,9 @@ def crear_cliente(
     db.commit()
     db.refresh(db_cliente)
     
+    # Crear preferencias de notificación por defecto
+    notification_preferences_service.crear_preferencias_default(db, db_cliente.id)
+
     # Crear registro inicial de puntos
     puntos_cliente = PuntosService.obtener_puntos_cliente(db, db_cliente.id)
     
@@ -251,3 +255,48 @@ def eliminar_cliente(
     db.delete(db_cliente)
     db.commit()
     return None
+
+
+@router.get("/unsubscribe", include_in_schema=True)
+def toggle_notificacion(token: str, db: Session = Depends(get_db)):
+    """
+    Endpoint público para suscribirse/desuscribirse de notificaciones.
+    No requiere autenticación — el token identifica al cliente y canal.
+    """
+    from fastapi.responses import HTMLResponse
+
+    resultado = notification_preferences_service.toggle_suscripcion(db, token)
+
+    if not resultado:
+        return HTMLResponse(content="""
+        <html><body style="font-family:Arial;text-align:center;padding:40px">
+            <h2>❌ Link inválido</h2>
+            <p>Este enlace no es válido o ya expiró.</p>
+        </body></html>
+        """, status_code=404)
+
+    canal_nombre = {"email": "Correo electrónico", "whatsapp": "WhatsApp", "telegram": "Telegram", "sms": "SMS"}.get(resultado["canal"], resultado["canal"])
+
+    if resultado["activo"]:
+        mensaje = f"✅ Te has <strong>suscrito</strong> nuevamente a notificaciones por {canal_nombre}."
+        boton = "Desuscribirme"
+        color = "#22c55e"
+    else:
+        mensaje = f"🔕 Te has <strong>desuscrito</strong> de notificaciones por {canal_nombre}."
+        boton = "Volver a suscribirme"
+        color = "#64748b"
+
+    return HTMLResponse(content=f"""
+    <html><head><meta charset="utf-8"></head>
+    <body style="font-family:Arial,sans-serif;text-align:center;padding:60px;background:#f8fafc">
+        <div style="max-width:480px;margin:0 auto;background:white;padding:40px;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,0.08)">
+            <h2 style="color:#1e293b">Masas Estación</h2>
+            <p style="font-size:16px;color:#334155">{mensaje}</p>
+            <p style="color:#64748b;font-size:14px">Canal: <strong>{canal_nombre}</strong></p>
+            <a href="/api/clientes/unsubscribe?token={token}"
+               style="display:inline-block;margin-top:20px;padding:10px 24px;background:{color};color:white;border-radius:8px;text-decoration:none;font-size:14px">
+                {boton}
+            </a>
+        </div>
+    </body></html>
+    """)

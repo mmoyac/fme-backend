@@ -671,6 +671,25 @@ class Cliente(Base):
     puntos_cliente = relationship("PuntosCliente", back_populates="cliente", cascade="all, delete-orphan")
     movimientos_puntos = relationship("MovimientoPuntos", back_populates="cliente", cascade="all, delete-orphan")
     locales_cliente = relationship("LocalCliente", back_populates="cliente", cascade="all, delete-orphan")
+    notification_preferences = relationship("ClienteNotificationPreference", back_populates="cliente", cascade="all, delete-orphan")
+
+
+class ClienteNotificationPreference(Base):
+    """Preferencias de notificación por canal para cada cliente."""
+    __tablename__ = "cliente_notification_preferences"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cliente_id = Column(Integer, ForeignKey("clientes.id", ondelete="CASCADE"), nullable=False, index=True)
+    canal = Column(String(20), nullable=False)   # 'email', 'whatsapp', 'telegram', 'sms'
+    activo = Column(Boolean, default=True, nullable=False)
+    token_unsub = Column(String(64), nullable=False, unique=True, index=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint('cliente_id', 'canal', name='uq_cliente_canal'),
+    )
+
+    cliente = relationship("Cliente", back_populates="notification_preferences")
 
 
 class TipoMovimientoPuntos(enum.Enum):

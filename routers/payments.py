@@ -65,7 +65,7 @@ async def process_payment(request: Request, db: Session = Depends(get_db)):
                     pedido.mp_status = "approved"
                     db.commit()
                     db.refresh(pedido)
-                    trigger_pedido_confirmado(pedido)
+                    trigger_pedido_confirmado(pedido, db)
         
         return payment_result
     except Exception as e:
@@ -112,7 +112,7 @@ async def mercado_pago_webhook(request: Request, db: Session = Depends(get_db)):
                         pedido.estado = "CONFIRMADO"
                         db.flush()
                         db.refresh(pedido)
-                        trigger_pedido_confirmado(pedido)
+                        trigger_pedido_confirmado(pedido, db)
 
                     db.commit()
                     return {"status": "ok"}
