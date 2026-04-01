@@ -56,6 +56,30 @@ def obtener_catalogo_web(
     return catalogo
 
 
+@router.get("/catalogo/{sku}", response_model=ProductoCatalogo)
+def obtener_producto_catalogo_por_sku(
+    sku: str,
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene un producto específico del catálogo web por SKU.
+    Detecta automáticamente el tenant por dominio.
+    Usado por las páginas de producto individual (para redes sociales).
+    """
+    tenant = tenant_service.get_tenant_from_request(request, db)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+
+    tenant_service.validar_tenant_activo(tenant)
+
+    catalogo = inventario_service.get_catalogo_web(db, tenant_id=tenant.id)
+    producto = next((p for p in catalogo if p["sku"] == sku), None)
+    if not producto:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+    return producto
+
+
 @router.get("/catalogo-local/{local_id}")
 def obtener_catalogo_local(
     local_id: int,
