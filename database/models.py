@@ -63,6 +63,8 @@ class Tenant(Base):
     subdomain = Column(String(50), unique=True, nullable=True)  # 'masasestacion' para *.tuapp.cl
     activo = Column(Boolean, default=True, nullable=False)
     correlativo_pedido = Column(Integer, default=0, nullable=False)  # Correlativo para numero_pedido por tenant
+    correlativo_cotizacion = Column(Integer, default=0, nullable=False)  # Correlativo para cotizaciones
+    correlativo_ot = Column(Integer, default=0, nullable=False)  # Correlativo para órdenes de trabajo
     google_sheet_id = Column(String(200), nullable=True)  # ID del Google Sheet para importación de datos
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -88,6 +90,9 @@ class Tenant(Base):
     )
     proveedores = relationship("Proveedor", back_populates="tenant", passive_deletes=True)
     cobros_pendientes = relationship("CobroPendiente", back_populates="tenant", passive_deletes=True)
+    ot_etapas = relationship("OtEtapaTipo", back_populates="tenant", passive_deletes=True)
+    cotizaciones = relationship("Cotizacion", back_populates="tenant", passive_deletes=True)
+    ordenes_trabajo = relationship("OrdenTrabajo", back_populates="tenant", passive_deletes=True)
 
 
 class ConfiguracionLanding(Base):
@@ -549,7 +554,8 @@ class Local(Base):
     direccion = Column(String)
     activo = Column(Boolean, default=True)
     tipo_local_id = Column(Integer, ForeignKey("tipos_local.id", ondelete="SET NULL"), nullable=True)
-    
+    es_local_fabricacion = Column(Boolean, default=False, nullable=False)  # Local de producción/fabricación del tenant
+
     # Relaciones
     tenant = relationship("Tenant", back_populates="locales", passive_deletes=True)
     tipo_local = relationship("TipoLocal", back_populates="locales")
@@ -668,6 +674,7 @@ class Cliente(Base):
     # Relaciones
     tenant = relationship("Tenant", back_populates="clientes")
     pedidos = relationship("Pedido", back_populates="cliente")
+    cotizaciones = relationship("Cotizacion", back_populates="cliente")
     puntos_cliente = relationship("PuntosCliente", back_populates="cliente", cascade="all, delete-orphan")
     movimientos_puntos = relationship("MovimientoPuntos", back_populates="cliente", cascade="all, delete-orphan")
     locales_cliente = relationship("LocalCliente", back_populates="cliente", cascade="all, delete-orphan")
@@ -881,6 +888,7 @@ class CanalVenta(Base):
     visible_en_pos = Column(Boolean, nullable=False, default=True)
 
     pedidos = relationship("Pedido", back_populates="canal_venta")
+    cotizaciones = relationship("Cotizacion", back_populates="canal_venta")
 
 
 class Pedido(Base):
@@ -905,6 +913,7 @@ class Pedido(Base):
     token_seguimiento = Column(String(64), nullable=True, unique=True, index=True)  # Token público para consulta de estado
     costo_delivery = Column(Numeric(10, 2), nullable=True, default=None)  # Costo de delivery (cobro aparte, no suma al total)
     inventario_descontado = Column(Boolean, default=False)  # Flag para evitar doble descuento
+    cotizacion_id = Column(Integer, ForeignKey("cotizaciones.id", ondelete="SET NULL"), nullable=True)  # Cotización que originó este pedido
     notas = Column(Text, nullable=True)
     notas_admin = Column(Text, nullable=True)
     
@@ -948,6 +957,7 @@ class Pedido(Base):
     despacho = relationship("Despacho", back_populates="pedido", uselist=False)
     notas_credito = relationship("NotaCredito", back_populates="pedido")
     devoluciones = relationship("Devolucion", back_populates="pedido")
+    cotizacion = relationship("Cotizacion", back_populates="pedidos")
 
 
 class Cheque(Base):
@@ -1865,3 +1875,228 @@ class Notification(Base):
     # Relaciones
     tenant = relationship("Tenant")
     user = relationship("User")
+
+
+# --------------------------------------------------
+# COTIZACIONES Y ÓRDENES DE TRABAJO
+# --------------------------------------------------
+
+class TipoOT(Base):
+    """Tipos de Orden de Trabajo: OP (Producción), OS (Servicio), etc. Maestra global extensible."""
+    __tablename__ = "tipos_ot"
+
+    id = Column(Integer, primary_key=True, index=True)
+    codigo = Column(String(20), unique=True, nullable=False, index=True)   # 'OP', 'OS'
+    nombre = Column(String(100), nullable=False)                            # 'Orden de Producción'
+    descripcion = Column(String(255), nullable=True)
+    activo = Column(Boolean, default=True)
+
+    # Relaciones
+    etapas = relationship("OtEtapaTipo", back_populates="tipo_ot")
+
+
+class EstadoCotizacion(Base):
+    """Estados configurables para cotizaciones."""
+    __tablename__ = "estados_cotizacion"
+
+    id = Column(Integer, primary_key=True, index=True)
+    codigo = Column(String(50), unique=True, nullable=False, index=True)   # 'BORRADOR', 'ENVIADA', 'ACEPTADA'
+    nombre = Column(String(100), nullable=False)                            # 'Borrador', 'Enviada al cliente'
+    descripcion = Column(Text, nullable=True)
+    color = Column(String(20), nullable=False, default='gray-500')          # Para UI: 'green-500', 'red-500'
+    orden = Column(Integer, nullable=False, default=0)
+    es_final = Column(Boolean, default=False)                               # True para ACEPTADA, RECHAZADA, VENCIDA
+    activo = Column(Boolean, default=True)
+    fecha_creacion = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relaciones
+    cotizaciones = relationship("Cotizacion", back_populates="estado_cotizacion")
+
+
+class EstadoOT(Base):
+    """Estados configurables para Órdenes de Trabajo."""
+    __tablename__ = "estados_ot"
+
+    id = Column(Integer, primary_key=True, index=True)
+    codigo = Column(String(50), unique=True, nullable=False, index=True)   # 'PENDIENTE', 'EN_PROCESO', 'CERRADA'
+    nombre = Column(String(100), nullable=False)                            # 'Pendiente', 'En proceso'
+    descripcion = Column(Text, nullable=True)
+    color = Column(String(20), nullable=False, default='gray-500')
+    orden = Column(Integer, nullable=False, default=0)
+    es_final = Column(Boolean, default=False)                               # True para CERRADA, CANCELADA
+    activo = Column(Boolean, default=True)
+    fecha_creacion = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relaciones
+    ordenes_trabajo = relationship("OrdenTrabajo", back_populates="estado_ot")
+
+
+class OtEtapaTipo(Base):
+    """Etapas parametrizables por tenant y tipo de OT. Define el flujo de trabajo de cada tipo."""
+    __tablename__ = "ot_etapas_tipo"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    tipo_ot_id = Column(Integer, ForeignKey("tipos_ot.id", ondelete="RESTRICT"), nullable=False)
+    nombre = Column(String(100), nullable=False)                            # 'En proceso', 'Control de calidad'
+    orden = Column(Integer, nullable=False, default=0)                      # Para ordenar el stepper
+    es_etapa_final = Column(Boolean, default=False)                         # La etapa que cierra la OT
+    color = Column(String(10), nullable=True)                               # Hex para UI: '#22c55e'
+    activo = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relaciones
+    tenant = relationship("Tenant", back_populates="ot_etapas")
+    tipo_ot = relationship("TipoOT", back_populates="etapas")
+
+
+# --------------------------------------------------
+# COTIZACIONES
+# --------------------------------------------------
+
+class CotizacionVersion(Base):
+    """Versión de una cotización. La versión 1 es siempre la solicitud original del cliente."""
+    __tablename__ = "cotizacion_versiones"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cotizacion_id = Column(Integer, ForeignKey("cotizaciones.id", ondelete="CASCADE"), nullable=False, index=True)
+    numero_version = Column(Integer, nullable=False)                         # 1, 2, 3...
+    items = Column(JSON, nullable=False)                                     # [{producto_id, nombre, cantidad, precio_unitario, subtotal}]
+    monto_total = Column(Numeric(10, 2), nullable=False, default=0)
+    motivo_cambio = Column(Text, nullable=True)                              # Razón de la nueva versión
+    creado_por_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    es_version_aceptada = Column(Boolean, default=False)                     # True solo en la versión que fue aceptada
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relaciones
+    cotizacion = relationship("Cotizacion", back_populates="versiones", foreign_keys=[cotizacion_id])
+    creado_por = relationship("User", foreign_keys=[creado_por_id])
+
+
+class Cotizacion(Base):
+    """Cotización madre. Contiene todas las versiones y el log de cambios."""
+    __tablename__ = "cotizaciones"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    cliente_id = Column(Integer, ForeignKey("clientes.id", ondelete="RESTRICT"), nullable=False)
+    canal_venta_id = Column(Integer, ForeignKey("canales_venta.id", ondelete="SET NULL"), nullable=True)
+    numero_cotizacion = Column(String(50), unique=True, nullable=False, index=True)  # ME-COT-2026-00001
+    estado_cotizacion_id = Column(Integer, ForeignKey("estados_cotizacion.id", ondelete="RESTRICT"), nullable=False)
+    fecha_vencimiento = Column(Date, nullable=True)
+    version_activa_id = Column(Integer, ForeignKey("cotizacion_versiones.id", ondelete="SET NULL"), nullable=True)
+    notas = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relaciones
+    tenant = relationship("Tenant", back_populates="cotizaciones")
+    cliente = relationship("Cliente", back_populates="cotizaciones")
+    canal_venta = relationship("CanalVenta", back_populates="cotizaciones")
+    estado_cotizacion = relationship("EstadoCotizacion", back_populates="cotizaciones")
+    versiones = relationship("CotizacionVersion", back_populates="cotizacion",
+                             foreign_keys="CotizacionVersion.cotizacion_id",
+                             cascade="all, delete-orphan", order_by="CotizacionVersion.numero_version")
+    version_activa = relationship("CotizacionVersion", foreign_keys=[version_activa_id], post_update=True)
+    log = relationship("CotizacionLog", back_populates="cotizacion", cascade="all, delete-orphan",
+                       order_by="CotizacionLog.created_at")
+    pedidos = relationship("Pedido", back_populates="cotizacion")
+
+
+class CotizacionLog(Base):
+    """Registro de auditoría de todos los eventos sobre una cotización."""
+    __tablename__ = "cotizacion_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    cotizacion_id = Column(Integer, ForeignKey("cotizaciones.id", ondelete="CASCADE"), nullable=False, index=True)
+    version_id = Column(Integer, ForeignKey("cotizacion_versiones.id", ondelete="SET NULL"), nullable=True)
+    accion = Column(String(50), nullable=False)   # CREADA, VERSION_CREADA, ENVIADA, ACEPTADA, RECHAZADA, VENCIDA
+    usuario_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    detalle = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relaciones
+    cotizacion = relationship("Cotizacion", back_populates="log")
+    version = relationship("CotizacionVersion", foreign_keys=[version_id])
+    usuario = relationship("User", foreign_keys=[usuario_id])
+
+
+# --------------------------------------------------
+# ÓRDENES DE TRABAJO
+# --------------------------------------------------
+
+class OrdenTrabajo(Base):
+    """
+    Orden de Trabajo (OT). Contenedor para producción (OP) o servicios (OS).
+    Tiene etapas parametrizables por tenant y tipo.
+    """
+    __tablename__ = "ordenes_trabajo"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    numero_ot = Column(String(50), unique=True, nullable=False, index=True)  # ME-OT-2026-00001
+    tipo_ot_id = Column(Integer, ForeignKey("tipos_ot.id", ondelete="RESTRICT"), nullable=False)
+    estado_ot_id = Column(Integer, ForeignKey("estados_ot.id", ondelete="RESTRICT"), nullable=False)
+    etapa_actual_id = Column(Integer, ForeignKey("ot_etapas_tipo.id", ondelete="SET NULL"), nullable=True)
+    local_id = Column(Integer, ForeignKey("locales.id", ondelete="RESTRICT"), nullable=False)
+    pedido_id = Column(Integer, ForeignKey("pedidos.id", ondelete="SET NULL"), nullable=True)
+    cotizacion_id = Column(Integer, ForeignKey("cotizaciones.id", ondelete="SET NULL"), nullable=True)
+    op_id = Column(Integer, ForeignKey("ordenes_produccion.id", ondelete="SET NULL"), nullable=True)
+    fecha_programada = Column(DateTime(timezone=True), nullable=True)
+    fecha_inicio = Column(DateTime(timezone=True), nullable=True)
+    fecha_cierre = Column(DateTime(timezone=True), nullable=True)
+    notas = Column(Text, nullable=True)
+    creado_por_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relaciones
+    tenant = relationship("Tenant", back_populates="ordenes_trabajo")
+    tipo_ot = relationship("TipoOT")
+    estado_ot = relationship("EstadoOT", back_populates="ordenes_trabajo")
+    etapa_actual = relationship("OtEtapaTipo", foreign_keys=[etapa_actual_id])
+    local = relationship("Local")
+    pedido = relationship("Pedido")
+    cotizacion = relationship("Cotizacion")
+    op = relationship("OrdenProduccion")
+    creado_por = relationship("User", foreign_keys=[creado_por_id])
+    items = relationship("OtItem", back_populates="ot", cascade="all, delete-orphan",
+                         order_by="OtItem.id")
+    log = relationship("OtLog", back_populates="ot", cascade="all, delete-orphan",
+                       order_by="OtLog.created_at")
+
+
+class OtItem(Base):
+    """Ítem de una Orden de Trabajo: producto + cantidad a producir/ejecutar."""
+    __tablename__ = "ot_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ot_id = Column(Integer, ForeignKey("ordenes_trabajo.id", ondelete="CASCADE"), nullable=False, index=True)
+    producto_id = Column(Integer, ForeignKey("productos.id", ondelete="RESTRICT"), nullable=False)
+    unidad_medida_id = Column(Integer, ForeignKey("unidades_medida.id", ondelete="RESTRICT"), nullable=True)
+    cantidad = Column(Numeric(10, 3), nullable=False)
+    cantidad_ejecutada = Column(Numeric(10, 3), nullable=True)   # Se llena al cierre
+    notas = Column(Text, nullable=True)
+
+    # Relaciones
+    ot = relationship("OrdenTrabajo", back_populates="items")
+    producto = relationship("Producto")
+    unidad_medida = relationship("UnidadMedida")
+
+
+class OtLog(Base):
+    """Auditoría de eventos sobre una Orden de Trabajo."""
+    __tablename__ = "ot_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ot_id = Column(Integer, ForeignKey("ordenes_trabajo.id", ondelete="CASCADE"), nullable=False, index=True)
+    accion = Column(String(50), nullable=False)   # CREADA, ETAPA_AVANZADA, CERRADA, CANCELADA
+    etapa_id = Column(Integer, ForeignKey("ot_etapas_tipo.id", ondelete="SET NULL"), nullable=True)
+    usuario_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    detalle = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relaciones
+    ot = relationship("OrdenTrabajo", back_populates="log")
+    etapa = relationship("OtEtapaTipo", foreign_keys=[etapa_id])
+    usuario = relationship("User", foreign_keys=[usuario_id])

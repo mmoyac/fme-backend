@@ -279,17 +279,28 @@ def finalizar_orden(orden_id: int, confirmacion: schemas_prod.ConfirmacionFinali
         if inv:
             inv.cantidad_stock = float(inv.cantidad_stock) - cantidad_requerida
         else:
-             pass 
+             pass
+        # Movimiento: salida de insumo por producción
+        db.add(models.MovimientoInventario(
+            producto_id=pid,
+            local_origen_id=orden.local_id,
+            local_destino_id=None,
+            cantidad=-cantidad_requerida,
+            tipo_movimiento="PRODUCCION",
+            referencia_id=orden.id,
+            notas=f"Consumo insumo OP #{orden.id}",
+            usuario=current_user.email,
+        ))
 
     # Fase 2: Incrementar Producto Final (Con Cantidad REAL)
     for detalle in orden.detalles:
         cantidad_real = ajustes_prod_map.get(detalle.id, float(detalle.cantidad_programada))
-        
+
         inventario_final = db.query(models.Inventario).filter(
             models.Inventario.producto_id == detalle.producto_id,
             models.Inventario.local_id == orden.local_id
         ).first()
-        
+
         if not inventario_final:
             inventario_final = models.Inventario(
                 producto_id=detalle.producto_id,
@@ -297,9 +308,21 @@ def finalizar_orden(orden_id: int, confirmacion: schemas_prod.ConfirmacionFinali
                 cantidad_stock=0
             )
             db.add(inventario_final)
-            
+
         inventario_final.cantidad_stock = float(inventario_final.cantidad_stock) + cantidad_real
-        detalle.cantidad_producida = cantidad_real # Guardamos lo real
+        detalle.cantidad_producida = cantidad_real  # Guardamos lo real
+
+        # Movimiento: entrada de producto terminado por producción
+        db.add(models.MovimientoInventario(
+            producto_id=detalle.producto_id,
+            local_origen_id=None,
+            local_destino_id=orden.local_id,
+            cantidad=cantidad_real,
+            tipo_movimiento="PRODUCCION",
+            referencia_id=orden.id,
+            notas=f"Producto terminado OP #{orden.id}",
+            usuario=current_user.email,
+        ))
 
     orden.fecha_finalizacion = datetime.now()
     orden.estado = "FINALIZADA"
@@ -308,8 +331,53 @@ def finalizar_orden(orden_id: int, confirmacion: schemas_prod.ConfirmacionFinali
              orden.notas += f" | Cierre: {confirmacion.notas_finalizacion}"
         else:
              orden.notas = f"Cierre: {confirmacion.notas_finalizacion}"
-             
+
+    # Si hay una OT vinculada a esta OP, cerrarla automáticamente
+    ot_vinculada = db.query(models.OrdenTrabajo).join(models.EstadoOT).filter(
+        models.OrdenTrabajo.op_id == orden_id,
+        models.EstadoOT.es_final == False,
+    ).first()
+    if ot_vinculada:
+        estado_cerrada = db.query(models.EstadoOT).filter(models.EstadoOT.codigo == "CERRADA").first()
+        if estado_cerrada:
+            ot_vinculada.estado_ot_id = estado_cerrada.id
+            ot_vinculada.fecha_cierre = datetime.now()
+            # Avanzar a la última etapa configurada
+            ultima_etapa = db.query(models.OtEtapaTipo).filter(
+                models.OtEtapaTipo.tenant_id == ot_vinculada.tenant_id,
+                models.OtEtapaTipo.tipo_ot_id == ot_vinculada.tipo_ot_id,
+            ).order_by(models.OtEtapaTipo.orden.desc()).first()
+            if ultima_etapa:
+                ot_vinculada.etapa_actual_id = ultima_etapa.id
+            db.add(models.OtLog(
+                ot_id=ot_vinculada.id,
+                accion="CERRADA",
+                etapa_id=ot_vinculada.etapa_actual_id,
+                usuario_id=current_user.id,
+                detalle=f"Cerrada automáticamente al finalizar OP #{orden_id}",
+            ))
+
+        # Si la OT tenía un pedido vinculado → confirmar el pedido y descontar inventario
+        if ot_vinculada.pedido_id:
+            pedido = db.query(models.Pedido).join(models.EstadoPedido).filter(
+                models.Pedido.id == ot_vinculada.pedido_id,
+                models.EstadoPedido.codigo == "PENDIENTE",
+            ).first()
+            if pedido:
+                estado_confirmado = db.query(models.EstadoPedido).filter(
+                    models.EstadoPedido.codigo == "CONFIRMADO"
+                ).first()
+                if estado_confirmado:
+                    pedido.estado_id = estado_confirmado.id
+                    pedido.notas_admin = (pedido.notas_admin or "") + f" | Confirmado automáticamente al cerrar OT #{ot_vinculada.id}"
+                # Descontar inventario del pedido si aún no se hizo
+                if not pedido.inventario_descontado:
+                    local_despacho_id = pedido.local_despacho_id or orden.local_id
+                    from routers.pedidos import descontar_inventario
+                    db.flush()  # Asegurar items del pedido disponibles
+                    descontar_inventario(pedido, local_despacho_id, db)
+
     db.commit()
-    
+
     return {"message": "Orden finalizada y stock actualizado"}
 

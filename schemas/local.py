@@ -11,6 +11,7 @@ class LocalBase(BaseModel):
     codigo: Optional[str] = Field(None, max_length=50)
     direccion: Optional[str] = None
     activo: bool = True
+    es_local_fabricacion: bool = False
 
 
 class LocalCreate(LocalBase):
@@ -24,6 +25,7 @@ class LocalUpdate(BaseModel):
     codigo: Optional[str] = Field(None, max_length=50)
     direccion: Optional[str] = None
     activo: Optional[bool] = None
+    es_local_fabricacion: Optional[bool] = None
 
 
 class LocalResponse(LocalBase):

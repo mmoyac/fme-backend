@@ -29,7 +29,7 @@ class MovimientoInventarioResponse(BaseModel):
     producto_id: int
     local_origen_id: Optional[int]
     local_destino_id: Optional[int]
-    cantidad: int
+    cantidad: float
     tipo_movimiento: str
     referencia_id: Optional[int]
     notas: Optional[str]

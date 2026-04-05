@@ -196,7 +196,59 @@ def obtener_siguiente_numero_pedido(db: Session, tenant_id: int) -> str:
     numero_pedido = f"{prefijo}-{year}-{correlativo:05d}"
     
     db.commit()  # Confirmar el UPDATE
-    
+
     print(f"✅ Número de pedido generado: {numero_pedido} (Tenant: {codigo_tenant})")
-    
+
     return numero_pedido
+
+
+def obtener_siguiente_numero_cotizacion(db: Session, tenant_id: int) -> str:
+    """
+    Genera el siguiente número de cotización único para el tenant.
+
+    Formato: {CODIGO}-COT-{AÑO}-{CORRELATIVO:05d}
+    Ejemplo: MASAS-ESTACION-COT-2026-00001
+    """
+    query = text("""
+        UPDATE tenants
+        SET correlativo_cotizacion = correlativo_cotizacion + 1
+        WHERE id = :tenant_id
+        RETURNING codigo, correlativo_cotizacion
+    """)
+    result = db.execute(query, {"tenant_id": tenant_id})
+    row = result.fetchone()
+    if not row:
+        raise ValueError(f"Tenant con ID {tenant_id} no existe")
+
+    prefijo = row[0].upper()
+    correlativo = row[1]
+    year = datetime.now().year
+    numero = f"{prefijo}-COT-{year}-{correlativo:05d}"
+    db.commit()
+    return numero
+
+
+def obtener_siguiente_numero_ot(db: Session, tenant_id: int) -> str:
+    """
+    Genera el siguiente número de Orden de Trabajo único para el tenant.
+
+    Formato: {CODIGO}-OT-{AÑO}-{CORRELATIVO:05d}
+    Ejemplo: MASAS-ESTACION-OT-2026-00001
+    """
+    query = text("""
+        UPDATE tenants
+        SET correlativo_ot = correlativo_ot + 1
+        WHERE id = :tenant_id
+        RETURNING codigo, correlativo_ot
+    """)
+    result = db.execute(query, {"tenant_id": tenant_id})
+    row = result.fetchone()
+    if not row:
+        raise ValueError(f"Tenant con ID {tenant_id} no existe")
+
+    prefijo = row[0].upper()
+    correlativo = row[1]
+    year = datetime.now().year
+    numero = f"{prefijo}-OT-{year}-{correlativo:05d}"
+    db.commit()
+    return numero

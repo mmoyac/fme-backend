@@ -217,7 +217,8 @@ class PedidoConRelaciones(BaseModel):
     puntos_ganados: Optional[int] = None
     puntos_usados: Optional[int] = None
     descuento_puntos: Optional[float] = None
-    
+    costo_delivery: Optional[float] = None
+
     # Control SII (Facturación Electrónica)
     tipo_documento_tributario_id: Optional[int] = None
     tipo_documento_codigo: Optional[str] = None

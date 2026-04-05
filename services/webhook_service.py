@@ -7,7 +7,7 @@ import threading
 import httpx
 from sqlalchemy.orm import Session
 
-from database.models import Pedido
+from database.models import Pedido, Cotizacion
 from services import notification_preferences_service
 
 logger = logging.getLogger(__name__)
@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 import os
 N8N_WEBHOOK_PEDIDO_CONFIRMADO = "https://n8n.masasestacion.cl/webhook/pedido-confirmado"
 N8N_WEBHOOK_PEDIDO_ENTREGADO = "https://n8n.masasestacion.cl/webhook/pedido-entregado"
+N8N_WEBHOOK_COTIZACION_CREADA = "https://n8n.masasestacion.cl/webhook/cotizacion-creada"
+N8N_WEBHOOK_COTIZACION_ENVIADA = "https://n8n.masasestacion.cl/webhook/cotizacion-enviada"
+N8N_WEBHOOK_COTIZACION_ACEPTADA = "https://n8n.masasestacion.cl/webhook/cotizacion-aceptada"
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.masasestacion.cl")
 
 
@@ -117,3 +120,76 @@ def trigger_pedido_entregado(pedido: Pedido, db: Session, fecha_entrega=None) ->
         daemon=True
     )
     thread.start()
+
+
+def _build_cotizacion_payload(cotizacion: Cotizacion, db: Session) -> dict:
+    from zoneinfo import ZoneInfo
+    tz_cl = ZoneInfo("America/Santiago")
+    cliente = cotizacion.cliente
+    token_unsub = notification_preferences_service.get_token(db, cliente.id, "email") if cliente else None
+    unsub_url = f"{API_BASE_URL}/api/clientes/unsubscribe?token={token_unsub}" if token_unsub else None
+    fecha_cl = cotizacion.created_at.astimezone(tz_cl).strftime("%d/%m/%Y %H:%M") if cotizacion.created_at else None
+    fecha_venc = cotizacion.fecha_vencimiento.strftime("%d/%m/%Y") if cotizacion.fecha_vencimiento else None
+    tenant_nombre = cotizacion.tenant.nombre if cotizacion.tenant else "Nuestra tienda"
+    version = cotizacion.version_activa
+
+    return {
+        "cotizacion_id": cotizacion.id,
+        "numero_cotizacion": cotizacion.numero_cotizacion,
+        "fecha": fecha_cl,
+        "fecha_vencimiento": fecha_venc,
+        "monto_total": float(version.monto_total) if version else 0.0,
+        "cliente_nombre": f"{cliente.nombre} {cliente.apellido or ''}".strip() if cliente else "Cliente",
+        "cliente_email": cliente.email if cliente else None,
+        "cliente_telefono": cliente.telefono if cliente else None,
+        "tenant_nombre": tenant_nombre,
+        "unsub_url": unsub_url,
+        "items": [
+            {
+                "producto": item.get("nombre", f"Producto {item.get('producto_id')}"),
+                "cantidad": item.get("cantidad"),
+                "precio_unitario": float(item.get("precio_unitario", 0)),
+                "subtotal": float(item.get("subtotal", 0)),
+            }
+            for item in (version.items or [])
+        ] if version else [],
+    }
+
+
+def _cotizacion_acepta_email(cotizacion: Cotizacion, db: Session) -> bool:
+    if not cotizacion.cliente or not cotizacion.cliente.email:
+        logger.info(f"Cotización {cotizacion.id} sin email de cliente, omitiendo webhook.")
+        return False
+    if not notification_preferences_service.acepta_canal(db, cotizacion.cliente.id, "email"):
+        logger.info(f"Cliente {cotizacion.cliente.id} no acepta emails, omitiendo webhook cotización.")
+        return False
+    return True
+
+
+def trigger_cotizacion_creada(cotizacion: Cotizacion, db: Session) -> None:
+    """Dispara el webhook cuando se crea una cotización. Fire-and-forget."""
+    if not _cotizacion_acepta_email(cotizacion, db):
+        return
+    payload = _build_cotizacion_payload(cotizacion, db)
+    threading.Thread(target=_post_webhook, args=(N8N_WEBHOOK_COTIZACION_CREADA, payload), daemon=True).start()
+
+
+def trigger_cotizacion_enviada(cotizacion: Cotizacion, db: Session) -> None:
+    """Dispara el webhook cuando la cotización es enviada al cliente. Fire-and-forget."""
+    if not _cotizacion_acepta_email(cotizacion, db):
+        return
+    payload = _build_cotizacion_payload(cotizacion, db)
+    payload["version_numero"] = cotizacion.version_activa.numero_version if cotizacion.version_activa else 1
+    threading.Thread(target=_post_webhook, args=(N8N_WEBHOOK_COTIZACION_ENVIADA, payload), daemon=True).start()
+
+
+def trigger_cotizacion_aceptada(cotizacion: Cotizacion, db: Session, numero_pedido: str, estado_pedido: str, costo_delivery: float | None = None) -> None:
+    """Dispara el webhook cuando la cotización es aceptada y el pedido fue generado. Fire-and-forget."""
+    if not _cotizacion_acepta_email(cotizacion, db):
+        return
+    payload = _build_cotizacion_payload(cotizacion, db)
+    payload["numero_pedido"] = numero_pedido
+    payload["estado_pedido"] = estado_pedido
+    payload["costo_delivery"] = costo_delivery
+    payload["tiene_delivery"] = costo_delivery is not None
+    threading.Thread(target=_post_webhook, args=(N8N_WEBHOOK_COTIZACION_ACEPTADA, payload), daemon=True).start()

@@ -97,7 +97,7 @@ def _descontar_inventario_productos(pedido: Pedido, local_despacho_id: int, db: 
                 detail=f"Producto {item.producto.nombre} no tiene inventario en el local seleccionado"
             )
         
-        if inventario.cantidad_stock < Decimal(str(item.cantidad)):
+        if float(inventario.cantidad_stock) < float(item.cantidad):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Stock insuficiente para {item.producto.nombre}. Disponible: {inventario.cantidad_stock}, Requerido: {item.cantidad}"
@@ -110,7 +110,7 @@ def _descontar_inventario_productos(pedido: Pedido, local_despacho_id: int, db: 
             Inventario.local_id == local_despacho_id
         ).first()
         
-        inventario.cantidad_stock -= Decimal(str(item.cantidad))
+        inventario.cantidad_stock = float(inventario.cantidad_stock) - float(item.cantidad)
         
         # Registrar movimiento
         movimiento = MovimientoInventario(
@@ -1362,6 +1362,7 @@ def listar_pedidos(
             'fecha_pedido': pedido.fecha_pedido,
             'total': pedido.monto_total,
             'monto_total': pedido.monto_total,  # Alias para compatibilidad
+            'costo_delivery': float(pedido.costo_delivery) if pedido.costo_delivery else None,
             'estado': pedido.estado_pedido.codigo if pedido.estado_pedido else None,
             'pagado': pedido.es_pagado,
             'inventario_descontado': pedido.inventario_descontado,
