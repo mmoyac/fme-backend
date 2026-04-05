@@ -10,7 +10,7 @@ from starlette.responses import Response
 from routers.auth import get_current_active_user
 
 # Importar routers
-from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, admin_utils, payments, test_payments, maestras, recetas, produccion, compras, cheques, puntos, caja, enrolamiento, gemini_vision, precios_proveedor, stock_cajas, alertas, tipos_pedido, despachos, configuracion, debug_menu, admin_configuracion_landing, tenants, etiquetas, paleta_colores, solicitudes_transferencia, locales_cliente, preventa, hojas_ruta, vehiculos, comisiones, canales_venta, cobranza, notas_credito, devoluciones, superadmin, oauth, notifications
+from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, admin_utils, payments, test_payments, maestras, recetas, produccion, compras, cheques, puntos, caja, enrolamiento, gemini_vision, precios_proveedor, stock_cajas, alertas, tipos_pedido, despachos, configuracion, debug_menu, admin_configuracion_landing, tenants, etiquetas, paleta_colores, solicitudes_transferencia, locales_cliente, preventa, hojas_ruta, vehiculos, comisiones, canales_venta, cobranza, notas_credito, devoluciones, superadmin, oauth, notifications, ordenes_trabajo, cotizaciones
 
 
 app = FastAPI(
@@ -156,6 +156,8 @@ app.include_router(devoluciones.router, prefix="/api/devoluciones", tags=["Devol
 app.include_router(puntos.router, tags=["Puntos"])
 app.include_router(caja.router, prefix="/api/caja", tags=["Caja"], dependencies=[Depends(get_current_active_user)])
 app.include_router(tipos_pedido.router, prefix="/api/tipos-pedido", tags=["Tipos de Pedido"])
+app.include_router(ordenes_trabajo.router, prefix="/api/ordenes-trabajo", tags=["Órdenes de Trabajo"])
+app.include_router(cotizaciones.router, prefix="/api/cotizaciones", tags=["Cotizaciones"])
 app.include_router(enrolamiento.router, prefix="/api/enrolamiento", tags=["Enrolamiento WMS"], dependencies=[Depends(get_current_active_user)])
 app.include_router(preventa.router, prefix="/api/preventa", tags=["Pre-Venta Cajas"], dependencies=[Depends(get_current_active_user)])
 app.include_router(preventa.router_pdf, prefix="/api/preventa", tags=["Pre-Venta Cajas PDF"])

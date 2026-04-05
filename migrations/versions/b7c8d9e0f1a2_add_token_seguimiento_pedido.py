@@ -1,6 +1,6 @@
 """add token_seguimiento to pedidos
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: b7c8d9e0f1a2
 Revises: ff911497bb86
 Create Date: 2026-03-26 17:00:00.000000
 
