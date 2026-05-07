@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from database.database import get_db
 from database.models import Producto, CategoriaProducto, MovimientoInventario, DetalleCompra, ItemPedido, IngredienteReceta, DetalleOrdenProduccion
@@ -373,20 +374,51 @@ def crear_producto(producto: ProductoCreate, db: Session = Depends(get_db), curr
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"❌ SKU duplicado: Ya existe un producto con el código '{producto.sku}'. Por favor, usa un código diferente."
+            detail=f"❌ SKU duplicado: Ya existe un producto con el código '{producto.sku}'. Usa un código diferente."
         )
-    
-    # Crear nuevo producto
+
+    # Verificar que el código de barra no esté en uso en el tenant
+    if producto.codigo_barra:
+        barra_existente = db.query(Producto).filter(
+            Producto.codigo_barra == producto.codigo_barra,
+            Producto.tenant_id == current_user.tenant_id
+        ).first()
+        if barra_existente:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"❌ Código de barra duplicado: El código '{producto.codigo_barra}' ya pertenece al producto '{barra_existente.nombre}' (SKU {barra_existente.sku}). Cada producto debe tener un código de barra único."
+            )
+
     producto_data = producto.model_dump()
     producto_data['tenant_id'] = current_user.tenant_id
     db_producto = Producto(**producto_data)
     db.add(db_producto)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        err = str(e.orig)
+        if 'tipo_producto_id_fkey' in err:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"El tipo de producto '{producto.tipo_producto_id}' existe en el Sheet pero no está registrado en el sistema. Contacta al administrador para que lo agregue."
+            )
+        if 'unidad_medida_id_fkey' in err:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"La unidad de medida '{producto.unidad_medida_id}' existe en el Sheet pero no está registrada en el sistema. Contacta al administrador para que la agregue."
+            )
+        if 'categoria' in err:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"La categoría '{producto.categoria_id}' existe en el Sheet pero no está registrada en el sistema. Contacta al administrador para que la agregue."
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Error de integridad al crear el producto '{producto.nombre}' (SKU {producto.sku}): {e.orig}"
+        )
     db.refresh(db_producto)
-    
-    # Stock inicial 0
     setattr(db_producto, "stock_actual", 0)
-    
     return db_producto
 
 
@@ -418,15 +450,52 @@ def actualizar_producto(
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Ya existe un producto con SKU '{producto.sku}'"
+                detail=f"❌ SKU duplicado: Ya existe un producto con el código '{producto.sku}'."
             )
-    
+
+    # Si se está actualizando el código de barra, verificar que sea único en el tenant
+    nuevo_barra = producto.codigo_barra if hasattr(producto, 'codigo_barra') and 'codigo_barra' in producto.model_dump(exclude_unset=True) else None
+    if nuevo_barra and nuevo_barra != db_producto.codigo_barra:
+        barra_existente = db.query(Producto).filter(
+            Producto.codigo_barra == nuevo_barra,
+            Producto.tenant_id == db_producto.tenant_id,
+            Producto.id != producto_id
+        ).first()
+        if barra_existente:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"❌ Código de barra duplicado: El código '{nuevo_barra}' ya pertenece al producto '{barra_existente.nombre}' (SKU {barra_existente.sku})."
+            )
+
     # Actualizar solo los campos proporcionados
     update_data = producto.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(db_producto, field, value)
-    
-    db.commit()
+
+    try:
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        err = str(e.orig)
+        if 'tipo_producto_id_fkey' in err:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"El tipo de producto '{producto.tipo_producto_id}' existe en el Sheet pero no está registrado en el sistema. Contacta al administrador para que lo agregue."
+            )
+        if 'unidad_medida_id_fkey' in err:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"La unidad de medida '{producto.unidad_medida_id}' existe en el Sheet pero no está registrada en el sistema. Contacta al administrador para que la agregue."
+            )
+        if 'categoria' in err:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"La categoría '{producto.categoria_id}' existe en el Sheet pero no está registrada en el sistema. Contacta al administrador para que la agregue."
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Error de integridad al actualizar el producto: {e.orig}"
+        )
     db.refresh(db_producto)
     
     # Recalcular stock

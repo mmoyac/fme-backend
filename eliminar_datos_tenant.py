@@ -48,7 +48,9 @@ from database.models import (
     HojaRutaItem, HojaRuta,
     SolicitudTransferencia, ItemSolicitudTransferencia,
     Comision, LiquidacionComision,
-    Receta, IngredienteReceta
+    Receta, IngredienteReceta,
+    Cotizacion,
+    Devolucion, ItemDevolucion, NotaCredito
 )
 
 # ─── Argumentos ───────────────────────────────────────────────────────────────
@@ -56,6 +58,8 @@ parser = argparse.ArgumentParser(description="Eliminar datos operativos de un te
 parser.add_argument("--tenant-id", type=int, required=True, help="ID del tenant a limpiar")
 parser.add_argument("--eliminar-clientes", action="store_true",
                     help="También eliminar clientes y sus puntos de fidelización (por defecto se conservan)")
+parser.add_argument("--eliminar-cotizaciones", action="store_true",
+                    help="También eliminar cotizaciones (por defecto se conservan)")
 parser.add_argument("--eliminar-productos", action="store_true",
                     help="También eliminar productos (por defecto se conservan)")
 parser.add_argument("--si", action="store_true",
@@ -64,11 +68,12 @@ args = parser.parse_args()
 
 TENANT_ID = args.tenant_id
 CONSERVAR_CLIENTES = not args.eliminar_clientes
+CONSERVAR_COTIZACIONES = not args.eliminar_cotizaciones
 CONSERVAR_PRODUCTOS = not args.eliminar_productos
 AUTO_CONFIRM = args.si
 
 
-def eliminar_datos(tenant_id: int, conservar_clientes: bool = False):
+def eliminar_datos(tenant_id: int, conservar_clientes: bool = False, conservar_cotizaciones: bool = True):
     db = SessionLocal()
     try:
         # ── Buscar tenant ────────────────────────────────────────────────────
@@ -229,6 +234,13 @@ def eliminar_datos(tenant_id: int, conservar_clientes: bool = False):
             n = db.query(MovimientoStockCajas).filter(MovimientoStockCajas.id.in_(movs_stock_ids)).delete(synchronize_session=False)
             print(f"   ✓ {n} movimientos de stock cajas")
 
+        # Items de devolución (FK RESTRICT a items_pedido — debe ir antes)
+        if pedidos_ids:
+            devolucion_ids = [d.id for d in db.query(Devolucion).filter(Devolucion.pedido_id.in_(pedidos_ids)).all()]
+            if devolucion_ids:
+                n = db.query(ItemDevolucion).filter(ItemDevolucion.devolucion_id.in_(devolucion_ids)).delete(synchronize_session=False)
+                print(f"   ✓ {n} items de devolución")
+
         # Items de pedidos (FK a lotes)
         if pedidos_ids:
             n = db.query(ItemPedido).filter(ItemPedido.pedido_id.in_(pedidos_ids)).delete(synchronize_session=False)
@@ -267,6 +279,18 @@ def eliminar_datos(tenant_id: int, conservar_clientes: bool = False):
         if n:
             print(f"   ✓ {n} liquidaciones de comisiones")
 
+        # Devoluciones (FK RESTRICT a pedidos)
+        if pedidos_ids:
+            n = db.query(Devolucion).filter(Devolucion.pedido_id.in_(pedidos_ids)).delete(synchronize_session=False)
+            if n:
+                print(f"   ✓ {n} devoluciones")
+
+        # Notas de crédito (FK RESTRICT a pedidos)
+        if pedidos_ids:
+            n = db.query(NotaCredito).filter(NotaCredito.pedido_id.in_(pedidos_ids)).delete(synchronize_session=False)
+            if n:
+                print(f"   ✓ {n} notas de crédito")
+
         # Pedidos
         if pedidos_ids:
             n = db.query(Pedido).filter(Pedido.id.in_(pedidos_ids)).delete(synchronize_session=False)
@@ -290,6 +314,14 @@ def eliminar_datos(tenant_id: int, conservar_clientes: bool = False):
         # Solicitudes de transferencia (items en cascada via ondelete)
         n = db.query(SolicitudTransferencia).filter(SolicitudTransferencia.tenant_id == tenant.id).delete(synchronize_session=False)
         print(f"   ✓ {n} solicitudes de transferencia")
+
+        # Cotizaciones (opcional, independiente de clientes)
+        if not conservar_cotizaciones:
+            n = db.query(Cotizacion).filter(Cotizacion.tenant_id == tenant.id).delete(synchronize_session=False)
+            if n:
+                print(f"   ✓ {n} cotizaciones")
+        else:
+            print(f"   ⏭ Cotizaciones CONSERVADAS")
 
         # Clientes y puntos (opcional)
         if not conservar_clientes:
@@ -350,6 +382,12 @@ def eliminar_datos(tenant_id: int, conservar_clientes: bool = False):
                 if n:
                     print(f"   ✓ {n} movimientos stock cajas residuales")
 
+                # 6. OrdenesTrabajo (OtItem/OtLog en cascada) — FK RESTRICT producto_id via ot_items
+                from database.models import OrdenTrabajo
+                n = db.query(OrdenTrabajo).filter(OrdenTrabajo.tenant_id == tenant.id).delete(synchronize_session=False)
+                if n:
+                    print(f"   ✓ {n} órdenes de trabajo (ot_items/ot_log en cascada)")
+
             n = db.query(Producto).filter(Producto.tenant_id == tenant.id).delete(synchronize_session=False)
             print(f"   ✓ {n} productos")
         else:
@@ -405,4 +443,4 @@ if __name__ == "__main__":
             print("❌ Operación cancelada")
             sys.exit(0)
 
-    eliminar_datos(TENANT_ID, conservar_clientes=CONSERVAR_CLIENTES)
+    eliminar_datos(TENANT_ID, conservar_clientes=CONSERVAR_CLIENTES, conservar_cotizaciones=CONSERVAR_COTIZACIONES)

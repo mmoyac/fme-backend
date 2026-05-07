@@ -18,8 +18,9 @@ Flags:
     --sheet        Sheet ID (anula el guardado en BD)
     --limpiar      Limpiar datos antes de importar (se pregunta si se omite)
     --solo-limpiar Solo limpiar, no importar
-    --eliminar-clientes   Con --limpiar: también elimina clientes y puntos (por defecto se conservan)
-    --eliminar-productos  Con --limpiar: también elimina productos (por defecto se conservan)
+    --eliminar-clientes       Con --limpiar: también elimina clientes y puntos (por defecto se conservan)
+    --eliminar-cotizaciones   Con --limpiar: también elimina cotizaciones (por defecto se conservan)
+    --eliminar-productos      Con --limpiar: también elimina productos (por defecto se conservan)
     --si           Confirma todas las preguntas automáticamente
 
 Nota: si --user/--password no se proveen, se usan los defaults del entorno.
@@ -60,6 +61,16 @@ ENVIRONMENTS = {
 
 SEP = "=" * 90
 
+# Lista global de errores que el cliente debe corregir en el Sheet
+ERRORES_CLIENTE = []
+
+def _agregar_error(hoja: str, fila: int, identificador: str, motivo: str):
+    """Registra un error del Sheet para mostrar en el resumen final."""
+    import re
+    motivo = re.sub(r'^\[HTTP \d+\]\s*', '', motivo)
+    motivo = re.sub(r'^[❌⚠️✗]\s*', '', motivo).strip()
+    ERRORES_CLIENTE.append({"hoja": hoja, "fila": fila, "id": identificador, "motivo": motivo})
+
 # ─── Argumentos ───────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser(description="Sincronizar tenant desde Google Sheet")
 parser.add_argument("--env",    choices=["prod", "dev"], default=None)
@@ -69,8 +80,9 @@ parser.add_argument("--user",   type=str,  default=None, help="Email del usuario
 parser.add_argument("--password", type=str, default=None, help="Contraseña del usuario")
 parser.add_argument("--limpiar",       action="store_true", help="Limpiar antes de importar")
 parser.add_argument("--solo-limpiar",  action="store_true", help="Solo limpiar, no importar")
-parser.add_argument("--eliminar-clientes", action="store_true", help="Con --limpiar: eliminar también clientes y puntos")
-parser.add_argument("--eliminar-productos", action="store_true", help="Con --limpiar: eliminar también productos (por defecto se conservan)")
+parser.add_argument("--eliminar-clientes",     action="store_true", help="Con --limpiar: eliminar también clientes y puntos")
+parser.add_argument("--eliminar-cotizaciones", action="store_true", help="Con --limpiar: eliminar también cotizaciones (por defecto se conservan)")
+parser.add_argument("--eliminar-productos",    action="store_true", help="Con --limpiar: eliminar también productos (por defecto se conservan)")
 parser.add_argument("--si", action="store_true", help="Auto-confirmar todo")
 args = parser.parse_args()
 
@@ -209,13 +221,29 @@ if HACER_LIMPIEZA:
     delete_cmd = ["python", "eliminar_datos_tenant.py", f"--tenant-id={TENANT_ID}", "--si"]
     if args.eliminar_clientes:
         delete_cmd.append("--eliminar-clientes")
+    if args.eliminar_cotizaciones:
+        delete_cmd.append("--eliminar-cotizaciones")
     if args.eliminar_productos:
         delete_cmd.append("--eliminar-productos")
 
     if ENV["docker_compose"]:
         cmd = ["docker", "compose", "exec", "backend"] + delete_cmd
     elif ENV.get("ssh_host"):
-        # Producción remota: ejecutar vía SSH
+        # Producción remota: copiar script actualizado al contenedor y ejecutar vía SSH
+        import os as _os
+        local_script = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "eliminar_datos_tenant.py")
+        copy_cmd = [
+            "scp", local_script,
+            f"root@{ENV['ssh_host']}:/tmp/eliminar_datos_tenant.py"
+        ]
+        print(f"📤 Copiando script al servidor...\n▶  {' '.join(copy_cmd)}\n")
+        copy_result = subprocess.run(copy_cmd, text=True, encoding="utf-8")
+        if copy_result.returncode != 0:
+            print("⚠️  No se pudo copiar el script. Usando versión del contenedor.")
+        else:
+            # Mover el script dentro del contenedor
+            mv_remote = f"docker cp /tmp/eliminar_datos_tenant.py {ENV['docker_container']}:/app/eliminar_datos_tenant.py"
+            subprocess.run(["ssh", f"root@{ENV['ssh_host']}", mv_remote], text=True, encoding="utf-8")
         remote_cmd = "docker exec " + ENV["docker_container"] + " " + " ".join(delete_cmd)
         cmd = ["ssh", f"root@{ENV['ssh_host']}", remote_cmd]
     else:
@@ -278,6 +306,12 @@ THROTTLE_SLEEP  = 0.5
 print(f"\n{SEP}")
 print("📖 LEYENDO GOOGLE SHEETS...")
 print(SEP)
+
+
+def to_float(val):
+    """Convierte string a float aceptando coma o punto como separador decimal."""
+    v = val.strip().replace(",", ".") if val else ""
+    return float(v) if v else None
 
 
 def leer_hoja(sheet_name):
@@ -498,9 +532,10 @@ productos_existentes = {p["sku"]: p for p in (r.json() if r.status_code == 200 e
 
 resultados = {"creados": [], "actualizados": [], "fallidos": []}
 productos_creados = {}  # sku → id
+sku_to_nombre = {p.get("sku","").strip(): p.get("nombre","").strip() for p in productos_data if p.get("sku","").strip()}
 contador = 0
 
-for prod in productos_data:
+for _fila_prod, prod in enumerate(productos_data, start=2):
     sku    = prod.get("sku", "").strip()
     nombre = prod.get("nombre", "").strip()
     if not sku or not nombre:
@@ -524,7 +559,10 @@ for prod in productos_data:
         "stock_minimo":      int(prod.get("stock_minimo", "0").strip() or "0"),
         "stock_critico":     int(prod.get("stock_critico", "0").strip() or "0"),
         "es_vendible":       prod.get("es_vendible", "true").strip().lower() not in ("false", "0", "no"),
-        "peso_bruto":        float(prod.get("peso_bruto", "").strip()) if prod.get("peso_bruto", "").strip() else None,
+        "peso_bruto":        to_float(prod.get("peso_bruto", "")),
+        "unidad_compra_descripcion": prod.get("unidad_compra_descripcion", "").strip() or None,
+        "factor_conversion_compra":  to_float(prod.get("factor_conversion_compra", "")) or 1,
+        "precio_compra":             to_float(prod.get("precio_compra", "")),
     }
     # Solo incluir categoria_id si fue resuelto (evita NOT NULL violation)
     if categoria_id:
@@ -540,8 +578,10 @@ for prod in productos_data:
                 resultados["actualizados"].append({"sku": sku, "id": pid})
                 print(f"    🔄 ACTUALIZADO (ID {pid})")
             else:
-                resultados["fallidos"].append({"sku": sku, "error": detalle_error(r)})
-                print(f"    ❌ {detalle_error(r)}")
+                err = detalle_error(r)
+                resultados["fallidos"].append({"sku": sku, "error": err})
+                _agregar_error("productos", _fila_prod, f"SKU {sku} — {nombre}", err)
+                print(f"    ❌ {err}")
         else:
             r = requests.post(f"{API_URL}/api/productos/", json=payload, headers=HEADERS)
             if r.status_code in (200, 201):
@@ -551,10 +591,13 @@ for prod in productos_data:
                 resultados["creados"].append({"sku": sku, "id": pid})
                 print(f"    ✅ CREADO (ID {pid})")
             else:
-                resultados["fallidos"].append({"sku": sku, "error": detalle_error(r)})
-                print(f"    ❌ {detalle_error(r)}")
+                err = detalle_error(r)
+                resultados["fallidos"].append({"sku": sku, "error": err})
+                _agregar_error("productos", _fila_prod, f"SKU {sku} — {nombre}", err)
+                print(f"    ❌ {err}")
     except Exception as e:
         resultados["fallidos"].append({"sku": sku, "error": str(e)})
+        _agregar_error("productos", _fila_prod, f"SKU {sku} — {nombre}", str(e))
         print(f"    ❌ {e}")
 
     contador += 1
@@ -578,7 +621,7 @@ if precios_data and productos_creados:
     r = requests.get(f"{API_URL}/api/productos/", headers=HEADERS)
     productos_full = {p["id"]: p for p in (r.json() if r.status_code == 200 else [])}
 
-    for precio in precios_data:
+    for _fila_precio, precio in enumerate(precios_data, start=2):
         sku          = precio.get("producto_sku", "").strip()
         codigo_local = precio.get("local_codigo", "").strip()
         monto        = precio.get("monto_precio", "").strip()
@@ -588,23 +631,26 @@ if precios_data and productos_creados:
         pid      = productos_creados.get(sku)
         local_id = locales_map.get(codigo_local)
         if not pid:
-            err = f"SKU '{sku}' no en sheet de productos"
+            err = f"SKU '{sku}' no existe en la hoja 'productos' — agrégalo primero"
             res_precios["fallidos"].append({"sku": sku, "local": codigo_local, "error": err})
+            _agregar_error("precios", _fila_precio, f"SKU {sku} / {codigo_local}", err)
             skus_faltantes_precios.add(sku)
             continue
         if not local_id:
             print(f"    ⚠️  Local '{codigo_local}' no existe, creando...")
             local_id = get_or_create_local(codigo_local)
         if not local_id:
-            err = f"Local '{codigo_local}' no existe y no se pudo crear"
+            err = f"Local '{codigo_local}' no existe en el sistema"
             res_precios["fallidos"].append({"sku": sku, "local": codigo_local, "error": err})
+            _agregar_error("precios", _fila_precio, f"SKU {sku} / {codigo_local}", err)
             print(f"    ❌ {err}")
             continue
 
         prod_full = productos_full.get(pid)
         if not prod_full or not prod_full.get("unidad_medida_id"):
-            err = f"Sin unidad_medida_id para producto {pid} ({sku})"
+            err = f"Producto SKU {sku} no tiene unidad de medida definida"
             res_precios["fallidos"].append({"sku": sku, "local": codigo_local, "error": err})
+            _agregar_error("precios", _fila_precio, f"SKU {sku} / {codigo_local}", err)
             print(f"    ❌ {err}")
             continue
 
@@ -620,10 +666,13 @@ if precios_data and productos_creados:
                 res_precios["exitosos"].append({"sku": sku, "local": codigo_local})
                 print("    ✅ OK")
             else:
-                res_precios["fallidos"].append({"sku": sku, "local": codigo_local, "error": detalle_error(r)})
-                print(f"    ❌ {detalle_error(r)}")
+                err = detalle_error(r)
+                res_precios["fallidos"].append({"sku": sku, "local": codigo_local, "error": err})
+                _agregar_error("precios", _fila_precio, f"SKU {sku} / {codigo_local}", err)
+                print(f"    ❌ {err}")
         except Exception as e:
             res_precios["fallidos"].append({"sku": sku, "local": codigo_local, "error": str(e)})
+            _agregar_error("precios", _fila_precio, f"SKU {sku} / {codigo_local}", str(e))
             print(f"    ❌ {e}")
 
     print(f"\n   ✅ {len(res_precios['exitosos'])} precios  ❌ {len(res_precios['fallidos'])} fallidos")
@@ -643,7 +692,7 @@ if inventario_data and productos_creados:
     print("📊 IMPORTANDO INVENTARIO...")
     print(SEP)
 
-    for inv in inventario_data:
+    for _fila_inv, inv in enumerate(inventario_data, start=2):
         sku          = inv.get("producto_sku", "").strip()
         codigo_local = inv.get("local_codigo", "").strip()
         cantidad     = inv.get("cantidad_stock", "").strip()
@@ -653,36 +702,46 @@ if inventario_data and productos_creados:
         pid      = productos_creados.get(sku)
         local_id = locales_map.get(codigo_local)
         if not pid:
-            err = f"SKU '{sku}' no en sheet de productos"
+            err = f"SKU '{sku}' no existe en la hoja 'productos' — agrégalo primero"
             res_inventario["fallidos"].append({"sku": sku, "local": codigo_local, "error": err})
+            _agregar_error("inventario", _fila_inv, f"SKU {sku} / {codigo_local}", err)
             skus_faltantes_inventario.add(sku)
             continue
         if not local_id:
-            local_id = locales_map.get(codigo_local)  # puede haber sido creado en paso precios
+            local_id = locales_map.get(codigo_local)
             if not local_id:
                 print(f"    ⚠️  Local '{codigo_local}' no existe, creando...")
                 local_id = get_or_create_local(codigo_local)
         if not local_id:
-            err = f"Local '{codigo_local}' no existe y no se pudo crear"
+            err = f"Local '{codigo_local}' no existe en el sistema"
             res_inventario["fallidos"].append({"sku": sku, "local": codigo_local, "error": err})
+            _agregar_error("inventario", _fila_inv, f"SKU {sku} / {codigo_local}", err)
             print(f"    ❌ {err}")
             continue
+
+        cantidad_float = float(cantidad.replace(",", "."))
+        if cantidad_float < 0:
+            nombre_prod = sku_to_nombre.get(sku, "")
+            _agregar_error("inventario", _fila_inv, f"SKU {sku} — {nombre_prod} / {codigo_local}", f"⚠️  Stock negativo: {cantidad} — revisa si el valor es correcto")
 
         print(f"\n  {sku} / {codigo_local}: {cantidad} uds.")
         try:
             r = requests.put(
                 f"{API_URL}/api/inventario/producto/{pid}/local/{local_id}",
-                json={"cantidad_stock": int(cantidad)},
+                json={"cantidad_stock": cantidad_float},
                 headers=HEADERS,
             )
             if r.status_code in (200, 201):
                 res_inventario["exitosos"].append({"sku": sku, "local": codigo_local})
                 print("    ✅ OK")
             else:
-                res_inventario["fallidos"].append({"sku": sku, "local": codigo_local, "error": detalle_error(r)})
-                print(f"    ❌ {detalle_error(r)}")
+                err = detalle_error(r)
+                res_inventario["fallidos"].append({"sku": sku, "local": codigo_local, "error": err})
+                _agregar_error("inventario", _fila_inv, f"SKU {sku} / {codigo_local}", err)
+                print(f"    ❌ {err}")
         except Exception as e:
             res_inventario["fallidos"].append({"sku": sku, "local": codigo_local, "error": str(e)})
+            _agregar_error("inventario", _fila_inv, f"SKU {sku} / {codigo_local}", str(e))
             print(f"    ❌ {e}")
 
     print(f"\n   ✅ {len(res_inventario['exitosos'])} inventarios  ❌ {len(res_inventario['fallidos'])} fallidos")
@@ -1033,6 +1092,24 @@ if skus_huerfanos:
         print(f"      • {sku:<15} — referenciado en: {', '.join(en)}")
     print(f"\n      👉 Agregar estos SKUs a la hoja 'productos' del Google Sheet y re-sincronizar.")
 
+print(f"\n{SEP}")
+if ERRORES_CLIENTE:
+    print("⚠️  CORRECCIONES REQUERIDAS EN EL SHEET")
+    print(SEP)
+    col_hoja = 18
+    col_fila =  4
+    col_id   = 32
+    print(f"   {'HOJA':<{col_hoja}} {'FILA':>{col_fila}}   {'IDENTIFICADOR':<{col_id}} MOTIVO")
+    print(f"   {'─'*col_hoja}  {'─'*col_fila}   {'─'*col_id}  {'─'*42}")
+    for e in ERRORES_CLIENTE:
+        hoja = e["hoja"][:col_hoja]
+        fila = str(e["fila"])
+        eid  = e["id"][:col_id]
+        mot  = e["motivo"][:80]
+        print(f"   {hoja:<{col_hoja}} {fila:>{col_fila}}   {eid:<{col_id}} {mot}")
+    print(f"\n   Total: {len(ERRORES_CLIENTE)} fila(s) con error — abre el Sheet, corrige y vuelve a ejecutar el sync.")
+else:
+    print("✅ Sin errores — todos los datos del Sheet se cargaron correctamente.")
 print(f"\n{SEP}")
 print("🎯 SINCRONIZACIÓN COMPLETADA")
 print(SEP)

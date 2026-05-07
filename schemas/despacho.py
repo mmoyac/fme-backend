@@ -69,7 +69,8 @@ class PickingItemResponse(PickingItemBase):
 
 class DespachoBase(BaseModel):
     """Base para despacho."""
-    pedido_id: int
+    pedido_id: Optional[int] = None
+    solicitud_id: Optional[int] = None
     despachador_user_id: int
     estado_despacho: EstadoDespacho = EstadoDespacho.ASIGNADO
     notas_despacho: Optional[str] = None
@@ -79,7 +80,8 @@ class DespachoBase(BaseModel):
 
 class DespachoCreate(BaseModel):
     """Schema para crear despacho."""
-    pedido_id: int
+    pedido_id: Optional[int] = None
+    solicitud_id: Optional[int] = None
     despachador_user_id: int
     notas_despacho: Optional[str] = None
     hora_estimada_entrega: Optional[datetime] = None
@@ -105,11 +107,16 @@ class DespachoResponse(DespachoBase):
     # Información del despachador
     despachador_nombre: Optional[str] = None
     
-    # Información del pedido
+    # Información del origen (pedido o solicitud)
+    tipo: str = "pedido"  # "pedido" | "solicitud"
     pedido_numero: Optional[str] = None
     pedido_total: Optional[float] = None
     cliente_nombre: Optional[str] = None
     direccion_entrega: Optional[str] = None
+    # Para solicitudes
+    solicitud_numero: Optional[str] = None
+    local_origen_nombre: Optional[str] = None
+    local_destino_nombre: Optional[str] = None
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -124,10 +131,28 @@ class DespachoConPickingItems(DespachoResponse):
 # ============================================
 
 class AsignarDespachoRequest(BaseModel):
-    """Request para asignar despacho."""
+    """Request para asignar despacho a un pedido."""
     despachador_user_id: int
     notas_despacho: Optional[str] = None
     hora_estimada_entrega: Optional[datetime] = None
+
+
+class AsignarDespachoSolicitudRequest(BaseModel):
+    """Request para asignar despacho a una solicitud de transferencia."""
+    despachador_user_id: int
+    notas_despacho: Optional[str] = None
+    hora_estimada_entrega: Optional[datetime] = None
+
+
+class ItemPendienteDespacho(BaseModel):
+    """Ítem unificado (pedido o solicitud) pendiente de despacho."""
+    tipo: str  # "pedido" | "solicitud"
+    id: int  # pedido_id o solicitud_id
+    numero: str  # "#123" o "ST-456"
+    cliente_o_local: str  # nombre cliente o "Local X → Local Y"
+    direccion_entrega: Optional[str] = None
+    fecha: datetime
+    total: Optional[float] = None  # solo pedidos
 
 
 class IniciarPickingRequest(BaseModel):

@@ -11,24 +11,179 @@ import io
 
 from database.database import get_db
 from database.models import (
-    Despacho, PickingItem, Pedido, ItemPedido, Cliente, Producto, 
-    Local, User, EstadoDespacho, TipoPedido, Lote, EstadoPedido
+    Despacho, PickingItem, Pedido, ItemPedido, Cliente, Producto,
+    Local, User, EstadoDespacho, TipoPedido, Lote, EstadoPedido,
+    SolicitudTransferencia, EstadoEnrolamiento
 )
 from schemas.despacho import (
     DespachoCreate, DespachoUpdate, DespachoResponse, DespachoConPickingItems,
-    AsignarDespachoRequest, IniciarPickingRequest, CompletarPickingItemRequest,
-    IniciarRutaRequest, ActualizarUbicacionRequest, ConfirmarEntregaRequest,
-    PickingItemUpdate, PickingItemResponse, ResumenDespachoResponse,
-    NotaPickingResponse, EscanearCodigoBarrasRequest, EscanearCodigoBarrasResponse
+    AsignarDespachoRequest, AsignarDespachoSolicitudRequest, IniciarPickingRequest,
+    CompletarPickingItemRequest, IniciarRutaRequest, ActualizarUbicacionRequest,
+    ConfirmarEntregaRequest, PickingItemUpdate, PickingItemResponse,
+    ResumenDespachoResponse, NotaPickingResponse, EscanearCodigoBarrasRequest,
+    EscanearCodigoBarrasResponse, ItemPendienteDespacho
 )
 from routers.auth import get_current_active_user
 
 router = APIRouter()
 
 
+def _build_despacho_response_dict(despacho: Despacho) -> dict:
+    """Construye el dict de respuesta para un despacho (pedido o solicitud)."""
+    base = {
+        "id": despacho.id,
+        "pedido_id": despacho.pedido_id,
+        "solicitud_id": despacho.solicitud_id,
+        "despachador_user_id": despacho.despachador_user_id,
+        "estado_despacho": despacho.estado_despacho,
+        "fecha_asignacion": despacho.fecha_asignacion,
+        "fecha_inicio_picking": despacho.fecha_inicio_picking,
+        "fecha_fin_picking": despacho.fecha_fin_picking,
+        "fecha_inicio_ruta": despacho.fecha_inicio_ruta,
+        "fecha_entrega": despacho.fecha_entrega,
+        "notas_despacho": despacho.notas_despacho,
+        "ubicacion_actual": despacho.ubicacion_actual,
+        "hora_estimada_entrega": despacho.hora_estimada_entrega,
+        "despachador_nombre": despacho.despachador.nombre_completo if despacho.despachador else None,
+    }
+    if despacho.pedido_id and despacho.pedido:
+        base.update({
+            "tipo": "pedido",
+            "pedido_numero": f"#{despacho.pedido.id}",
+            "pedido_total": float(despacho.pedido.monto_total) if despacho.pedido.monto_total else None,
+            "cliente_nombre": despacho.pedido.cliente.nombre if despacho.pedido.cliente else None,
+            "direccion_entrega": despacho.pedido.notas,
+        })
+    elif despacho.solicitud_id and despacho.solicitud:
+        s = despacho.solicitud
+        base.update({
+            "tipo": "solicitud",
+            "solicitud_numero": f"ST-{s.solicitud_id}",
+            "local_origen_nombre": s.local_origen.nombre if s.local_origen else f"Local {s.local_origen_id}",
+            "local_destino_nombre": s.local_destino.nombre if s.local_destino else f"Local {s.local_destino_id}",
+            "cliente_nombre": s.local_origen.nombre if s.local_origen else None,
+            "direccion_entrega": s.local_destino.direccion if hasattr(s.local_destino, 'direccion') and s.local_destino else None,
+        })
+    return base
+
+
 # ============================================
 # ENDPOINTS DE GESTIÓN DE DESPACHOS
 # ============================================
+
+@router.get("/pendientes", response_model=List[ItemPendienteDespacho])
+def listar_pendientes_despacho(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Lista unificada de pedidos confirmados y solicitudes con delivery pendientes de despacho."""
+    # Pedidos CONFIRMADO sin despacho asignado
+    estado_confirmado = db.query(EstadoPedido).filter(EstadoPedido.codigo == "CONFIRMADO").first()
+    pedidos_ids_con_despacho = {d.pedido_id for d in db.query(Despacho.pedido_id).filter(Despacho.pedido_id.isnot(None)).all()}
+
+    pedidos = []
+    if estado_confirmado:
+        pedidos = db.query(Pedido).join(Cliente).filter(
+            Cliente.tenant_id == current_user.tenant_id,
+            Pedido.estado_id == estado_confirmado.id,
+            Pedido.id.notin_(pedidos_ids_con_despacho)
+        ).all()
+
+    # Solicitudes FINALIZADO con requiere_delivery=True sin despacho asignado
+    estado_finalizado = db.query(EstadoEnrolamiento).filter(EstadoEnrolamiento.codigo == "FINALIZADO").first()
+    solicitudes_ids_con_despacho = {d.solicitud_id for d in db.query(Despacho.solicitud_id).filter(Despacho.solicitud_id.isnot(None)).all()}
+
+    solicitudes = []
+    if estado_finalizado:
+        solicitudes = db.query(SolicitudTransferencia).options(
+            joinedload(SolicitudTransferencia.local_origen),
+            joinedload(SolicitudTransferencia.local_destino)
+        ).filter(
+            SolicitudTransferencia.tenant_id == current_user.tenant_id,
+            SolicitudTransferencia.estado_id == estado_finalizado.id,
+            SolicitudTransferencia.requiere_delivery == True,
+            SolicitudTransferencia.solicitud_id.notin_(solicitudes_ids_con_despacho)
+        ).all()
+
+    result = []
+    for p in pedidos:
+        result.append(ItemPendienteDespacho(
+            tipo="pedido",
+            id=p.id,
+            numero=f"#{p.numero_pedido or p.id}",
+            cliente_o_local=p.cliente.nombre if p.cliente else "Sin cliente",
+            direccion_entrega=p.notas,
+            fecha=p.fecha_pedido if hasattr(p, 'fecha_pedido') else p.fecha_creacion if hasattr(p, 'fecha_creacion') else datetime.now(),
+            total=float(p.monto_total) if p.monto_total else None
+        ))
+    for s in solicitudes:
+        local_origen = s.local_origen
+        local_destino = s.local_destino
+        result.append(ItemPendienteDespacho(
+            tipo="solicitud",
+            id=s.solicitud_id,
+            numero=f"ST-{s.solicitud_id}",
+            cliente_o_local=f"{local_origen.nombre if local_origen else f'Local {s.local_origen_id}'} → {local_destino.nombre if local_destino else f'Local {s.local_destino_id}'}",
+            direccion_entrega=local_destino.direccion if local_destino and hasattr(local_destino, 'direccion') else None,
+            fecha=s.fecha_actualizacion,
+            total=None
+        ))
+    return result
+
+
+@router.post("/asignar-solicitud/{solicitud_id}", response_model=DespachoResponse)
+def asignar_despacho_solicitud(
+    solicitud_id: int,
+    despacho_data: AsignarDespachoSolicitudRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Asignar despacho a una solicitud de transferencia que requiere delivery."""
+    solicitud = db.query(SolicitudTransferencia).options(
+        joinedload(SolicitudTransferencia.local_origen),
+        joinedload(SolicitudTransferencia.local_destino)
+    ).filter(
+        SolicitudTransferencia.solicitud_id == solicitud_id,
+        SolicitudTransferencia.tenant_id == current_user.tenant_id
+    ).first()
+
+    if not solicitud:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Solicitud no encontrada")
+
+    if not solicitud.requiere_delivery:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La solicitud no está marcada como requiere delivery")
+
+    estado_finalizado = db.query(EstadoEnrolamiento).filter(EstadoEnrolamiento.codigo == "FINALIZADO").first()
+    if not estado_finalizado or solicitud.estado_id != estado_finalizado.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Solo se pueden despachar solicitudes en estado FINALIZADO")
+
+    existente = db.query(Despacho).filter(Despacho.solicitud_id == solicitud_id).first()
+    if existente:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Esta solicitud ya tiene un despacho asignado")
+
+    despachador = db.query(User).filter(User.id == despacho_data.despachador_user_id).first()
+    if not despachador:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Despachador no encontrado")
+
+    despacho = Despacho(
+        solicitud_id=solicitud_id,
+        pedido_id=None,
+        despachador_user_id=despacho_data.despachador_user_id,
+        estado_despacho=EstadoDespacho.ASIGNADO,
+        notas_despacho=despacho_data.notas_despacho,
+        hora_estimada_entrega=despacho_data.hora_estimada_entrega
+    )
+    db.add(despacho)
+    db.flush()
+    db.commit()
+    db.refresh(despacho)
+
+    # Cargar relaciones para respuesta
+    despacho.solicitud = solicitud
+    despacho.despachador = despachador
+
+    return DespachoResponse(**_build_despacho_response_dict(despacho))
+
 
 @router.get("/", response_model=List[DespachoResponse])
 def listar_despachos(
@@ -41,18 +196,26 @@ def listar_despachos(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Listar despachos del tenant con filtros."""
-    # Filtrar por tenant mediante join con Pedido -> Cliente
-    query = db.query(Despacho).join(Pedido).join(Cliente).filter(
-        Cliente.tenant_id == current_user.tenant_id
+    """Listar despachos del tenant con filtros (pedidos y solicitudes)."""
+    query = db.query(Despacho).outerjoin(
+        Pedido, Despacho.pedido_id == Pedido.id
+    ).outerjoin(
+        Cliente, Pedido.cliente_id == Cliente.id
+    ).outerjoin(
+        SolicitudTransferencia, Despacho.solicitud_id == SolicitudTransferencia.solicitud_id
+    ).filter(
+        or_(
+            Cliente.tenant_id == current_user.tenant_id,
+            SolicitudTransferencia.tenant_id == current_user.tenant_id
+        )
     ).options(
         joinedload(Despacho.pedido).joinedload(Pedido.cliente),
+        joinedload(Despacho.solicitud).joinedload(SolicitudTransferencia.local_origen),
+        joinedload(Despacho.solicitud).joinedload(SolicitudTransferencia.local_destino),
         joinedload(Despacho.despachador)
     )
-    
-    # Aplicar filtros
+
     if estado:
-        # Soportar múltiples estados separados por coma
         if ',' in estado:
             estados = [e.strip() for e in estado.split(',')]
             query = query.filter(Despacho.estado_despacho.in_(estados))
@@ -64,37 +227,11 @@ def listar_despachos(
         query = query.filter(Despacho.fecha_asignacion >= fecha_desde)
     if fecha_hasta:
         query = query.filter(Despacho.fecha_asignacion <= fecha_hasta)
-    
-    # Ordenar por fecha más reciente
+
     query = query.order_by(desc(Despacho.fecha_asignacion))
-    
     despachos = query.offset(skip).limit(limit).all()
-    
-    # Construir respuesta con información adicional
-    result = []
-    for despacho in despachos:
-        despacho_dict = {
-            "id": despacho.id,
-            "pedido_id": despacho.pedido_id,
-            "despachador_user_id": despacho.despachador_user_id,
-            "estado_despacho": despacho.estado_despacho,
-            "fecha_asignacion": despacho.fecha_asignacion,
-            "fecha_inicio_picking": despacho.fecha_inicio_picking,
-            "fecha_fin_picking": despacho.fecha_fin_picking,
-            "fecha_inicio_ruta": despacho.fecha_inicio_ruta,
-            "fecha_entrega": despacho.fecha_entrega,
-            "notas_despacho": despacho.notas_despacho,
-            "ubicacion_actual": despacho.ubicacion_actual,
-            "hora_estimada_entrega": despacho.hora_estimada_entrega,
-            "despachador_nombre": despacho.despachador.nombre_completo if despacho.despachador else None,
-            "pedido_numero": f"#{despacho.pedido.id}",
-            "pedido_total": float(despacho.pedido.monto_total) if despacho.pedido else None,
-            "cliente_nombre": despacho.pedido.cliente.nombre if despacho.pedido and despacho.pedido.cliente else None,
-            "direccion_entrega": despacho.pedido.notas if despacho.pedido else None  # Asumiendo que la dirección está en notas
-        }
-        result.append(DespachoResponse(**despacho_dict))
-    
-    return result
+
+    return [DespachoResponse(**_build_despacho_response_dict(d)) for d in despachos]
 
 
 @router.get("/{despacho_id}", response_model=DespachoConPickingItems)

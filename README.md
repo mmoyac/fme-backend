@@ -63,6 +63,18 @@ pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
+### Hooks de pre-commit (obligatorio al clonar)
+
+Este repositorio incluye un hook que valida la cadena de migraciones Alembic antes de cada commit. Previene que se suba código con migraciones incompletas que puedan causar caídas en producción.
+
+Instalar una sola vez después de clonar:
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+A partir de ahí corre automáticamente. Si intentas commitear una migración cuyo `down_revision` no existe en el repo, el commit se bloquea con un mensaje de error indicando qué archivo falta.
+
 ## 📁 Estructura del Proyecto
 
 ```

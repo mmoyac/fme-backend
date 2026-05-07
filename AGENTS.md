@@ -1158,3 +1158,177 @@ max_km_delivery: Optional[float] = Field(None, ge=0,
 ### Migración
 
 `d1e2f3a4b5c6_add_max_km_delivery_to_configuracion_landing.py` — agrega columna `max_km_delivery` a `configuracion_landing`.
+
+---
+
+## 📧 Sistema de Notificaciones Email (n8n + Webhooks)
+
+### Arquitectura
+
+- **Fire-and-forget** via `threading.Thread` + `httpx.Client` (síncrono). No usar asyncio — los endpoints backoffice son `def` síncrono y no tienen event loop.
+- `API_BASE_URL` configurable via env var. Default: `https://api.masasestacion.cl`. En desarrollo: `http://localhost:8000`.
+- Webhooks apuntan a n8n en `https://n8n.masasestacion.cl`.
+
+### Workflows n8n
+
+| ID | Nombre | Webhook path | Trigger |
+|----|--------|-------------|---------|
+| `8k3qYK9sfm1NEA1R` | Email Confirmación Compra | `/webhook/pedido-confirmado` | Pedido pagado (backoffice/MP) |
+| `AqmOmlWJETP1WGAZ` | Email Entrega Pedido | `/webhook/pedido-entregado` | Marcar entregado en hoja de ruta |
+
+### Payload webhook confirmación
+
+```json
+{
+  "pedido_id": 123,
+  "numero_pedido": "MASAS-ESTACION-2026-00100",
+  "fecha_pedido": "26/03/2026 13:33",
+  "monto_total": 15000,
+  "cliente_nombre": "Juan Pérez",
+  "cliente_email": "juan@email.com",
+  "cliente_telefono": "+56912345678",
+  "unsub_url": "https://api.masasestacion.cl/api/clientes/unsubscribe?token=...",
+  "seguimiento_url": "https://api.masasestacion.cl/api/pedidos/seguimiento/...",
+  "items": [{"producto": "Pan", "cantidad": 2, "precio_unitario": 3500, "subtotal": 7000}]
+}
+```
+
+### Payload webhook entrega
+
+```json
+{
+  "pedido_id": 123,
+  "numero_pedido": "MASAS-ESTACION-2026-00100",
+  "fecha_entrega": "26/03/2026 15:45",
+  "monto_total": 15000,
+  "cliente_nombre": "Juan Pérez",
+  "cliente_email": "juan@email.com",
+  "unsub_url": "https://api.masasestacion.cl/api/clientes/unsubscribe?token=..."
+}
+```
+
+### Reglas de negocio
+
+- **No enviar** si canal_venta tiene `entrega_inmediata=True` (ventas POS/mostrador).
+- **No enviar** si cliente no tiene email.
+- **No enviar** si cliente tiene `acepta_canal('email') = False`.
+- Fechas siempre en zona horaria `America/Santiago` (formato `DD/MM/YYYY HH:MM`).
+
+### Preferencias de notificación por cliente
+
+- Tabla `cliente_notification_preferences`: canales email/whatsapp/telegram/sms.
+- Se crean automáticamente (todas activas) al crear un cliente.
+- Token de desuscripción único por canal (`token_unsub`).
+- Endpoint público: `GET /api/clientes/unsubscribe?token=...` — alterna activo/inactivo y retorna HTML.
+
+---
+
+## 🔍 Seguimiento de Pedidos
+
+### Campo `token_seguimiento` (modelo `Pedido`)
+
+- Token único hex(32) generado al crear el pedido (backoffice y landing).
+- Migración: `b7c8d9e0f1a2_add_token_seguimiento_pedido.py`.
+
+### Endpoints
+
+| Endpoint | Auth | Descripción |
+|----------|------|-------------|
+| `GET /api/pedidos/seguimiento/{token}` | Público | Página HTML con estado del pedido (5 pasos + estado despacho) |
+| `GET /api/pedidos/estado/{pedido_id}` | `X-API-Key` | JSON con estado actual (para n8n/WhatsApp) |
+
+### Página de seguimiento — 5 pasos
+
+`PENDIENTE` → `CONFIRMADO` → `EN_PREPARACION` → `EN_RUTA` → `ENTREGADO`
+
+Si el pedido tiene delivery (`costo_delivery > 0` o está en `hoja_ruta_items`), muestra además el estado de despacho derivado de `HojaRuta.estado` y `HojaRutaItem.entregado`.
+
+---
+
+## 📦 Flujo de Pedidos Backoffice (Canal TELEFONO/no-POS)
+
+### Auto-confirmación con pago inmediato
+
+Si `not es_pago_diferido` (transferencia, efectivo, tarjeta) y `tipo_pedido = PRODUCTOS`:
+1. Estado → `CONFIRMADO`
+2. `inventario_descontado = True`
+3. `local_despacho_id = local.id`
+4. Se otorgan/usan puntos
+5. Se dispara webhook de confirmación email
+
+Pagos diferidos (cheque, plazo_dias > 0) → quedan en `PENDIENTE`.
+
+### Estado `EN_RUTA` en `estados_pedido`
+
+Nuevo estado agregado (id=7, orden=4) entre `EN_PREPARACION` y `ENTREGADO`.
+
+### Transiciones automáticas vía Hojas de Ruta
+
+| Acción | Estado pedido resultante |
+|--------|--------------------------|
+| Crear pedido backoffice (pago inmediato) | `CONFIRMADO` |
+| Agregar pedido a hoja de ruta | `EN_PREPARACION` |
+| Marcar hoja de ruta como salida (`POST /{id}/salir`) | `EN_RUTA` |
+| Marcar ítem como entregado (`POST /{id}/items/{item_id}/entregar`) | `ENTREGADO` + webhook email |
+
+---
+
+## Módulo: Hojas de Ruta — Endpoints para App Despachador (implementado 2026-04-06)
+
+### Nuevo endpoint: `GET /api/hojas-ruta/mis-hojas`
+
+**Router:** `routers/hojas_ruta.py`
+
+Devuelve las hojas de ruta asignadas al usuario autenticado como chofer (`chofer_id == current_user.id`).
+
+**Filtro:** Solo hojas donde `cobro_chofer_pagado = False` (aparecen hasta que el admin las liquide).
+
+**Campos adicionales** que agrega sobre `_build_hoja_response`:
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `delivery_cobrable` | `float` | Suma de `costo_delivery` de pedidos no prepagados. Legado, no usar para el cobro al chofer. |
+| `delivery_cobros_detalle` | `list[float]` | Lista individual de cada `costo_delivery` cobrable. |
+| `delivery_total` | `float` | Suma total de `costo_delivery` de todos los pedidos. |
+
+> ⚠️ El pago al despachador se gestiona con `monto_cobro_chofer` / `cobro_chofer_pagado`, no con `delivery_cobrable`. Son conceptos distintos:
+> - `costo_delivery` = lo que el **cliente** paga por el envío
+> - `monto_cobro_chofer` = lo que la **empresa** le paga al despachador por hacer la ruta
+
+### Cambio en `_build_pedido_summary`
+
+Se agregó el campo `costo_delivery` al dict de respuesta (estaba en el TypeScript pero no era devuelto):
+
+```python
+"costo_delivery": float(pedido.costo_delivery) if pedido.costo_delivery else 0,
+```
+
+### Cambio en `routers/vehiculos.py` — `GET /api/vehiculos/choferes`
+
+Antes devolvía todos los usuarios activos del tenant. Ahora filtra por rol `despachador`:
+
+```python
+.join(Role, User.role_id == Role.id)
+.filter(Role.nombre.ilike('despachador'))
+```
+
+Requiere importar `Role` desde `database.models`.
+
+### Cambio en `routers/admin_users.py` — creación de usuario
+
+**Problema:** `email = Column(String, unique=True)` es constraint global (no por tenant). La validación solo chequeaba dentro del tenant, causando `IntegrityError (gkpj)` al hacer INSERT.
+
+**Fix:**
+1. Validación ahora chequea email en toda la tabla
+2. `try/except IntegrityError` como fallback
+
+### Datos registrados para tracking de ruta
+
+| Campo | Tabla | Se registra cuando |
+|---|---|---|
+| `fecha_salida` | `hojas_ruta` | `POST /api/hojas-ruta/{id}/salir` |
+| `fecha_retorno` | `hojas_ruta` | `PUT /api/hojas-ruta/{id}` con `estado=COMPLETADA` |
+| `fecha_entrega` | `hoja_ruta_items` | `POST /api/hojas-ruta/{id}/items/{item_id}/entregar` |
+| `notas_entrega` | `hoja_ruta_items` | Ídem, campo opcional |
+
+Estos timestamps alimentan el timeline de tracking visible en el admin y en la app del despachador.

@@ -28,27 +28,28 @@ def calcular_costos_receta(receta: RecetaModel, db: Session):
         
         if producto_ingrediente and unidad_base and unidad_ingrediente:
             # Usar precio_compra si es materia prima, o costo_fabricacion si es producto elaborado
-            costo_unitario = producto_ingrediente.precio_compra or producto_ingrediente.costo_fabricacion or Decimal('0')
-            # Convertir cantidad a la unidad base del producto
-            # Ejemplo: producto es 1000g, ingrediente es 100g, factor_conversion=1 para g
+            precio_por_unidad_compra = producto_ingrediente.precio_compra or producto_ingrediente.costo_fabricacion or Decimal('0')
+            # Normalizar al precio por unidad base (ej: precio por saco → precio por kg)
+            factor_compra = Decimal(producto_ingrediente.factor_conversion_compra or 1)
+            costo_unitario = precio_por_unidad_compra / factor_compra
+            # Convertir cantidad de la receta a la unidad base del producto
             if unidad_base.id == unidad_ingrediente.id:
-                cantidad_proporcional = ingrediente.cantidad / Decimal('1')
+                cantidad_proporcional = ingrediente.cantidad
             else:
-                # Si hay factor de conversión, usarlo
-                # Ejemplo: unidad_base=kg, unidad_ingrediente=g, factor_conversion=1000
                 factor = Decimal(unidad_ingrediente.factor_conversion) / Decimal(unidad_base.factor_conversion)
                 cantidad_proporcional = ingrediente.cantidad * factor
             # Calcular costo proporcional
             cantidad_sobre_base = cantidad_proporcional / Decimal('1000') if unidad_base.simbolo == 'g' and producto_ingrediente.unidad_medida_id == unidad_base.id else cantidad_proporcional
-            # Si el producto es 1000g y el ingrediente es 100g, cantidad_sobre_base = 0.1
             costo_ingrediente = costo_unitario * cantidad_sobre_base
             # Actualizar ingrediente
             ingrediente.costo_unitario_referencia = costo_unitario
             ingrediente.costo_total_calculado = costo_ingrediente
             costo_total += costo_ingrediente
         else:
-            # Fallback: cálculo directo
-            costo_unitario = producto_ingrediente.precio_compra or producto_ingrediente.costo_fabricacion or Decimal('0')
+            # Fallback: cálculo directo aplicando factor_conversion_compra
+            precio_por_unidad_compra = producto_ingrediente.precio_compra or producto_ingrediente.costo_fabricacion or Decimal('0') if producto_ingrediente else Decimal('0')
+            factor_compra = Decimal(producto_ingrediente.factor_conversion_compra or 1) if producto_ingrediente else Decimal('1')
+            costo_unitario = precio_por_unidad_compra / factor_compra
             costo_ingrediente = costo_unitario * ingrediente.cantidad
             ingrediente.costo_unitario_referencia = costo_unitario
             ingrediente.costo_total_calculado = costo_ingrediente

@@ -113,7 +113,8 @@ def listar_solicitudes_transferencia(request: Request, db: Session = Depends(get
             usuario_finalizador_id=s.usuario_finalizador_id,
             recibido=s.recibido,
             usuario_receptor_id=s.usuario_receptor_id,
-            fecha_recepcion=s.fecha_recepcion
+            fecha_recepcion=s.fecha_recepcion,
+            requiere_delivery=s.requiere_delivery
         ))
     return result
 
@@ -143,7 +144,8 @@ def obtener_solicitud_transferencia(solicitud_id: int, db: Session = Depends(get
         usuario_finalizador_id=s.usuario_finalizador_id,
         recibido=s.recibido,
         usuario_receptor_id=s.usuario_receptor_id,
-        fecha_recepcion=s.fecha_recepcion
+        fecha_recepcion=s.fecha_recepcion,
+        requiere_delivery=s.requiere_delivery
     )
 
 @router.put("/{solicitud_id}", response_model=SolicitudTransferenciaResponse)
@@ -166,8 +168,14 @@ def actualizar_solicitud_transferencia(
 
     es_admin = current_user.role and current_user.role.nombre.lower() == 'admin'
 
-    # FINALIZADO: solo local destino (o admin) puede registrar la recepción
+    # FINALIZADO: local destino registra recepción, local origen puede cambiar requiere_delivery
     if estado_actual == 'FINALIZADO':
+        # Local origen puede actualizar requiere_delivery sin tocar la recepción
+        if (es_admin or current_user.local_defecto_id == s.local_origen_id) and data.requiere_delivery is not None and not data.recibido:
+            s.requiere_delivery = data.requiere_delivery
+            db.commit()
+            db.refresh(s)
+            return obtener_solicitud_transferencia(solicitud_id, db)
         if not es_admin and current_user.local_defecto_id != s.local_destino_id:
             raise HTTPException(status_code=403, detail="Solo el local destino puede registrar la recepción.")
         era_recibido = s.recibido
@@ -261,6 +269,8 @@ def actualizar_solicitud_transferencia(
         if estado_nuevo == 'FINALIZADO':
             s.estado_id = codigos_map['FINALIZADO']
             s.usuario_finalizador_id = current_user.id
+            if data.requiere_delivery is not None:
+                s.requiere_delivery = data.requiere_delivery
             if data.items:
                 for item_data in data.items:
                     item_db = next((i for i in s.items if i.producto_id == item_data.producto_id), None)
@@ -307,6 +317,8 @@ def actualizar_solicitud_transferencia(
             return obtener_solicitud_transferencia(solicitud_id, db)
         if data.nota is not None:
             s.nota = data.nota
+        if data.requiere_delivery is not None:
+            s.requiere_delivery = data.requiere_delivery
         if data.items is not None:
             db.query(ItemSolicitudTransferencia).filter_by(solicitud_id=solicitud_id).delete()
             for item in data.items:

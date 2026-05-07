@@ -4,6 +4,7 @@ Router para gestión de usuarios y roles (Backoffice Admin).
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status, Body
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from typing import Annotated
 
 from database.database import get_db
@@ -188,12 +189,9 @@ def crear_usuario(
     current_user: User = Depends(get_current_admin_user)
 ):
     """Crear un nuevo usuario y asignarle un rol."""
-    # Verificar email único dentro del tenant
-    if db.query(User).filter(
-        User.email == user.email,
-        User.tenant_id == current_user.tenant_id
-    ).first():
-        raise HTTPException(status_code=400, detail="El email ya está registrado")
+    # Verificar email único globalmente (el constraint de DB es global)
+    if db.query(User).filter(User.email == user.email).first():
+        raise HTTPException(status_code=400, detail="El email ya está registrado en el sistema")
     
     # Verificar que el rol exista y pertenezca al tenant
     role = db.query(Role).filter(
@@ -214,8 +212,12 @@ def crear_usuario(
         tenant_id=current_user.tenant_id
     )
     db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
+    try:
+        db.commit()
+        db.refresh(db_user)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="El email ya está registrado en el sistema")
     return db_user
 
 @router.get("/users/{user_id}", response_model=UserSchema)

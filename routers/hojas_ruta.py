@@ -14,6 +14,7 @@ from database.models import (
     HojaRuta, HojaRutaItem, EstadoHojaRuta,
     Pedido, ItemPedido, AsignacionPicking,
     EstadoPedido, Cliente, Vehiculo, User, Producto,
+    SolicitudTransferencia, ItemSolicitudTransferencia, EstadoEnrolamiento, Local,
 )
 from services.webhook_service import trigger_pedido_entregado
 from routers.auth import get_current_active_user
@@ -30,7 +31,8 @@ class HojaRutaCreate(BaseModel):
     chofer_id: int
     capacidad_kg: Optional[float] = None  # si None, se toma de vehiculo.capacidad_kg
     notas: Optional[str] = None
-    pedido_ids: List[int]
+    pedido_ids: List[int] = []
+    solicitud_ids: List[int] = []
     tipo_cobro_chofer: Optional[str] = None   # 'FIJO' o 'POR_KG'
     tarifa_chofer: Optional[float] = None
 
@@ -98,6 +100,7 @@ def _build_pedido_summary(pedido: Pedido, db: Session) -> dict:
         "cliente_telefono": pedido.cliente.telefono if pedido.cliente else None,
         "direccion": pedido.cliente.direccion if pedido.cliente else None,
         "monto_total": float(pedido.monto_total) if pedido.monto_total else 0,
+        "costo_delivery": float(pedido.costo_delivery) if pedido.costo_delivery else 0,
         "estado": pedido.estado_pedido.codigo if pedido.estado_pedido else None,
         "es_pagado": pedido.es_pagado,
         "kg_brutos": kg,
@@ -105,24 +108,63 @@ def _build_pedido_summary(pedido: Pedido, db: Session) -> dict:
     }
 
 
+def _build_solicitud_summary(s: SolicitudTransferencia) -> dict:
+    local_destino = s.local_destino
+    local_origen = s.local_origen
+    # Calcular kg a partir de cantidad_aprobada × peso_bruto del producto
+    kg = 0.0
+    for item in (s.items or []):
+        cantidad = float(item.cantidad_aprobada or item.cantidad_solicitada or 0)
+        peso = float(item.producto.peso_bruto) if item.producto and item.producto.peso_bruto else 0.0
+        kg += cantidad * peso
+    return {
+        "id": s.solicitud_id,
+        "tipo": "solicitud",
+        "numero_pedido": f"ST-{s.solicitud_id}",
+        "cliente_nombre": f"{local_origen.nombre if local_origen else f'Local {s.local_origen_id}'} → {local_destino.nombre if local_destino else f'Local {s.local_destino_id}'}",
+        "cliente_telefono": None,
+        "direccion": local_destino.direccion if local_destino and hasattr(local_destino, 'direccion') else None,
+        "monto_total": 0,
+        "costo_delivery": 0,
+        "estado": "SOLICITUD",
+        "es_pagado": True,
+        "kg_brutos": round(kg, 3),
+        "items_count": len(s.items) if s.items else 0,
+        "fecha_pedido": s.fecha_actualizacion.isoformat() if s.fecha_actualizacion else None,
+        "local_origen_nombre": local_origen.nombre if local_origen else f"Local {s.local_origen_id}",
+        "local_destino_nombre": local_destino.nombre if local_destino else f"Local {s.local_destino_id}",
+    }
+
+
 def _build_hoja_response(hoja: HojaRuta, db: Session) -> dict:
     items_out = []
     total_kg = 0.0
     for hi in (hoja.items or []):
-        pedido = hi.pedido
-        if not pedido:
-            continue
-        pedido_data = _build_pedido_summary(pedido, db)
-        total_kg += pedido_data["kg_brutos"]
-        items_out.append({
-            "id": hi.id,
-            "pedido_id": hi.pedido_id,
-            "orden": hi.orden,
-            "entregado": hi.entregado,
-            "fecha_entrega": hi.fecha_entrega.isoformat() if hi.fecha_entrega else None,
-            "notas_entrega": hi.notas_entrega,
-            "pedido": pedido_data,
-        })
+        if hi.pedido_id and hi.pedido:
+            pedido_data = _build_pedido_summary(hi.pedido, db)
+            total_kg += pedido_data["kg_brutos"]
+            items_out.append({
+                "id": hi.id,
+                "pedido_id": hi.pedido_id,
+                "solicitud_id": None,
+                "orden": hi.orden,
+                "entregado": hi.entregado,
+                "fecha_entrega": hi.fecha_entrega.isoformat() if hi.fecha_entrega else None,
+                "notas_entrega": hi.notas_entrega,
+                "pedido": pedido_data,
+            })
+        elif hi.solicitud_id and hi.solicitud:
+            sol_data = _build_solicitud_summary(hi.solicitud)
+            items_out.append({
+                "id": hi.id,
+                "pedido_id": None,
+                "solicitud_id": hi.solicitud_id,
+                "orden": hi.orden,
+                "entregado": hi.entregado,
+                "fecha_entrega": hi.fecha_entrega.isoformat() if hi.fecha_entrega else None,
+                "notas_entrega": hi.notas_entrega,
+                "pedido": sol_data,
+            })
 
     # Sort by orden
     items_out.sort(key=lambda x: x["orden"])
@@ -181,6 +223,20 @@ def _build_hoja_response(hoja: HojaRuta, db: Session) -> dict:
     }
 
 
+def _hoja_options():
+    """Opciones de carga para HojaRuta con items de pedido y solicitud."""
+    return [
+        joinedload(HojaRuta.vehiculo).joinedload(Vehiculo.tipo_vehiculo),
+        joinedload(HojaRuta.chofer),
+        joinedload(HojaRuta.items).joinedload(HojaRutaItem.pedido).joinedload(Pedido.cliente),
+        joinedload(HojaRuta.items).joinedload(HojaRutaItem.pedido).joinedload(Pedido.items).joinedload(ItemPedido.producto),
+        joinedload(HojaRuta.items).joinedload(HojaRutaItem.pedido).joinedload(Pedido.estado_pedido),
+        joinedload(HojaRuta.items).joinedload(HojaRutaItem.solicitud).joinedload(SolicitudTransferencia.local_origen),
+        joinedload(HojaRuta.items).joinedload(HojaRutaItem.solicitud).joinedload(SolicitudTransferencia.local_destino),
+        joinedload(HojaRuta.items).joinedload(HojaRutaItem.solicitud).joinedload(SolicitudTransferencia.items).joinedload(ItemSolicitudTransferencia.producto),
+    ]
+
+
 # ──────────────────────────────────────────
 # Endpoints
 # ──────────────────────────────────────────
@@ -236,6 +292,7 @@ def listar_pedidos_disponibles(
         kg = _kg_pedido(db, p.items or [])
         result.append({
             "id": p.id,
+            "tipo": "pedido",
             "numero_pedido": p.numero_pedido,
             "cliente_nombre": p.cliente.nombre if p.cliente else None,
             "cliente_telefono": p.cliente.telefono if p.cliente else None,
@@ -247,6 +304,26 @@ def listar_pedidos_disponibles(
             "items_count": len(p.items) if p.items else 0,
             "fecha_pedido": p.fecha_pedido.isoformat() if p.fecha_pedido else None,
         })
+
+    # Solicitudes FINALIZADO con requiere_delivery=True no asignadas a ninguna hoja
+    solicitudes_asignadas_ids = {
+        r[0] for r in db.query(HojaRutaItem.solicitud_id).filter(HojaRutaItem.solicitud_id.isnot(None)).all()
+    }
+    estado_finalizado = db.query(EstadoEnrolamiento).filter(EstadoEnrolamiento.codigo == "FINALIZADO").first()
+    if estado_finalizado:
+        solicitudes = db.query(SolicitudTransferencia).options(
+            joinedload(SolicitudTransferencia.local_origen),
+            joinedload(SolicitudTransferencia.local_destino),
+            joinedload(SolicitudTransferencia.items).joinedload(ItemSolicitudTransferencia.producto),
+        ).filter(
+            SolicitudTransferencia.tenant_id == current_user.tenant_id,
+            SolicitudTransferencia.estado_id == estado_finalizado.id,
+            SolicitudTransferencia.requiere_delivery == True,
+            SolicitudTransferencia.solicitud_id.notin_(solicitudes_asignadas_ids) if solicitudes_asignadas_ids else True,
+        ).all()
+        for s in solicitudes:
+            result.append(_build_solicitud_summary(s))
+
     return result
 
 
@@ -256,38 +333,64 @@ def crear_hoja_ruta(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    """Crea una hoja de ruta con los pedidos seleccionados."""
-    if not data.pedido_ids:
-        raise HTTPException(status_code=400, detail="Debe incluir al menos un pedido")
+    """Crea una hoja de ruta con los pedidos y/o solicitudes seleccionados."""
+    if not data.pedido_ids and not data.solicitud_ids:
+        raise HTTPException(status_code=400, detail="Debe incluir al menos un pedido o solicitud")
 
-    # Validar que los pedidos existen, son del tenant y están CONFIRMADOS
-    estado_confirmado = db.query(EstadoPedido).filter(EstadoPedido.codigo == "CONFIRMADO").first()
-    if not estado_confirmado:
-        raise HTTPException(status_code=500, detail="Estado CONFIRMADO no encontrado")
+    # Validar pedidos
+    pedidos = []
+    if data.pedido_ids:
+        estado_confirmado = db.query(EstadoPedido).filter(EstadoPedido.codigo == "CONFIRMADO").first()
+        if not estado_confirmado:
+            raise HTTPException(status_code=500, detail="Estado CONFIRMADO no encontrado")
 
-    pedidos = (
-        db.query(Pedido)
-        .join(Cliente)
-        .filter(
-            Pedido.id.in_(data.pedido_ids),
-            Cliente.tenant_id == current_user.tenant_id,
-            Pedido.estado_id == estado_confirmado.id,
+        pedidos = (
+            db.query(Pedido)
+            .join(Cliente)
+            .filter(
+                Pedido.id.in_(data.pedido_ids),
+                Cliente.tenant_id == current_user.tenant_id,
+                Pedido.estado_id == estado_confirmado.id,
+            )
+            .options(joinedload(Pedido.items).joinedload(ItemPedido.producto))
+            .all()
         )
-        .options(joinedload(Pedido.items).joinedload(ItemPedido.producto))
-        .all()
-    )
+        if len(pedidos) != len(data.pedido_ids):
+            raise HTTPException(status_code=400, detail="Uno o más pedidos no son válidos o no están confirmados")
 
-    if len(pedidos) != len(data.pedido_ids):
-        raise HTTPException(status_code=400, detail="Uno o más pedidos no son válidos o no están confirmados")
+        ya_asignados = db.query(HojaRutaItem).filter(
+            HojaRutaItem.pedido_id.in_(data.pedido_ids)
+        ).first()
+        if ya_asignados:
+            raise HTTPException(status_code=400, detail="Uno o más pedidos ya están asignados a una hoja de ruta")
 
-    # Verificar que no estén ya en una hoja de ruta
-    ya_asignados = db.query(HojaRutaItem).filter(
-        HojaRutaItem.pedido_id.in_(data.pedido_ids)
-    ).first()
-    if ya_asignados:
-        raise HTTPException(status_code=400, detail="Uno o más pedidos ya están asignados a una hoja de ruta")
+    # Validar solicitudes
+    solicitudes = []
+    if data.solicitud_ids:
+        estado_finalizado = db.query(EstadoEnrolamiento).filter(EstadoEnrolamiento.codigo == "FINALIZADO").first()
+        if not estado_finalizado:
+            raise HTTPException(status_code=500, detail="Estado FINALIZADO no encontrado")
 
-    # Calcular kg totales y validar capacidad (incluye fallback a peso_bruto para pedidos POS)
+        solicitudes = db.query(SolicitudTransferencia).options(
+            joinedload(SolicitudTransferencia.local_origen),
+            joinedload(SolicitudTransferencia.local_destino),
+            joinedload(SolicitudTransferencia.items).joinedload(ItemSolicitudTransferencia.producto),
+        ).filter(
+            SolicitudTransferencia.solicitud_id.in_(data.solicitud_ids),
+            SolicitudTransferencia.tenant_id == current_user.tenant_id,
+            SolicitudTransferencia.estado_id == estado_finalizado.id,
+            SolicitudTransferencia.requiere_delivery == True,
+        ).all()
+        if len(solicitudes) != len(data.solicitud_ids):
+            raise HTTPException(status_code=400, detail="Una o más solicitudes no son válidas, no están finalizadas o no requieren delivery")
+
+        ya_asignadas = db.query(HojaRutaItem).filter(
+            HojaRutaItem.solicitud_id.in_(data.solicitud_ids)
+        ).first()
+        if ya_asignadas:
+            raise HTTPException(status_code=400, detail="Una o más solicitudes ya están asignadas a una hoja de ruta")
+
+    # Calcular kg totales (solo pedidos contribuyen kg)
     total_kg = sum(_kg_pedido(db, p.items or []) for p in pedidos)
 
     # Validar vehículo y chofer
@@ -341,18 +444,18 @@ def crear_hoja_ruta(
     db.flush()
 
     estado_en_prep = db.query(EstadoPedido).filter(EstadoPedido.codigo == "EN_PREPARACION").first()
-    for orden, pedido_id in enumerate(data.pedido_ids):
-        item = HojaRutaItem(
-            hoja_ruta_id=hoja.id,
-            pedido_id=pedido_id,
-            orden=orden,
-        )
-        db.add(item)
-        # Avanzar estado del pedido a EN_PREPARACION
+    orden = 0
+    for pedido_id in data.pedido_ids:
+        db.add(HojaRutaItem(hoja_ruta_id=hoja.id, pedido_id=pedido_id, orden=orden))
         if estado_en_prep:
             pedido_obj = db.query(Pedido).filter(Pedido.id == pedido_id).first()
             if pedido_obj:
                 pedido_obj.estado_id = estado_en_prep.id
+        orden += 1
+
+    for sol_id in data.solicitud_ids:
+        db.add(HojaRutaItem(hoja_ruta_id=hoja.id, solicitud_id=sol_id, pedido_id=None, orden=orden))
+        orden += 1
 
     db.commit()
     db.refresh(hoja)
@@ -361,13 +464,7 @@ def crear_hoja_ruta(
     hoja = (
         db.query(HojaRuta)
         .filter(HojaRuta.id == hoja.id)
-        .options(
-            joinedload(HojaRuta.vehiculo).joinedload(Vehiculo.tipo_vehiculo),
-            joinedload(HojaRuta.chofer),
-            joinedload(HojaRuta.items).joinedload(HojaRutaItem.pedido).joinedload(Pedido.cliente),
-            joinedload(HojaRuta.items).joinedload(HojaRutaItem.pedido).joinedload(Pedido.items),
-            joinedload(HojaRuta.items).joinedload(HojaRutaItem.pedido).joinedload(Pedido.estado_pedido),
-        )
+        .options(*_hoja_options())
         .first()
     )
     return _build_hoja_response(hoja, db)
@@ -403,17 +500,55 @@ def listar_hojas_ruta(
         q = q.filter(HojaRuta.id.in_(hoja_ids_local))
 
     hojas = (
-        q.options(
-            joinedload(HojaRuta.vehiculo).joinedload(Vehiculo.tipo_vehiculo),
-            joinedload(HojaRuta.chofer),
-            joinedload(HojaRuta.items).joinedload(HojaRutaItem.pedido).joinedload(Pedido.cliente),
-            joinedload(HojaRuta.items).joinedload(HojaRutaItem.pedido).joinedload(Pedido.items),
-            joinedload(HojaRuta.items).joinedload(HojaRutaItem.pedido).joinedload(Pedido.estado_pedido),
-        )
+        q.options(*_hoja_options())
         .order_by(HojaRuta.fecha_creacion.desc())
         .all()
     )
     return [_build_hoja_response(h, db) for h in hojas]
+
+
+@router.get("/mis-hojas")
+def mis_hojas(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user),
+):
+    """
+    Devuelve las hojas de ruta asignadas al usuario autenticado como chofer.
+    Muestra PENDIENTE, EN_RUTA y COMPLETADA no pagadas.
+    Desaparece solo cuando cobro_chofer_pagado = True.
+    Agrega resumen de delivery cobrable (pedidos no pagados).
+    """
+    hojas = (
+        db.query(HojaRuta)
+        .filter(
+            HojaRuta.tenant_id == current_user.tenant_id,
+            HojaRuta.chofer_id == current_user.id,
+            HojaRuta.cobro_chofer_pagado == False,
+        )
+        .options(*_hoja_options())
+        .order_by(HojaRuta.fecha_creacion.desc())
+        .all()
+    )
+
+    result = []
+    for h in hojas:
+        hoja_data = _build_hoja_response(h, db)
+        # Cobros de delivery: pedidos no prepagados (cobro en mano, entregados o no)
+        cobros = [
+            float(hi.pedido.costo_delivery or 0)
+            for hi in h.items
+            if hi.pedido and not hi.pedido.es_pagado and (hi.pedido.costo_delivery or 0) > 0
+        ]
+        hoja_data["delivery_cobrable"] = round(sum(cobros), 0)
+        hoja_data["delivery_cobros_detalle"] = cobros  # lista individual para desglose
+        hoja_data["delivery_total"] = round(sum(
+            float(hi.pedido.costo_delivery or 0)
+            for hi in h.items
+            if hi.pedido
+        ), 0)
+        result.append(hoja_data)
+
+    return result
 
 
 @router.get("/{hoja_id}")
@@ -425,13 +560,7 @@ def obtener_hoja_ruta(
     hoja = (
         db.query(HojaRuta)
         .filter(HojaRuta.id == hoja_id, HojaRuta.tenant_id == current_user.tenant_id)
-        .options(
-            joinedload(HojaRuta.vehiculo).joinedload(Vehiculo.tipo_vehiculo),
-            joinedload(HojaRuta.chofer),
-            joinedload(HojaRuta.items).joinedload(HojaRutaItem.pedido).joinedload(Pedido.cliente),
-            joinedload(HojaRuta.items).joinedload(HojaRutaItem.pedido).joinedload(Pedido.items),
-            joinedload(HojaRuta.items).joinedload(HojaRutaItem.pedido).joinedload(Pedido.estado_pedido),
-        )
+        .options(*_hoja_options())
         .first()
     )
     if not hoja:
@@ -493,13 +622,7 @@ def actualizar_hoja_ruta(
     hoja = (
         db.query(HojaRuta)
         .filter(HojaRuta.id == hoja_id)
-        .options(
-            joinedload(HojaRuta.vehiculo).joinedload(Vehiculo.tipo_vehiculo),
-            joinedload(HojaRuta.chofer),
-            joinedload(HojaRuta.items).joinedload(HojaRutaItem.pedido).joinedload(Pedido.cliente),
-            joinedload(HojaRuta.items).joinedload(HojaRutaItem.pedido).joinedload(Pedido.items),
-            joinedload(HojaRuta.items).joinedload(HojaRutaItem.pedido).joinedload(Pedido.estado_pedido),
-        )
+        .options(*_hoja_options())
         .first()
     )
     return _build_hoja_response(hoja, db)

@@ -34,6 +34,7 @@ class SolicitudTransferenciaUpdate(BaseModel):
     recibido: Optional[bool] = None
     usuario_receptor_id: Optional[int] = None
     fecha_recepcion: Optional[datetime] = None
+    requiere_delivery: Optional[bool] = None
 
 class SolicitudTransferenciaResponse(BaseModel):
     solicitud_id: int
@@ -49,4 +50,5 @@ class SolicitudTransferenciaResponse(BaseModel):
     recibido: bool = False
     usuario_receptor_id: Optional[int] = None
     fecha_recepcion: Optional[datetime] = None
+    requiere_delivery: bool = False
     items: List[ItemSolicitudTransferenciaResponse]

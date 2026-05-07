@@ -24,6 +24,7 @@ class AceptarCotizacionRequest(BaseModel):
     tipo_documento_id: int
     tipo_pedido_id: int = 1
     local_despacho_id: Optional[int] = None
+    local_fabricacion_id: Optional[int] = None
     notas: Optional[str] = None
     medio_pago_id: Optional[int] = None
     requiere_delivery: bool = False
@@ -347,11 +348,32 @@ def aceptar_cotizacion(
         raise HTTPException(status_code=400, detail="Tipo de pedido inválido")
 
     # Local de fabricación del tenant (para chequeo de stock y OT)
-    local_fab = db.query(models.Local).filter(
+    locales_fab = db.query(models.Local).filter(
         models.Local.tenant_id == current_user.tenant_id,
         models.Local.es_local_fabricacion == True,
         models.Local.activo == True,
-    ).first()
+    ).all()
+
+    if len(locales_fab) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="No hay locales de fabricación configurados. Configura al menos uno en Administración > Locales antes de aceptar cotizaciones.",
+        )
+    elif len(locales_fab) == 1:
+        local_fab = locales_fab[0]
+    else:
+        if not data.local_fabricacion_id:
+            nombres = ", ".join(f"'{l.nombre}'" for l in locales_fab)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Hay múltiples locales de fabricación ({nombres}). Debes seleccionar en cuál se producirá.",
+            )
+        local_fab = next((l for l in locales_fab if l.id == data.local_fabricacion_id), None)
+        if not local_fab:
+            raise HTTPException(
+                status_code=400,
+                detail="El local de fabricación seleccionado no es válido o no está activo.",
+            )
 
     # Local del pedido: local_despacho_id si se indica, sino el local de fabricación, sino el primero activo
     local_pedido = (

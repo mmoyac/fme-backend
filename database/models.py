@@ -593,6 +593,7 @@ class SolicitudTransferencia(Base):
     recibido = Column(Boolean, default=False, nullable=False)
     usuario_receptor_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
     fecha_recepcion = Column(DateTime(timezone=True), nullable=True)
+    requiere_delivery = Column(Boolean, default=False, nullable=False)
 
     # Relaciones
     items = relationship("ItemSolicitudTransferencia", back_populates="solicitud", cascade="all, delete-orphan")
@@ -1615,7 +1616,8 @@ class Despacho(Base):
     __tablename__ = "despachos"
 
     id = Column(Integer, primary_key=True, index=True)
-    pedido_id = Column(Integer, ForeignKey("pedidos.id", ondelete="CASCADE"), nullable=False, unique=True)
+    pedido_id = Column(Integer, ForeignKey("pedidos.id", ondelete="CASCADE"), nullable=True)
+    solicitud_id = Column(Integer, ForeignKey("solicitudes_transferencia.solicitud_id", ondelete="CASCADE"), nullable=True)
     despachador_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     estado_despacho = Column(Enum(EstadoDespacho), default=EstadoDespacho.ASIGNADO, nullable=False)
     
@@ -1633,6 +1635,7 @@ class Despacho(Base):
     
     # Relaciones
     pedido = relationship("Pedido", back_populates="despacho")
+    solicitud = relationship("SolicitudTransferencia")
     despachador = relationship("User")
     picking_items = relationship("PickingItem", back_populates="despacho", cascade="all, delete-orphan")
 
@@ -1776,12 +1779,13 @@ class HojaRuta(Base):
 
 
 class HojaRutaItem(Base):
-    """Pedido individual dentro de una hoja de ruta."""
+    """Pedido o solicitud de transferencia dentro de una hoja de ruta."""
     __tablename__ = "hoja_ruta_items"
 
     id = Column(Integer, primary_key=True, index=True)
     hoja_ruta_id = Column(Integer, ForeignKey("hojas_ruta.id", ondelete="CASCADE"), nullable=False)
-    pedido_id = Column(Integer, ForeignKey("pedidos.id", ondelete="RESTRICT"), nullable=False)
+    pedido_id = Column(Integer, ForeignKey("pedidos.id", ondelete="RESTRICT"), nullable=True)
+    solicitud_id = Column(Integer, ForeignKey("solicitudes_transferencia.solicitud_id", ondelete="RESTRICT"), nullable=True)
     orden = Column(Integer, default=0)  # orden de entrega sugerido
 
     entregado = Column(Boolean, default=False, nullable=False)
@@ -1791,6 +1795,7 @@ class HojaRutaItem(Base):
     # Relaciones
     hoja_ruta = relationship("HojaRuta", back_populates="items")
     pedido = relationship("Pedido")
+    solicitud = relationship("SolicitudTransferencia")
 
 
 class Devolucion(Base):

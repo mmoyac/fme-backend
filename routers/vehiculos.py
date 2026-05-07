@@ -8,7 +8,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 from database.database import get_db
-from database.models import Vehiculo, TipoVehiculo, User
+from database.models import Vehiculo, TipoVehiculo, User, Role
 from routers.auth import get_current_active_user
 
 router = APIRouter(prefix="/api/vehiculos", tags=["Vehículos"])
@@ -148,10 +148,15 @@ def listar_choferes(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_active_user),
 ):
-    """Lista usuarios activos del tenant para usar como choferes."""
+    """Lista usuarios activos del tenant con rol DESPACHADOR."""
     users = (
         db.query(User)
-        .filter(User.tenant_id == current_user.tenant_id, User.is_active == True)
+        .join(Role, User.role_id == Role.id)
+        .filter(
+            User.tenant_id == current_user.tenant_id,
+            User.is_active == True,
+            Role.nombre.ilike('despachador'),
+        )
         .order_by(User.nombre_completo)
         .all()
     )
