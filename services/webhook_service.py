@@ -13,11 +13,11 @@ from services import notification_preferences_service
 logger = logging.getLogger(__name__)
 
 import os
-N8N_WEBHOOK_PEDIDO_CONFIRMADO = "https://n8n.masasestacion.cl/webhook/pedido-confirmado"
-N8N_WEBHOOK_PEDIDO_ENTREGADO = "https://n8n.masasestacion.cl/webhook/pedido-entregado"
-N8N_WEBHOOK_COTIZACION_CREADA = "https://n8n.masasestacion.cl/webhook/cotizacion-creada"
-N8N_WEBHOOK_COTIZACION_ENVIADA = "https://n8n.masasestacion.cl/webhook/cotizacion-enviada"
-N8N_WEBHOOK_COTIZACION_ACEPTADA = "https://n8n.masasestacion.cl/webhook/cotizacion-aceptada"
+N8N_WEBHOOK_PEDIDO_CONFIRMADO = "https://n8n.effi4tech.cl/webhook/pedido-confirmado"
+N8N_WEBHOOK_PEDIDO_ENTREGADO = "https://n8n.effi4tech.cl/webhook/pedido-entregado"
+N8N_WEBHOOK_COTIZACION_CREADA = "https://n8n.effi4tech.cl/webhook/cotizacion-creada"
+N8N_WEBHOOK_COTIZACION_ENVIADA = "https://n8n.effi4tech.cl/webhook/cotizacion-enviada"
+N8N_WEBHOOK_COTIZACION_ACEPTADA = "https://n8n.effi4tech.cl/webhook/cotizacion-aceptada"
 API_BASE_URL = os.getenv("API_BASE_URL", "https://api.masasestacion.cl")
 
 
