@@ -21,7 +21,7 @@ router = APIRouter()
 
 # Dependencia para verificar que el usuario es admin
 def get_current_admin_user(current_user: User = Depends(get_current_active_user)):
-    if current_user.role.nombre != "admin":
+    if current_user.role.nombre not in ("admin", "superadmin"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Se requieren privilegios de administrador"

@@ -598,7 +598,7 @@ def descargar_pdf_cierre_turno(
     
     # Validar que el usuario puede acceder a este turno
     # Solo el propio vendedor o un admin pueden generar el PDF
-    if turno.vendedor_id != current_user.id and (not current_user.role or current_user.role.nombre != "admin"):
+    if turno.vendedor_id != current_user.id and (not current_user.role or current_user.role.nombre not in ("admin", "superadmin")):
         raise HTTPException(
             status_code=403, 
             detail="No tienes permiso para descargar este reporte"
