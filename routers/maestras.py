@@ -1454,26 +1454,30 @@ def seed_all_maestras(
         else:
             result["skipped"].append("Estados de cheque (ya existen)")
         
-        # 6. Bancos
-        if db.query(BancoModel).count() == 0:
-            bancos = [
-                {"nombre": "Banco de Chile", "codigo": "001"},
-                {"nombre": "Banco Santander", "codigo": "037"},
-                {"nombre": "Banco Estado", "codigo": "012"},
-                {"nombre": "Banco BCI", "codigo": "009"},
-                {"nombre": "Banco Falabella", "codigo": "051"},
-                {"nombre": "Banco Itaú", "codigo": "039"},
-                {"nombre": "Banco Security", "codigo": "049"}
-            ]
-            
-            for banco_data in bancos:
-                banco = BancoModel(**banco_data)
-                db.add(banco)
-            
+        # 6. Bancos — upsert por código para que sea idempotente
+        bancos_seed = [
+            {"nombre": "Banco de Chile",  "codigo": "001", "nombre_corto": "BCI Chile"},
+            {"nombre": "Banco Santander", "codigo": "037", "nombre_corto": "Santander"},
+            {"nombre": "Banco Estado",    "codigo": "012", "nombre_corto": "BancoEstado"},
+            {"nombre": "Banco BCI",       "codigo": "009", "nombre_corto": "BCI"},
+            {"nombre": "Banco Falabella", "codigo": "051", "nombre_corto": "Falabella"},
+            {"nombre": "Banco Itaú",      "codigo": "039", "nombre_corto": "Itaú"},
+            {"nombre": "Banco Security",  "codigo": "049", "nombre_corto": "Security"},
+            {"nombre": "Banco BICE",      "codigo": "028", "nombre_corto": "BICE"},
+            {"nombre": "Banco Scotiabank","codigo": "014", "nombre_corto": "Scotiabank"},
+            {"nombre": "Banco Consorcio", "codigo": "055", "nombre_corto": "Consorcio"},
+        ]
+        bancos_creados = 0
+        for banco_data in bancos_seed:
+            existing = db.query(BancoModel).filter(BancoModel.codigo == banco_data["codigo"]).first()
+            if not existing:
+                db.add(BancoModel(**banco_data))
+                bancos_creados += 1
+        if bancos_creados > 0:
             db.commit()
-            result["loaded"].append(f"Bancos: {len(bancos)} items")
+            result["loaded"].append(f"Bancos: {bancos_creados} nuevos")
         else:
-            result["skipped"].append("Bancos (ya existen)")
+            result["skipped"].append("Bancos (todos ya existen)")
         
         # 7. Tipos de venta
         if db.query(TipoVentaModel).count() == 0:
