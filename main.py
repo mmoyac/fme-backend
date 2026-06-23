@@ -5,7 +5,11 @@ from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware  # noqa: F401 (kept for potential use)
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from starlette.responses import Response, JSONResponse
+import logging
+import traceback
+
+logger = logging.getLogger("fme.cors")
 
 from routers.auth import get_current_active_user
 
@@ -109,7 +113,19 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
                 )
             return Response(status_code=400)
 
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception:
+            # Una excepción no controlada en el handler haría que call_next re-lance y
+            # la respuesta 500 saliera SIN cabeceras CORS → el navegador lo reporta como
+            # "Failed to fetch", ocultando el error real. Capturamos, logueamos el
+            # traceback y devolvemos un 500 JSON con las cabeceras CORS aplicadas.
+            logger.error("Excepción no controlada en %s %s\n%s", request.method, request.url.path, traceback.format_exc())
+            response = JSONResponse(
+                status_code=500,
+                content={"detail": "Error interno del servidor"},
+            )
+
         if is_origin_allowed(origin, allowed):
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Access-Control-Allow-Credentials"] = "true"

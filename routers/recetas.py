@@ -4,7 +4,7 @@ Router para gestión de Recetas e Ingredientes.
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 
 from database.database import get_db
 from database.models import Receta as RecetaModel, IngredienteReceta as IngredienteRecetaModel, Producto, UnidadMedida, User
@@ -17,56 +17,86 @@ from routers.auth import get_current_active_user
 router = APIRouter()
 
 
+# Límite de las columnas de costo Numeric(10,2)
+MAX_COSTO = Decimal("99999999.99")
+
+
+def _a_dinero(valor: Decimal) -> Decimal:
+    """Redondea a 2 decimales (escala de las columnas de costo) y valida el rango.
+
+    Evita el `numeric field overflow` de Postgres al persistir Decimals de alta
+    precisión en columnas Numeric(10,2).
+    """
+    try:
+        q = Decimal(valor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="Valor de costo inválido en el cálculo de la receta")
+    if abs(q) > MAX_COSTO:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Un costo calculado ({q}) excede el máximo permitido ({MAX_COSTO}). "
+                "Revisa cantidades, precios o rendimiento."
+            ),
+        )
+    return q
+
+
+def _div_segura(numerador: Decimal, denominador) -> Decimal:
+    """División que trata un denominador nulo/cero como 1 (evita ZeroDivision)."""
+    den = Decimal(denominador or 1)
+    if den == 0:
+        den = Decimal(1)
+    return numerador / den
+
+
 def calcular_costos_receta(receta: RecetaModel, db: Session):
-    """Calcula los costos de una receta basándose en sus ingredientes."""
+    """Calcula los costos de una receta basándose en sus ingredientes.
+
+    Solo muta objetos en la sesión (no hace commit): la atomicidad la controla el
+    endpoint que la invoca. Todos los costos se redondean a 2 decimales antes de
+    asignarse para no exceder la precisión de las columnas.
+    """
     costo_total = Decimal('0')
-    
+
     for ingrediente in receta.ingredientes:
         producto_ingrediente = db.query(Producto).filter(Producto.id == ingrediente.producto_ingrediente_id).first()
         unidad_base = db.query(UnidadMedida).filter(UnidadMedida.id == producto_ingrediente.unidad_medida_id).first() if producto_ingrediente else None
         unidad_ingrediente = db.query(UnidadMedida).filter(UnidadMedida.id == ingrediente.unidad_medida_id).first() if ingrediente.unidad_medida_id else None
-        
+
+        # Precio: precio_compra si es materia prima, o costo_fabricacion si es elaborado
+        precio_por_unidad_compra = (producto_ingrediente.precio_compra or producto_ingrediente.costo_fabricacion or Decimal('0')) if producto_ingrediente else Decimal('0')
+        # Normalizar al precio por unidad base (ej: precio por saco → precio por kg)
+        costo_unitario = _div_segura(precio_por_unidad_compra, producto_ingrediente.factor_conversion_compra if producto_ingrediente else 1)
+
         if producto_ingrediente and unidad_base and unidad_ingrediente:
-            # Usar precio_compra si es materia prima, o costo_fabricacion si es producto elaborado
-            precio_por_unidad_compra = producto_ingrediente.precio_compra or producto_ingrediente.costo_fabricacion or Decimal('0')
-            # Normalizar al precio por unidad base (ej: precio por saco → precio por kg)
-            factor_compra = Decimal(producto_ingrediente.factor_conversion_compra or 1)
-            costo_unitario = precio_por_unidad_compra / factor_compra
-            # Convertir cantidad de la receta a la unidad base del producto
+            # Convertir la cantidad (factor) a la unidad base del producto
             if unidad_base.id == unidad_ingrediente.id:
                 cantidad_proporcional = ingrediente.cantidad
             else:
-                factor = Decimal(unidad_ingrediente.factor_conversion) / Decimal(unidad_base.factor_conversion)
+                factor = _div_segura(Decimal(unidad_ingrediente.factor_conversion), unidad_base.factor_conversion)
                 cantidad_proporcional = ingrediente.cantidad * factor
-            # Calcular costo proporcional
             cantidad_sobre_base = cantidad_proporcional / Decimal('1000') if unidad_base.simbolo == 'g' and producto_ingrediente.unidad_medida_id == unidad_base.id else cantidad_proporcional
             costo_ingrediente = costo_unitario * cantidad_sobre_base
-            # Actualizar ingrediente
-            ingrediente.costo_unitario_referencia = costo_unitario
-            ingrediente.costo_total_calculado = costo_ingrediente
-            costo_total += costo_ingrediente
         else:
-            # Fallback: cálculo directo aplicando factor_conversion_compra
-            precio_por_unidad_compra = producto_ingrediente.precio_compra or producto_ingrediente.costo_fabricacion or Decimal('0') if producto_ingrediente else Decimal('0')
-            factor_compra = Decimal(producto_ingrediente.factor_conversion_compra or 1) if producto_ingrediente else Decimal('1')
-            costo_unitario = precio_por_unidad_compra / factor_compra
+            # Fallback: cálculo directo
             costo_ingrediente = costo_unitario * ingrediente.cantidad
-            ingrediente.costo_unitario_referencia = costo_unitario
-            ingrediente.costo_total_calculado = costo_ingrediente
-            costo_total += costo_ingrediente
-    
-    # Actualizar receta
-    receta.costo_total_calculado = costo_total
-    receta.costo_unitario_calculado = costo_total / receta.rendimiento if receta.rendimiento > 0 else Decimal('0')
-    
-    db.commit()
-    
-    # Actualizar el costo_fabricacion del producto
+
+        # Persistir redondeado a 2 decimales (escala de columna)
+        ingrediente.costo_unitario_referencia = _a_dinero(costo_unitario)
+        ingrediente.costo_total_calculado = _a_dinero(costo_ingrediente)
+        costo_total += ingrediente.costo_total_calculado
+
+    # Actualizar receta (redondeado)
+    receta.costo_total_calculado = _a_dinero(costo_total)
+    rendimiento = receta.rendimiento if receta.rendimiento and receta.rendimiento > 0 else Decimal('1')
+    receta.costo_unitario_calculado = _a_dinero(costo_total / rendimiento)
+
+    # Propagar al producto (sin commit; lo hace el endpoint)
     producto = db.query(Producto).filter(Producto.id == receta.producto_id).first()
     if producto:
         producto.costo_fabricacion = receta.costo_unitario_calculado
-        db.commit()
-    
+
     return receta
 
 
@@ -104,7 +134,12 @@ def crear_receta(
     producto = db.query(Producto).filter(Producto.id == producto_id).first()
     if not producto:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
-    
+
+    # No permitir productos repetidos como ingrediente
+    ids_ingredientes = [ing.producto_ingrediente_id for ing in receta_data.ingredientes]
+    if len(ids_ingredientes) != len(set(ids_ingredientes)):
+        raise HTTPException(status_code=400, detail="La receta tiene un producto repetido como ingrediente")
+
     # Desactivar recetas anteriores
     db.query(RecetaModel).filter(
         RecetaModel.producto_id == producto_id,
@@ -114,29 +149,26 @@ def crear_receta(
     # Crear nueva receta
     receta_dict = receta_data.model_dump(exclude={'ingredientes'})
     receta_dict['producto_id'] = producto_id
-    
+
     db_receta = RecetaModel(**receta_dict)
     db.add(db_receta)
-    db.flush()  # Para obtener el ID
-    
-    # Agregar ingredientes
+
+    # Agregar ingredientes a la relación (queda poblada en memoria para el cálculo)
     for ing_data in receta_data.ingredientes:
-        ing_dict = ing_data.model_dump()
-        ing_dict['receta_id'] = db_receta.id
-        
-        db_ingrediente = IngredienteRecetaModel(**ing_dict)
-        db.add(db_ingrediente)
-    
-    db.commit()
-    db.refresh(db_receta)
-    
-    # Calcular costos
-    calcular_costos_receta(db_receta, db)
-    
-    # Marcar producto como "tiene_receta"
-    producto.tiene_receta = True
-    db.commit()
-    
+        db_receta.ingredientes.append(IngredienteRecetaModel(**ing_data.model_dump()))
+
+    # Transacción única: desactivar anteriores + receta + ingredientes + costos + flag
+    try:
+        calcular_costos_receta(db_receta, db)
+        producto.tiene_receta = True
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error al crear la receta")
+
     db.refresh(db_receta)
     return db_receta
 
@@ -156,12 +188,17 @@ def actualizar_receta(
     update_data = receta_data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(db_receta, field, value)
-    
-    db.commit()
-    
-    # Recalcular costos
-    calcular_costos_receta(db_receta, db)
-    
+
+    try:
+        calcular_costos_receta(db_receta, db)
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error al actualizar la receta")
+
     db.refresh(db_receta)
     return db_receta
 
@@ -178,21 +215,26 @@ def eliminar_receta(
         raise HTTPException(status_code=404, detail="Receta no encontrada")
     
     producto_id = db_receta.producto_id
-    
+
     db.delete(db_receta)
-    db.commit()
-    
+    db.flush()
+
     # Verificar si quedan recetas para este producto
     tiene_recetas = db.query(RecetaModel).filter(RecetaModel.producto_id == producto_id).count() > 0
-    
+
     # Actualizar flag del producto
     producto = db.query(Producto).filter(Producto.id == producto_id).first()
     if producto:
         producto.tiene_receta = tiene_recetas
         if not tiene_recetas:
             producto.costo_fabricacion = None
+
+    try:
         db.commit()
-    
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error al eliminar la receta")
+
     return None
 
 
@@ -212,22 +254,26 @@ def agregar_ingrediente(
     receta = db.query(RecetaModel).filter(RecetaModel.id == receta_id).first()
     if not receta:
         raise HTTPException(status_code=404, detail="Receta no encontrada")
-    
-    # Crear ingrediente
-    ing_dict = ingrediente.model_dump()
-    ing_dict['receta_id'] = receta_id
-    
-    db_ingrediente = IngredienteRecetaModel(**ing_dict)
-    db.add(db_ingrediente)
-    db.commit()
+
+    # No permitir el mismo producto dos veces en la receta
+    if any(i.producto_ingrediente_id == ingrediente.producto_ingrediente_id for i in receta.ingredientes):
+        raise HTTPException(status_code=400, detail="El producto ya es un ingrediente de esta receta")
+
+    # Crear ingrediente vía la relación (poblada en memoria para el cálculo)
+    db_ingrediente = IngredienteRecetaModel(**ingrediente.model_dump())
+    receta.ingredientes.append(db_ingrediente)
+
+    try:
+        calcular_costos_receta(receta, db)
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error al agregar el ingrediente")
+
     db.refresh(db_ingrediente)
-    
-    # Recalcular costos de la receta
-    calcular_costos_receta(receta, db)
-    
-    # Refrescar la receta para que incluya el nuevo ingrediente
-    db.refresh(receta)
-    
     return db_ingrediente
 
 
@@ -246,15 +292,21 @@ def actualizar_ingrediente(
     update_data = ingrediente.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(db_ingrediente, field, value)
-    
-    db.commit()
-    db.refresh(db_ingrediente)
-    
-    # Recalcular costos de la receta
+
     receta = db.query(RecetaModel).filter(RecetaModel.id == db_ingrediente.receta_id).first()
-    if receta:
-        calcular_costos_receta(receta, db)
-    
+
+    try:
+        if receta:
+            calcular_costos_receta(receta, db)
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error al actualizar el ingrediente")
+
+    db.refresh(db_ingrediente)
     return db_ingrediente
 
 
@@ -269,16 +321,25 @@ def eliminar_ingrediente(
     if not db_ingrediente:
         raise HTTPException(status_code=404, detail="Ingrediente no encontrado")
     
-    receta_id = db_ingrediente.receta_id
-    
-    db.delete(db_ingrediente)
-    db.commit()
-    
-    # Recalcular costos de la receta
-    receta = db.query(RecetaModel).filter(RecetaModel.id == receta_id).first()
-    if receta:
-        calcular_costos_receta(receta, db)
-    
+    receta = db.query(RecetaModel).filter(RecetaModel.id == db_ingrediente.receta_id).first()
+
+    # Quitar de la relación (cascade delete-orphan) para que el recálculo no lo incluya
+    if receta and db_ingrediente in receta.ingredientes:
+        receta.ingredientes.remove(db_ingrediente)
+    else:
+        db.delete(db_ingrediente)
+
+    try:
+        if receta:
+            calcular_costos_receta(receta, db)
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error al eliminar el ingrediente")
+
     return None
 
 
@@ -293,7 +354,15 @@ def recalcular_costos(
     if not receta:
         raise HTTPException(status_code=404, detail="Receta no encontrada")
     
-    calcular_costos_receta(receta, db)
+    try:
+        calcular_costos_receta(receta, db)
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error al recalcular costos")
+
     db.refresh(receta)
-    
     return receta

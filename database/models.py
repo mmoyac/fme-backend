@@ -221,6 +221,9 @@ class TipoProducto(Base):
     nombre = Column(String, nullable=False)
     descripcion = Column(String)
     activo = Column(Boolean, default=True)
+    # True: los productos de este tipo afectan inventario (insumos fisicos).
+    # False: operacionales (arriendo, electricidad, HH); se costean pero no manejan stock.
+    afecta_inventario = Column(Boolean, nullable=False, default=True, server_default='true')
 
     # Relaciones
     productos = relationship("Producto", back_populates="tipo_producto")
@@ -1172,8 +1175,8 @@ class IngredienteReceta(Base):
     receta_id = Column(Integer, ForeignKey("recetas.id", ondelete="CASCADE"), nullable=False)
     producto_ingrediente_id = Column(Integer, ForeignKey("productos.id", ondelete="RESTRICT"), nullable=False)
     
-    # Cantidad del ingrediente
-    cantidad = Column(Numeric(10, 3), nullable=False)
+    # Cantidad del ingrediente (se usa como FACTOR de costeo; alta precision)
+    cantidad = Column(Numeric(18, 8), nullable=False)
     unidad_medida_id = Column(Integer, ForeignKey("unidades_medida.id", ondelete="RESTRICT"), nullable=False)
     
     # Costos

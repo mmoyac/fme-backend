@@ -1,10 +1,16 @@
 """
 Schemas Pydantic para Recetas e Ingredientes.
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, condecimal
 from typing import Optional, List
 from decimal import Decimal
 from datetime import datetime
+
+# Tipos con precisión acotada a las columnas de la BD.
+# cantidad se usa como FACTOR de costeo: Numeric(18,8).
+CantidadFactor = condecimal(gt=0, max_digits=18, decimal_places=8)
+# rendimiento: Numeric(10,3).
+Rendimiento = condecimal(gt=0, max_digits=10, decimal_places=3)
 
 
 # ============================================
@@ -14,7 +20,10 @@ from datetime import datetime
 class IngredienteRecetaBase(BaseModel):
     """Schema base de Ingrediente de Receta."""
     producto_ingrediente_id: int = Field(..., description="ID del producto usado como ingrediente")
-    cantidad: Decimal = Field(..., gt=0, description="Cantidad del ingrediente")
+    # cantidad se usa como FACTOR de costeo: hasta 8 decimales (columna Numeric(18,8)).
+    cantidad: CantidadFactor = Field(
+        ..., description="Cantidad/factor del ingrediente (hasta 8 decimales)",
+    )
     unidad_medida_id: int = Field(..., description="ID de la unidad de medida")
     orden: int = Field(default=0, description="Orden de visualización")
     notas: Optional[str] = None
@@ -28,7 +37,7 @@ class IngredienteRecetaCreate(IngredienteRecetaBase):
 class IngredienteRecetaUpdate(BaseModel):
     """Schema para actualizar un Ingrediente de Receta."""
     producto_ingrediente_id: Optional[int] = None
-    cantidad: Optional[Decimal] = Field(None, gt=0)
+    cantidad: Optional[CantidadFactor] = None
     unidad_medida_id: Optional[int] = None
     orden: Optional[int] = None
     notas: Optional[str] = None
@@ -52,7 +61,7 @@ class IngredienteRecetaResponse(IngredienteRecetaBase):
 class RecetaBase(BaseModel):
     """Schema base de Receta."""
     nombre: str = Field(..., min_length=1, max_length=255)
-    rendimiento: Decimal = Field(..., gt=0, description="Cantidad que produce esta receta")
+    rendimiento: Rendimiento = Field(..., description="Cantidad que produce esta receta")
     unidad_rendimiento_id: int = Field(..., description="ID de la unidad de medida del rendimiento")
     notas: Optional[str] = None
     activa: bool = True
@@ -66,7 +75,7 @@ class RecetaCreate(RecetaBase):
 class RecetaUpdate(BaseModel):
     """Schema para actualizar una Receta."""
     nombre: Optional[str] = Field(None, min_length=1, max_length=255)
-    rendimiento: Optional[Decimal] = Field(None, gt=0)
+    rendimiento: Optional[Rendimiento] = None
     unidad_rendimiento_id: Optional[int] = None
     notas: Optional[str] = None
     activa: Optional[bool] = None

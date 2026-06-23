@@ -14,6 +14,18 @@ router = APIRouter(
     tags=["Produccion"]
 )
 
+
+def _afecta_inventario(prod) -> bool:
+    """True si el producto maneja stock. Los tipos operacionales (arriendo, electricidad,
+    servicios) tienen tipo_producto.afecta_inventario=False: se costean pero no descuentan
+    stock en producción."""
+    if not prod:
+        return True
+    tipo = getattr(prod, "tipo_producto", None)
+    if tipo is None:
+        return True
+    return bool(getattr(tipo, "afecta_inventario", True))
+
 # Endpoint para chequeo de insumos en tiempo real
 @router.get("/chequear-insumos")
 def chequear_insumos_producto(
@@ -39,8 +51,11 @@ def chequear_insumos_producto(
     errores = []
     for ingrediente in receta.ingredientes:
         pid = ingrediente.producto_ingrediente_id
-        consumo = float(ingrediente.cantidad) * factor
         prod_ing = db.query(models.Producto).filter(models.Producto.id == pid).first()
+        # Insumos operacionales (arriendo, electricidad, etc.) no manejan stock
+        if not _afecta_inventario(prod_ing):
+            continue
+        consumo = float(ingrediente.cantidad) * factor
         inv = db.query(models.Inventario).filter(
             models.Inventario.producto_id == pid,
             models.Inventario.local_id == local_id
@@ -106,13 +121,15 @@ def calcular_requisitos_orden(orden_id: int, db: Session = Depends(get_db), curr
             
             for ingrediente in receta.ingredientes:
                 pid = ingrediente.producto_ingrediente_id
+                prod_ing = db.query(models.Producto).filter(models.Producto.id == pid).first()
+                # Operacionales no se incluyen en la hoja de insumos a preparar
+                if not _afecta_inventario(prod_ing):
+                    continue
                 consumo = float(ingrediente.cantidad) * factor
-                
+
                 if pid in consumos_totales:
                     consumos_totales[pid]['cantidad'] += consumo
                 else:
-                    # Traer datos extra para mostrar
-                    prod_ing = db.query(models.Producto).filter(models.Producto.id == pid).first()
                     consumos_totales[pid] = {
                         'producto_id': pid,
                         'nombre': prod_ing.nombre,
@@ -144,6 +161,10 @@ def crear_orden(orden: schemas_prod.OrdenProduccionCreate, db: Session = Depends
             factor = float(det.cantidad) / rendimiento
             for ingrediente in receta.ingredientes:
                 pid = ingrediente.producto_ingrediente_id
+                prod_ing = db.query(models.Producto).filter(models.Producto.id == pid).first()
+                # Operacionales no validan stock
+                if not _afecta_inventario(prod_ing):
+                    continue
                 consumo = float(ingrediente.cantidad) * factor
                 if pid in consumos_totales:
                     consumos_totales[pid] += consumo
@@ -232,6 +253,10 @@ def finalizar_orden(orden_id: int, confirmacion: schemas_prod.ConfirmacionFinali
                 # saltando la suma acumulada de la receta.
                 # PERO, si el ajuste es nulo, sumamos.
                 
+                prod_ing = db.query(models.Producto).filter(models.Producto.id == pid).first()
+                # Operacionales no descuentan stock
+                if not _afecta_inventario(prod_ing):
+                    continue
                 if pid not in ajustes_insumos_map:
                     consumo = float(ingrediente.cantidad) * factor
                     if pid in consumos_totales:
@@ -241,6 +266,10 @@ def finalizar_orden(orden_id: int, confirmacion: schemas_prod.ConfirmacionFinali
 
     # 2. Incorporar ajustes manuales de insumos (sobreescriben lo calculado)
     for pid, qty in ajustes_insumos_map.items():
+        prod_ajuste = db.query(models.Producto).filter(models.Producto.id == pid).first()
+        # Operacionales nunca descuentan stock, ni siquiera vía ajuste manual
+        if not _afecta_inventario(prod_ajuste):
+            continue
         consumos_totales[pid] = qty
 
     # Verificar disponibilidad en Base de Datos

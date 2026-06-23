@@ -134,6 +134,10 @@ class TipoProductoBase(BaseModel):
     nombre: str = Field(..., description="Nombre del tipo")
     descripcion: Optional[str] = None
     activo: bool = True
+    afecta_inventario: bool = Field(
+        default=True,
+        description="Si los productos de este tipo manejan stock (False = operacional, p. ej. arriendo/servicio)",
+    )
 
 
 class TipoProductoCreate(TipoProductoBase):
@@ -145,6 +149,7 @@ class TipoProductoUpdate(BaseModel):
     nombre: Optional[str] = None
     descripcion: Optional[str] = None
     activo: Optional[bool] = None
+    afecta_inventario: Optional[bool] = None
 
 
 class TipoProducto(TipoProductoBase):
