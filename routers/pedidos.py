@@ -10,7 +10,7 @@ import io
 from decimal import Decimal
 
 from database.database import get_db
-from database.models import Pedido, ItemPedido, Cliente, Producto, Local, Inventario, MovimientoInventario, TurnoCaja, OperacionCaja, TipoOperacionCaja, EstadoTurnoCaja, TipoPedido, StockCajasProveedor, MedioPago, CobroPendiente
+from database.models import Pedido, ItemPedido, Cliente, Producto, Local, Inventario, MovimientoInventario, TurnoCaja, OperacionCaja, TipoOperacionCaja, EstadoTurnoCaja, TipoPedido, StockCajasProveedor, MedioPago, CobroPendiente, TipoDocumento
 from schemas.pedido import (
     PedidoCreateFrontend,
     PedidoCreateBackoffice,
@@ -614,6 +614,12 @@ def crear_pedido_frontend(
         Cliente.tenant_id == tenant_id
     ).first()
     
+    # El modelo Cliente no tiene columna 'comuna'; se preserva la comuna de despacho
+    # dentro de la dirección para no perder el dato.
+    direccion_completa = pedido_data.direccion_entrega
+    if pedido_data.comuna:
+        direccion_completa = f"{pedido_data.direccion_entrega}, {pedido_data.comuna}"
+
     if not cliente:
         # Crear nuevo cliente en el tenant detectado
         cliente = Cliente(
@@ -622,8 +628,7 @@ def crear_pedido_frontend(
             apellido=pedido_data.cliente_apellido,
             email=pedido_data.cliente_email,
             telefono=pedido_data.cliente_telefono,
-            direccion=pedido_data.direccion_entrega,
-            comuna=pedido_data.comuna
+            direccion=direccion_completa,
         )
         db.add(cliente)
         db.flush()  # Para obtener el ID sin hacer commit
@@ -632,8 +637,7 @@ def crear_pedido_frontend(
         cliente.nombre = pedido_data.cliente_nombre
         cliente.apellido = pedido_data.cliente_apellido
         cliente.telefono = pedido_data.cliente_telefono
-        cliente.direccion = pedido_data.direccion_entrega
-        cliente.comuna = pedido_data.comuna
+        cliente.direccion = direccion_completa
     
     # 3. Validar productos y calcular total (en el tenant correspondiente)
     items_a_crear = []
