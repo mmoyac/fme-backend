@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, DataError
+from contextlib import contextmanager
 from typing import List
 from datetime import datetime
 
@@ -13,6 +14,26 @@ router = APIRouter(
     prefix="/compras",
     tags=["Compras"]
 )
+
+
+@contextmanager
+def _errores_bd_a_400(db: Session, accion: str):
+    """Traduce errores de BD (flush/commit) a un 400 legible en vez de un 500 opaco."""
+    try:
+        yield
+    except DataError:
+        db.rollback()
+        # Típico: overflow numérico (monto/cantidad demasiado grande para la columna)
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se pudo {accion}: algún monto o cantidad excede el máximo permitido."
+        )
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=f"No se pudo {accion}: datos inválidos o referencia inexistente (proveedor, local, tipo de documento o producto)."
+        )
 
 # -----------------------------------------------------------------------------
 # Proveedores
@@ -112,26 +133,27 @@ def create_compra(compra: schemas.CompraCreate, db: Session = Depends(get_db), c
         estado="PENDIENTE",
         monto_total=0
     )
-    db.add(nueva_compra)
-    db.flush()
+    with _errores_bd_a_400(db, "registrar la compra"):
+        db.add(nueva_compra)
+        db.flush()
 
-    total_compra = 0
+        total_compra = 0
 
-    # 2. Guardar Detalles (Sin afectar inventario aun)
-    for det in compra.detalles:
-        nuevo_detalle = models.DetalleCompra(
-            compra_id=nueva_compra.id,
-            producto_id=det.producto_id,
-            cantidad=det.cantidad,
-            precio_unitario=det.precio_unitario
-        )
-        db.add(nuevo_detalle)
-        
-        line_total = float(det.cantidad) * float(det.precio_unitario)
-        total_compra += line_total
-    
-    nueva_compra.monto_total = total_compra
-    db.commit()
+        # 2. Guardar Detalles (Sin afectar inventario aun)
+        for det in compra.detalles:
+            nuevo_detalle = models.DetalleCompra(
+                compra_id=nueva_compra.id,
+                producto_id=det.producto_id,
+                cantidad=det.cantidad,
+                precio_unitario=det.precio_unitario
+            )
+            db.add(nuevo_detalle)
+
+            line_total = float(det.cantidad) * float(det.precio_unitario)
+            total_compra += line_total
+
+        nueva_compra.monto_total = total_compra
+        db.commit()
     db.refresh(nueva_compra)
     return nueva_compra
 
@@ -147,32 +169,33 @@ def update_compra(compra_id: int, compra_data: schemas.CompraCreate, db: Session
     if db_compra.estado == "RECIBIDA":
         raise HTTPException(status_code=400, detail="No se puede modificar una compra ya recibida")
 
-    # Actualizar cabecera
-    db_compra.proveedor_id = compra_data.proveedor_id
-    db_compra.local_id = compra_data.local_id
-    db_compra.fecha_compra = compra_data.fecha_compra or db_compra.fecha_compra
-    db_compra.numero_documento = compra_data.numero_documento
-    db_compra.tipo_documento_id = compra_data.tipo_documento_id
-    db_compra.notas = compra_data.notas
+    with _errores_bd_a_400(db, "actualizar la compra"):
+        # Actualizar cabecera
+        db_compra.proveedor_id = compra_data.proveedor_id
+        db_compra.local_id = compra_data.local_id
+        db_compra.fecha_compra = compra_data.fecha_compra or db_compra.fecha_compra
+        db_compra.numero_documento = compra_data.numero_documento
+        db_compra.tipo_documento_id = compra_data.tipo_documento_id
+        db_compra.notas = compra_data.notas
 
-    # Eliminar detalles anteriores
-    db.query(models.DetalleCompra).filter(models.DetalleCompra.compra_id == compra_id).delete()
-    
-    # Crear nuevos detalles
-    total_compra = 0
-    for det in compra_data.detalles:
-        nuevo_detalle = models.DetalleCompra(
-            compra_id=db_compra.id,
-            producto_id=det.producto_id,
-            cantidad=det.cantidad,
-            precio_unitario=det.precio_unitario
-        )
-        db.add(nuevo_detalle)
-        line_total = float(det.cantidad) * float(det.precio_unitario)
-        total_compra += line_total
-    
-    db_compra.monto_total = total_compra
-    db.commit()
+        # Eliminar detalles anteriores
+        db.query(models.DetalleCompra).filter(models.DetalleCompra.compra_id == compra_id).delete()
+
+        # Crear nuevos detalles
+        total_compra = 0
+        for det in compra_data.detalles:
+            nuevo_detalle = models.DetalleCompra(
+                compra_id=db_compra.id,
+                producto_id=det.producto_id,
+                cantidad=det.cantidad,
+                precio_unitario=det.precio_unitario
+            )
+            db.add(nuevo_detalle)
+            line_total = float(det.cantidad) * float(det.precio_unitario)
+            total_compra += line_total
+
+        db_compra.monto_total = total_compra
+        db.commit()
     db.refresh(db_compra)
     return db_compra
 
@@ -252,6 +275,7 @@ def recibir_compra(compra_id: int, db: Session = Depends(get_db), current_user =
             producto.precio_compra = float(det.precio_unitario) / factor
     
     db_compra.estado = "RECIBIDA"
-    db.commit()
+    with _errores_bd_a_400(db, "recibir la compra"):
+        db.commit()
     db.refresh(db_compra)
     return db_compra

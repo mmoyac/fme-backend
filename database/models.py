@@ -409,7 +409,7 @@ class Producto(Base):
     peso_bruto = Column(Numeric(8, 3), nullable=True)  # Peso bruto en kg (producto + empaque). Usado para asignación de vehículos en delivery.
 
     # Costos y precios
-    precio_compra = Column(Numeric(10, 2), nullable=True)  # Para materias primas
+    precio_compra = Column(Numeric(12, 2), nullable=True)  # Para materias primas
     costo_fabricacion = Column(Numeric(10, 2), nullable=True)  # Calculado automáticamente
     
     # Stock
@@ -1352,7 +1352,7 @@ class Compra(Base):
     
     fecha_compra = Column(DateTime(timezone=True), server_default=func.now())
     numero_documento = Column(String)  # Fac/Bol/Guia
-    monto_total = Column(Numeric(10, 2), default=0)
+    monto_total = Column(Numeric(12, 2), default=0)
     notas = Column(Text)
     estado = Column(String, default="RECIBIDA") # RECIBIDA, ANULADA
     
@@ -1371,7 +1371,7 @@ class DetalleCompra(Base):
     compra_id = Column(Integer, ForeignKey("compras.id", ondelete="CASCADE"), nullable=False)
     producto_id = Column(Integer, ForeignKey("productos.id", ondelete="RESTRICT"), nullable=False)
     cantidad = Column(Numeric(10, 3), nullable=False)
-    precio_unitario = Column(Numeric(10, 2), nullable=False) # Precio Costo Unitario
+    precio_unitario = Column(Numeric(12, 2), nullable=False) # Precio Costo Unitario
     
     # Relaciones
     compra = relationship("Compra", back_populates="detalles")
