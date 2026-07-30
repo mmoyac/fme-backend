@@ -4,6 +4,7 @@ Permite CRUD de vehículos y consulta de tipos de vehículo.
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func
 from typing import List, Optional
 from pydantic import BaseModel
 
@@ -155,7 +156,7 @@ def listar_choferes(
         .filter(
             User.tenant_id == current_user.tenant_id,
             User.is_active == True,
-            Role.nombre.ilike('despachador'),
+            func.lower(Role.nombre).in_(['despachador', 'chofer']),
         )
         .order_by(User.nombre_completo)
         .all()

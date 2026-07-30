@@ -93,6 +93,14 @@ def _kg_pedido(db: Session, items: List) -> float:
 
 def _build_pedido_summary(pedido: Pedido, db: Session) -> dict:
     kg = _kg_pedido(db, pedido.items or [])
+    local_nombre = None
+    local_direccion = None
+    if pedido.local_despacho:
+        local_nombre = pedido.local_despacho.nombre
+        local_direccion = pedido.local_despacho.direccion
+    elif pedido.local:
+        local_nombre = pedido.local.nombre
+        local_direccion = pedido.local.direccion
     return {
         "id": pedido.id,
         "numero_pedido": pedido.numero_pedido,
@@ -105,6 +113,8 @@ def _build_pedido_summary(pedido: Pedido, db: Session) -> dict:
         "es_pagado": pedido.es_pagado,
         "kg_brutos": kg,
         "items_count": len(pedido.items) if pedido.items else 0,
+        "local_nombre": local_nombre,
+        "local_direccion": local_direccion,
     }
 
 
@@ -263,6 +273,7 @@ def listar_pedidos_disponibles(
             Cliente.tenant_id == current_user.tenant_id,
             Pedido.estado_id == estado_confirmado.id,
             ~Pedido.id.in_(asignados_ids) if asignados_ids else True,
+            Pedido.costo_delivery.isnot(None),
         )
     )
 
@@ -282,6 +293,8 @@ def listar_pedidos_disponibles(
             joinedload(Pedido.cliente),
             joinedload(Pedido.items).joinedload(ItemPedido.producto),
             joinedload(Pedido.estado_pedido),
+            joinedload(Pedido.local_despacho),
+            joinedload(Pedido.local),
         )
         .order_by(Pedido.fecha_pedido.desc())
         .all()
@@ -290,6 +303,8 @@ def listar_pedidos_disponibles(
     result = []
     for p in pedidos:
         kg = _kg_pedido(db, p.items or [])
+        local_nombre = (p.local_despacho.nombre if p.local_despacho else None) or (p.local.nombre if p.local else None)
+        local_direccion = (p.local_despacho.direccion if p.local_despacho else None) or (p.local.direccion if p.local else None)
         result.append({
             "id": p.id,
             "tipo": "pedido",
@@ -303,6 +318,8 @@ def listar_pedidos_disponibles(
             "kg_brutos": round(kg, 3),
             "items_count": len(p.items) if p.items else 0,
             "fecha_pedido": p.fecha_pedido.isoformat() if p.fecha_pedido else None,
+            "local_nombre": local_nombre,
+            "local_direccion": local_direccion,
         })
 
     # Solicitudes FINALIZADO con requiere_delivery=True no asignadas a ninguna hoja
@@ -840,6 +857,14 @@ def eliminar_hoja_ruta(
     if hoja.estado == EstadoHojaRuta.EN_RUTA:
         raise HTTPException(status_code=400, detail="No se puede eliminar una hoja de ruta EN_RUTA")
 
+    # Antes de eliminar, devolver los pedidos a estado CONFIRMADO
+    estado_confirmado = db.query(EstadoPedido).filter(EstadoPedido.codigo == "CONFIRMADO").first()
+    if estado_confirmado:
+        for item in hoja.items:
+            pedido = item.pedido
+            if pedido:
+                pedido.estado_id = estado_confirmado.id
+    
     db.delete(hoja)
     db.commit()
     return {"ok": True}

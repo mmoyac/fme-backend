@@ -150,6 +150,7 @@ class ConfiguracionLanding(Base):
     # Configuración de Delivery
     costo_fijo_delivery = Column(Numeric(10, 2), nullable=True, default=None)
     costo_por_km_delivery = Column(Numeric(10, 2), nullable=True, default=None)
+    costo_por_kilo_delivery = Column(Numeric(10, 2), nullable=True, default=None)
     monto_minimo_delivery_gratis = Column(Numeric(10, 2), nullable=True, default=None)
     max_km_delivery = Column(Numeric(6, 2), nullable=True, default=None)
 
