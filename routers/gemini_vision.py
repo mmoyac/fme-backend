@@ -72,7 +72,7 @@ def encontrar_producto_similar(nombre_extraido: str, db: Session) -> tuple[Optio
 
 
 @router.post("/extraer-etiqueta", response_model=DatosEtiquetaResponse)
-async def extraer_datos_etiqueta(file: UploadFile = File(...), db: Session = Depends(get_db)):
+def extraer_datos_etiqueta(file: UploadFile = File(...), db: Session = Depends(get_db)):
     """
     Extrae datos específicos de etiquetas de carne usando Gemini Vision API
     """
@@ -84,7 +84,7 @@ async def extraer_datos_etiqueta(file: UploadFile = File(...), db: Session = Dep
     
     try:
         # Leer archivo de imagen
-        contents = await file.read()
+        contents = file.file.read()
         
         # Configurar modelo Gemini - usar modelo 2.5 disponible
         model = genai.GenerativeModel('gemini-2.5-flash')
@@ -229,7 +229,7 @@ async def extraer_datos_etiqueta(file: UploadFile = File(...), db: Session = Dep
         )
 
 @router.post("/extraer-texto")
-async def extraer_solo_texto(file: UploadFile = File(...)):
+def extraer_solo_texto(file: UploadFile = File(...)):
     """
     Extrae solo el texto completo de la imagen para debugging
     """
@@ -237,7 +237,7 @@ async def extraer_solo_texto(file: UploadFile = File(...)):
         raise HTTPException(status_code=503, detail="Gemini API no configurada")
     
     try:
-        contents = await file.read()
+        contents = file.file.read()
         model = genai.GenerativeModel('gemini-1.5-flash')
         
         prompt = "Extrae TODO el texto visible en esta imagen, conservando el formato original."

@@ -29,7 +29,7 @@ MAX_FILE_SIZE = 2 * 1024 * 1024  # 2MB
 
 
 @router.post("/upload-imagen")
-async def upload_imagen(
+def upload_imagen(
     tipo: str,  # 'logo' o 'favicon'
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -55,7 +55,7 @@ async def upload_imagen(
         )
     
     # Leer archivo y validar tamaño
-    contents = await file.read()
+    contents = file.file.read()
     if len(contents) > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

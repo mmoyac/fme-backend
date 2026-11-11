@@ -22,7 +22,7 @@ router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/token", auto_error=False)
 security_scheme = HTTPBearer(auto_error=False)
 
-async def get_current_user(
+def get_current_user(
     token: Annotated[str, Depends(oauth2_scheme)],
     auth: Annotated[HTTPAuthorizationCredentials, Depends(security_scheme)],
     db: Session = Depends(get_db)
@@ -98,7 +98,7 @@ class ApiKeyUser:
         self.nombre_completo = "Integración API"
 
 
-async def get_current_user_or_api_key(
+def get_current_user_or_api_key(
     token: Annotated[str, Depends(oauth2_scheme)],
     auth: Annotated[HTTPAuthorizationCredentials, Depends(security_scheme)],
     x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
@@ -153,7 +153,7 @@ async def get_current_user_or_api_key(
     return user
 
 
-async def get_optional_user(
+def get_optional_user(
     token: Annotated[str, Depends(oauth2_scheme)],
     auth: Annotated[HTTPAuthorizationCredentials, Depends(security_scheme)],
     db: Session = Depends(get_db)
@@ -178,7 +178,7 @@ async def get_optional_user(
         return None
 
 @router.post("/token", response_model=Token)
-async def login_for_access_token(
+def login_for_access_token(
     request: Request,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
     db: Session = Depends(get_db)
@@ -308,7 +308,7 @@ def create_initial_admin(db: Session = Depends(get_db)):
     return db_user
 
 @router.get("/users/me", response_model=UserSchema)
-async def read_users_me(current_user: Annotated[User, Depends(get_current_active_user)], db: Session = Depends(get_db)):
+def read_users_me(current_user: Annotated[User, Depends(get_current_active_user)], db: Session = Depends(get_db)):
     """
     Obtiene información del usuario actual incluyendo datos de su tenant.
     """

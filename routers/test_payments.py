@@ -7,7 +7,7 @@ from database.models import Pedido
 router = APIRouter()
 
 @router.post("/test_webhook/{pedido_id}")
-async def test_webhook_simulation(pedido_id: int, db: Session = Depends(get_db)):
+def test_webhook_simulation(pedido_id: int, db: Session = Depends(get_db)):
     """
     ENDPOINT TEMPORAL DE PRUEBA - Simula un pago aprobado sin consultar a Mercado Pago.
     ⚠️ ELIMINAR EN PRODUCCIÓN

@@ -1,5 +1,6 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from database.database import get_db
 from database.models import Pedido
@@ -11,7 +12,7 @@ from routers.pedidos import descontar_inventario
 router = APIRouter()
 
 @router.post("/create_preference/{pedido_id}")
-async def create_payment_preference(
+def create_payment_preference(
     pedido_id: int, 
     db: Session = Depends(get_db)
     # Sin auth, o con auth según prefieras. Normalmente es público si viene del frontend tras crear pedido.
@@ -47,7 +48,15 @@ async def process_payment(request: Request, db: Session = Depends(get_db)):
     """
     try:
         body = await request.json()
-        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Body inválido: {e}")
+    # La llamada a MercadoPago y las queries son síncronas: se ejecutan en el threadpool
+    # para no bloquear el event loop (ver incidente 2026-11-11, pool agotado).
+    return await run_in_threadpool(_process_payment_sync, body, db)
+
+
+def _process_payment_sync(body: dict, db: Session):
+    try:
         # Opcional: Validar que el monto coincida con el pedido si se envía 'external_reference'
         # Pero MP ya valida algunas cosas.
         
@@ -91,6 +100,11 @@ async def mercado_pago_webhook(request: Request, db: Session = Depends(get_db)):
         except:
             pass
 
+    # Consulta a MercadoPago + BD son síncronas: al threadpool para no bloquear el event loop.
+    return await run_in_threadpool(_procesar_webhook_sync, topic, mp_id, db)
+
+
+def _procesar_webhook_sync(topic, mp_id, db: Session):
     if topic == "payment" and mp_id:
         # Consultar estado real del pago a MP (Seguridad: No confiar ciegamente en el webhook)
         payment_info = payment_service.check_payment(mp_id)

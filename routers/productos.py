@@ -560,7 +560,7 @@ def eliminar_producto(producto_id: int, db: Session = Depends(get_db), current_u
 
 
 @router.post("/{producto_id}/imagen", response_model=ProductoResponse)
-async def subir_imagen_producto(
+def subir_imagen_producto(
     producto_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -593,7 +593,7 @@ async def subir_imagen_producto(
     
     # Validar tamaño (2MB)
     max_size = 2 * 1024 * 1024  # 2MB en bytes
-    contents = await file.read()
+    contents = file.file.read()
     if len(contents) > max_size:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

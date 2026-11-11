@@ -16,7 +16,7 @@ router = APIRouter()
 # ========================================
 
 @router.get("/landing")
-async def get_landing_config(
+def get_landing_config(
     request: Request,
     db: Session = Depends(get_db),
     tenant_id: int = None,
@@ -126,7 +126,7 @@ async def get_landing_config(
 
 
 @router.get("/tenant/{codigo}")
-async def get_tenant_by_code(
+def get_tenant_by_code(
     codigo: str,
     db: Session = Depends(get_db)
 ):

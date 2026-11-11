@@ -25,7 +25,7 @@ router = APIRouter()
 
 
 @router.get("/", response_model=List[StockCajasProveedorResponse])
-async def listar_stock_cajas(
+def listar_stock_cajas(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     producto_id: Optional[int] = Query(None),
@@ -91,7 +91,7 @@ async def listar_stock_cajas(
 
 
 @router.get("/resumen", response_model=ResumenStockCajas)
-async def obtener_resumen_stock(
+def obtener_resumen_stock(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
 ):
@@ -170,7 +170,7 @@ async def obtener_resumen_stock(
 
 
 @router.get("/peso-promedio")
-async def obtener_peso_promedio_por_producto(
+def obtener_peso_promedio_por_producto(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
 ):
@@ -221,7 +221,7 @@ async def obtener_peso_promedio_por_producto(
 
 
 @router.get("/producto/{producto_id}", response_model=List[StockCajasProveedorResponse])
-async def obtener_stock_por_producto(
+def obtener_stock_por_producto(
     producto_id: int,
     solo_con_stock: bool = Query(True),
     db: Session = Depends(get_db),
@@ -277,7 +277,7 @@ async def obtener_stock_por_producto(
 
 
 @router.get("/lotes-disponibles/{producto_id}")
-async def obtener_lotes_disponibles_producto(
+def obtener_lotes_disponibles_producto(
     producto_id: int,
     cantidad_requerida: int = Query(..., description="Cantidad de cajas requeridas"),
     db: Session = Depends(get_db),
@@ -369,7 +369,7 @@ async def obtener_lotes_disponibles_producto(
 
 
 @router.post("/actualizar-desde-enrolamiento")
-async def actualizar_stock_desde_enrolamiento(
+def actualizar_stock_desde_enrolamiento(
     actualizacion: ActualizacionStockCajas,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
@@ -441,7 +441,7 @@ async def actualizar_stock_desde_enrolamiento(
 
 
 @router.post("/reservar-para-pedido")
-async def reservar_stock_para_pedido(
+def reservar_stock_para_pedido(
     reserva: ReservaStockCajas,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
@@ -501,7 +501,7 @@ async def reservar_stock_para_pedido(
 
 
 @router.get("/movimientos", response_model=List[MovimientoStockCajasResponse])
-async def listar_movimientos_stock(
+def listar_movimientos_stock(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     producto_id: Optional[int] = Query(None),
@@ -575,7 +575,7 @@ async def listar_movimientos_stock(
 
 
 @router.put("/ajustar/{producto_id}/{proveedor_id}")
-async def ajustar_stock_manual(
+def ajustar_stock_manual(
     producto_id: int,
     proveedor_id: int,
     ajuste: StockCajasProveedorUpdate,
@@ -628,7 +628,7 @@ async def ajustar_stock_manual(
 
 
 @router.get("/lotes-asignados-pedido/{pedido_id}")
-async def obtener_lotes_asignados_pedido(
+def obtener_lotes_asignados_pedido(
     pedido_id: int,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)

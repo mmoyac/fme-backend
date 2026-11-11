@@ -97,7 +97,7 @@ def cleanup_notifications(
 
 
 @router.get("/stream")
-async def sse_stream(
+def sse_stream(
     token: str,
     db: Session = Depends(get_db),
 ):

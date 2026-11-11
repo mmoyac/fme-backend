@@ -6,7 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware  # noqa: F401 (kept for poten
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response, JSONResponse
+from starlette.concurrency import run_in_threadpool
+import asyncio
 import logging
+import time
 import traceback
 
 logger = logging.getLogger("fme.cors")
@@ -45,6 +48,17 @@ def get_allowed_origins() -> list[str]:
     """
     Construye la lista de orígenes CORS combinando los estáticos
     con los dominios de todos los tenants registrados en la BD.
+    Si la BD no responde, devuelve solo los estáticos.
+    """
+    try:
+        return _fetch_allowed_origins()
+    except Exception:
+        return list(set(STATIC_ORIGINS))
+
+
+def _fetch_allowed_origins() -> list[str]:
+    """
+    Igual que get_allowed_origins pero propaga el error si la BD falla.
     Genera automáticamente para cada tenant:
     - http://{subdomain}.local:3000 / :3001  (desarrollo)
     - https://{dominio_principal}            (producción)
@@ -52,8 +66,8 @@ def get_allowed_origins() -> list[str]:
     from database.database import SessionLocal
     from database.models import Tenant
     origins = list(STATIC_ORIGINS)
+    db = SessionLocal()
     try:
-        db = SessionLocal()
         tenants = db.query(Tenant).filter(Tenant.activo == True).all()
         for tenant in tenants:
             # Orígenes de desarrollo .local desde subdomain
@@ -69,10 +83,37 @@ def get_allowed_origins() -> list[str]:
                 origins.append(f"https://{d}")
                 origins.append(f"https://www.{d}")
                 origins.append(f"https://admin.{d}")
+    finally:
         db.close()
-    except Exception:
-        pass  # Si la BD no está lista aún, usamos solo los estáticos
     return list(set(origins))
+
+
+# Caché de orígenes permitidos: evita una query a BD por cada request.
+# (Incidente 2026-11-11: la query síncrona dentro del middleware async bloqueaba
+# el event loop y, con el pool agotado, dejaba la API completamente colgada.)
+_ORIGINS_TTL_SECONDS = 60
+_ORIGINS_RETRY_SECONDS = 10
+_origins_cache: dict = {"value": None, "expires": 0.0}
+_origins_lock = asyncio.Lock()
+
+
+async def get_allowed_origins_cached() -> list[str]:
+    now = time.monotonic()
+    if _origins_cache["value"] is not None and now < _origins_cache["expires"]:
+        return _origins_cache["value"]
+    async with _origins_lock:
+        if _origins_cache["value"] is None or time.monotonic() >= _origins_cache["expires"]:
+            try:
+                # Consulta síncrona fuera del event loop
+                _origins_cache["value"] = await run_in_threadpool(_fetch_allowed_origins)
+                _origins_cache["expires"] = time.monotonic() + _ORIGINS_TTL_SECONDS
+            except Exception:
+                logger.warning("No se pudieron cargar orígenes CORS desde BD; se reintenta en %ss", _ORIGINS_RETRY_SECONDS)
+                # Conservar la última lista buena; si no hay, usar solo los estáticos
+                if _origins_cache["value"] is None:
+                    _origins_cache["value"] = list(set(STATIC_ORIGINS))
+                _origins_cache["expires"] = time.monotonic() + _ORIGINS_RETRY_SECONDS
+    return _origins_cache["value"]
 
 
 def is_origin_allowed(origin: str, allowed: list[str]) -> bool:
@@ -97,7 +138,7 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
     """
     async def dispatch(self, request: Request, call_next):
         origin = request.headers.get("origin", "")
-        allowed = get_allowed_origins()
+        allowed = await get_allowed_origins_cached()
 
         if request.method == "OPTIONS":
             if is_origin_allowed(origin, allowed):

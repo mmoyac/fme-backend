@@ -29,6 +29,9 @@ services:
     image: mmoyac/masas-estacion-backend:latest
     container_name: masas_estacion_backend
     restart: always
+    labels:
+      # Reinicio automático si queda "unhealthy" (lo vigila el servicio autoheal)
+      autoheal: "true"
 #    ports:
 #      - "8001:8000"
     environment:
@@ -132,6 +135,19 @@ services:
       - ./nginx/certbot/conf:/etc/letsencrypt
       - ./nginx/certbot/www:/var/www/certbot
     entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+
+  # Reinicia automáticamente los contenedores con label autoheal=true que queden "unhealthy".
+  # Docker por sí solo NO reinicia contenedores unhealthy (restart: always solo actúa si el proceso muere).
+  autoheal:
+    image: willfarrell/autoheal:1.2.0
+    container_name: masas_estacion_autoheal
+    restart: always
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_INTERVAL: 30
+      AUTOHEAL_START_PERIOD: 120
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
 # Volúmenes nombrados para persistencia
 volumes:
