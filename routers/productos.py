@@ -15,6 +15,7 @@ from schemas.producto import ProductoResponse, ProductoCreate, ProductoUpdate
 from services import inventario_service, tenant_service
 
 from routers.auth import get_current_active_user
+from utils.modulos import require_modulo
 
 router = APIRouter()
 
@@ -23,7 +24,7 @@ UPLOAD_DIR = Path("static/productos")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
-@router.get("/catalogo", response_model=List[ProductoCatalogo])
+@router.get("/catalogo", response_model=List[ProductoCatalogo], dependencies=[Depends(require_modulo("tienda_online"))])
 def obtener_catalogo_web(
     request: Request,
     db: Session = Depends(get_db)
@@ -57,7 +58,7 @@ def obtener_catalogo_web(
     return catalogo
 
 
-@router.get("/catalogo/{sku}", response_model=ProductoCatalogo)
+@router.get("/catalogo/{sku}", response_model=ProductoCatalogo, dependencies=[Depends(require_modulo("tienda_online"))])
 def obtener_producto_catalogo_por_sku(
     sku: str,
     request: Request,
@@ -81,7 +82,7 @@ def obtener_producto_catalogo_por_sku(
     return producto
 
 
-@router.get("/catalogo-local/{local_id}")
+@router.get("/catalogo-local/{local_id}", dependencies=[Depends(require_modulo("ventas"))])
 def obtener_catalogo_local(
     local_id: int,
     db: Session = Depends(get_db),
@@ -259,6 +260,7 @@ def listar_productos(
             'unidad_medida_id': p.unidad_medida_id,
             'precio_compra': p.precio_compra,
             'costo_fabricacion': p.costo_fabricacion,
+            'costo_promedio': p.costo_promedio,
             'peso_bruto': p.peso_bruto,
             'es_vendible': p.es_vendible,
             'es_vendible_web': p.es_vendible_web,
@@ -331,6 +333,7 @@ def obtener_producto(producto_id: int, db: Session = Depends(get_db), current_us
         'unidad_medida_id': producto.unidad_medida_id,
         'precio_compra': producto.precio_compra,
         'costo_fabricacion': producto.costo_fabricacion,
+        'costo_promedio': producto.costo_promedio,
         'peso_bruto': producto.peso_bruto,
         'es_vendible': producto.es_vendible,
         'es_vendible_web': producto.es_vendible_web,

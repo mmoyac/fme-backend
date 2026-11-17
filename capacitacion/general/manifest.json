@@ -1,0 +1,10 @@
+{
+  "lecciones": [
+    {
+      "slug": "primeros-pasos",
+      "titulo": "Primeros pasos en el sistema",
+      "descripcion": "Ingresar, moverte por el menú, tu local, los módulos de tu plan y dónde está la capacitación.",
+      "archivo": "primeros-pasos.html"
+    }
+  ]
+}

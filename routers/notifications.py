@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from datetime import datetime, timezone, timedelta
 
-from database.database import get_db
+from database.database import get_db, SessionLocal
 from database.models import User, Notification
 from routers.auth import get_current_active_user
 from services import notification_service
@@ -97,12 +97,14 @@ def cleanup_notifications(
 
 
 @router.get("/stream")
-def sse_stream(
-    token: str,
-    db: Session = Depends(get_db),
-):
+def sse_stream(token: str):
     """Stream SSE. Acepta el token por query param porque EventSource no soporta headers custom.
     Ejemplo: GET /api/notifications/stream?token=eyJ...
+
+    No usa Depends(get_db): con FastAPI 0.104 la sesión de una dependencia con yield
+    se cierra recién cuando termina la respuesta, y un stream SSE dura horas, así que
+    cada pestaña abierta retendría una conexión del pool. La sesión se abre y se cierra
+    aquí mismo, antes de empezar el stream.
     """
     from jose import JWTError, jwt
     from utils.security import SECRET_KEY, ALGORITHM
@@ -115,12 +117,21 @@ def sse_stream(
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
 
-    user = db.query(User).filter(User.email == email, User.is_active == True).first()
-    if not user:
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(User.id)
+            .filter(User.email == email, User.is_active == True)
+            .first()
+        )
+    finally:
+        db.close()
+    user_id = row[0] if row else None
+    if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario no encontrado")
 
     return StreamingResponse(
-        notification_service.sse_generator(user.id),
+        notification_service.sse_generator(user_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

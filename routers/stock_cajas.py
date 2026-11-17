@@ -24,6 +24,16 @@ from routers.auth import get_current_active_user
 router = APIRouter()
 
 
+def _validar_tenant(db: Session, user, producto_id, proveedor_id=None) -> None:
+    """Producto (y proveedor si se indica) deben ser del tenant del usuario; 404 si no.
+    Change OpenSpec: fix-seguridad-inventario."""
+    if not db.query(Producto.id).filter(Producto.id == producto_id, Producto.tenant_id == user.tenant_id).first():
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+    if proveedor_id is not None and not db.query(Proveedor.id).filter(
+            Proveedor.id == proveedor_id, Proveedor.tenant_id == user.tenant_id).first():
+        raise HTTPException(status_code=404, detail="Proveedor no encontrado")
+
+
 @router.get("/", response_model=List[StockCajasProveedorResponse])
 def listar_stock_cajas(
     skip: int = Query(0, ge=0),
@@ -375,7 +385,8 @@ def actualizar_stock_desde_enrolamiento(
     current_user = Depends(get_current_active_user)
 ):
     """Actualizar stock de cajas desde un enrolamiento de recepción."""
-    
+    _validar_tenant(db, current_user, actualizacion.producto_id, actualizacion.proveedor_id)
+
     # Validar que el producto y proveedor existan
     producto = db.query(Producto).filter(Producto.id == actualizacion.producto_id).first()
     if not producto:
@@ -455,7 +466,8 @@ def reservar_stock_para_pedido(
         producto_id = item.get("producto_id")
         proveedor_id = item.get("proveedor_id")
         cajas_requeridas = item.get("cajas_requeridas", 0)
-        
+        _validar_tenant(db, current_user, producto_id, proveedor_id)
+
         # Verificar stock disponible
         stock = db.query(StockCajasProveedor).filter(
             and_(
@@ -586,7 +598,8 @@ def ajustar_stock_manual(
     
     if ajuste.cajas_disponibles is None:
         raise HTTPException(status_code=400, detail="Debe especificar las cajas disponibles")
-    
+    _validar_tenant(db, current_user, producto_id, proveedor_id)
+
     # Buscar el registro de stock
     stock = db.query(StockCajasProveedor).filter(
         and_(

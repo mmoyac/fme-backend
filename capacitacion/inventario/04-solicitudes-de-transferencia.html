@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solicitudes de transferencia</title>
+<!-- Lección del Centro de Capacitación. Basada en _plantilla.html: al editarla, actualizar "Última revisión". -->
+<style>
+  :root {
+    /* Paleta del backoffice (tailwind: slate-900/800/700, primary, secondary, accent) */
+    --primario: #5ec8f2; --primario-osc: #2b9ccc; --secundario: #45a29a; --acento: #daa520;
+    --texto: #f1f5f9; --suave: #9ca3af; --borde: #334155; --borde-fuerte: #475569;
+    --fondo: #0f172a; --tarjeta: #1e293b; --campo: #334155; --cabecera-tabla: #273449;
+    --ok: #4ade80; --ok-fondo: rgba(34,197,94,.12); --ok-borde: rgba(34,197,94,.45);
+    --error: #f87171; --error-fondo: rgba(239,68,68,.12); --error-borde: rgba(239,68,68,.5);
+    --aviso: #fbbf24; --aviso-fondo: rgba(245,158,11,.12); --aviso-borde: rgba(245,158,11,.45);
+    --info-fondo: rgba(94,200,242,.10); --info-borde: rgba(94,200,242,.4);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--texto);
+         background: var(--fondo); line-height: 1.55; font-size: 15px; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 40px; }
+  header.leccion { background: linear-gradient(135deg, #1e3a5f, #1f4f4b); color: #fff; border-bottom: 3px solid var(--primario);
+         padding: 22px 16px; }
+  header.leccion > div { max-width: 860px; margin: 0 auto; }
+  header.leccion .modulo { text-transform: uppercase; font-size: 12px; letter-spacing: .08em; color: var(--primario); font-weight: 700; }
+  header.leccion h1 { margin: 4px 0 6px; font-size: 26px; line-height: 1.2; }
+  header.leccion .meta { font-size: 13px; opacity: .92; }
+  h2 { font-size: 20px; margin: 32px 0 10px; }
+  h3 { font-size: 16px; margin: 20px 0 8px; }
+  .tarjeta { background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 12px; padding: 16px 18px; margin: 14px 0; }
+  .objetivos { background: var(--info-fondo); border-color: var(--info-borde); }
+  .objetivos ul { margin: 6px 0 0; padding-left: 20px; }
+  .tip, .advertencia { border-radius: 10px; padding: 12px 14px 12px 44px; margin: 14px 0; position: relative; }
+  .tip { background: var(--ok-fondo); border: 1px solid var(--ok-borde); }
+  .advertencia { background: var(--aviso-fondo); border: 1px solid var(--aviso-borde); }
+  .tip::before, .advertencia::before { position: absolute; left: 14px; top: 11px; font-size: 18px; }
+  .tip::before { content: "💡"; }
+  .advertencia::before { content: "⚠️"; }
+  .ui-boton { display: inline-block; background: var(--primario); color: #0f172a; border-radius: 6px; padding: 1px 8px;
+              font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .ui-boton.sec { background: var(--campo); color: var(--texto); border: 1px solid var(--borde-fuerte); }
+  .ui-tab { display: inline-block; border-bottom: 2px solid var(--primario); padding: 0 4px; font-weight: 600; white-space: nowrap; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--tarjeta); }
+  th, td { border: 1px solid var(--borde); padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: var(--cabecera-tabla); }
+  .tabla-scroll { overflow-x: auto; }
+  .chip { display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: 12px; font-weight: 600; }
+  button { font: inherit; cursor: pointer; }
+
+  /* Paso a paso */
+  .pasos .paso { display: none; }
+  .pasos .paso.activo { display: block; }
+  .pasos .paso h3 { margin-top: 0; }
+  .pasos-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  .pasos-barra { height: 6px; background: var(--borde); border-radius: 3px; overflow: hidden; margin-bottom: 14px; }
+  .pasos-barra > i { display: block; height: 100%; background: var(--primario); transition: width .25s; }
+  .btn { border: 1px solid var(--borde-fuerte); background: var(--campo); color: var(--texto); border-radius: 8px; padding: 7px 14px; }
+  .btn.prim { background: var(--primario); border-color: var(--primario); color: #0f172a; font-weight: 600; }
+  .btn:disabled { opacity: .45; cursor: default; }
+
+  /* Quiz */
+  .quiz .pregunta { font-weight: 600; margin: 0 0 10px; }
+  .quiz .opciones { display: grid; gap: 8px; }
+  .quiz .opciones button { text-align: left; border: 1px solid var(--borde-fuerte); background: var(--campo); color: var(--texto); border-radius: 8px; padding: 9px 12px; }
+  .quiz .opciones button:hover:not(:disabled) { border-color: var(--primario); }
+  .quiz .opciones button.correcta { background: var(--ok-fondo); border-color: var(--ok); }
+  .quiz .opciones button:disabled { cursor: default; }
+  .quiz .opciones button.incorrecta { background: var(--error-fondo); border-color: var(--error); }
+  .quiz .feedback { margin: 10px 0 0; font-size: 14px; }
+  .quiz .feedback.ok { color: var(--ok); }
+  .quiz .feedback.mal { color: var(--error); }
+  .quiz-resumen { font-weight: 600; text-align: center; padding: 14px; }
+  @media (max-width: 520px) { header.leccion h1 { font-size: 22px; } }
+.diagrama { display: flex; align-items: stretch; justify-content: center; gap: 8px; flex-wrap: wrap; margin: 6px 0 14px; }
+.estado { border: 2px solid var(--borde-fuerte); background: var(--campo); color: var(--texto); border-radius: 12px; padding: 10px 16px; min-width: 140px; text-align: center; font-weight: 600; }
+.estado small { display: block; font-weight: 400; color: var(--suave); font-size: 12px; }
+.estado.activo { border-color: var(--primario); box-shadow: 0 0 0 3px rgba(94,200,242,.25); }
+.e-pend { color: #facc15; } .e-proc { color: #60a5fa; } .e-fin { color: #4ade80; }
+.trans { align-self: center; color: var(--suave); font-size: 12px; text-align: center; }
+.trans b { color: var(--primario); font-size: 18px; display: block; }
+.detalle-estado h3 { margin-top: 0; }
+.roles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.rol { background: var(--campo); border-radius: 10px; padding: 10px 12px; font-size: 14px; }
+.rol strong { display: block; margin-bottom: 4px; }
+@media (max-width: 560px) { .roles { grid-template-columns: 1fr; } .trans b { transform: rotate(90deg); } .diagrama { flex-direction: column; align-items: center; } }
+</style>
+</head>
+<body>
+<header class="leccion"><div>
+  <div class="modulo">Inventario · Lección 4</div>
+  <h1>Solicitudes de transferencia</h1>
+  <div class="meta">⏱ 8 minutos · Última revisión: 2026-11-17</div>
+</div></header>
+
+<main>
+<section class="tarjeta objetivos">
+  <strong>Al terminar vas a saber:</strong>
+  <ul>
+    <li>Pedirle productos a otro local con una solicitud.</li>
+    <li>Atender una solicitud que te llegó: aprobar cantidades y despacharla.</li>
+    <li>Registrar lo que realmente recibiste.</li>
+  </ul>
+</section>
+
+<h2>La idea</h2>
+<p>Una solicitud es un pedido entre locales. La crea el local que <strong>necesita</strong> el producto (el <strong>destino</strong>) y se la pide al local que lo tiene (el <strong>origen</strong>). El stock recién se mueve cuando el origen la <strong>finaliza</strong>.</p>
+<p>Está en el menú <strong>Solicitudes</strong>. También puedes llegar desde el Dashboard, tarjeta <strong>"Tablero de Solicitudes"</strong> → <span class="ui-boton">Gestionar Solicitudes →</span>, o desde la campana de notificaciones.</p>
+
+<h2>Los estados: toca cada uno</h2>
+<div class="diagrama" id="diagrama">
+  <button class="estado" type="button" data-e="0"><span class="e-pend">Pendiente</span><small>recién creada</small></button>
+  <div class="trans"><b>→</b>Comenzar atención</div>
+  <button class="estado" type="button" data-e="1"><span class="e-proc">En Proceso</span><small>origen preparando</small></button>
+  <div class="trans"><b>→</b>Finalizar solicitud</div>
+  <button class="estado" type="button" data-e="2"><span class="e-fin">Finalizado</span><small>stock movido</small></button>
+</div>
+<div class="tarjeta detalle-estado" id="detalle"></div>
+
+<h2>Crear una solicitud (local destino)</h2>
+<div class="tarjeta pasos">
+  <div class="paso"><h3>1. Nueva solicitud</h3><p>En <strong>Solicitudes</strong>, presiona <span class="ui-boton">+ Nueva Solicitud</span>.</p></div>
+  <div class="paso"><h3>2. ¿A quién le pides?</h3><p>En <strong>"Local Origen (a quien solicitas)"</strong> elige el local que tiene el producto. <strong>"Local Destino (mi local)"</strong> ya viene con tu local y no se cambia.</p></div>
+  <div class="paso"><h3>3. Agrega productos</h3><p>Presiona <span class="ui-boton sec">+ Agregar producto</span>, busca el producto y escribe la cantidad. Junto a cada producto verás el stock del origen: <span style="color:var(--ok)">[Stock: 40] ✔</span> si alcanza o <span style="color:var(--error)">⚠</span> si no. Puedes quitar una fila con ✕.</p></div>
+  <div class="paso"><h3>4. Nota y crear</h3><p>Si quieres, agrega una nota para el local origen (hasta 500 caracteres) y presiona <span class="ui-boton">Crear</span>. La solicitud queda <span class="e-pend">Pendiente</span> y los usuarios del local origen reciben una notificación.</p></div>
+  <div class="paso"><h3>5. Avísales (opcional)</h3><p>Con 📤 <strong>Compartir PDF</strong> puedes mandar un aviso por WhatsApp, Telegram o correo, y con 📄 <strong>Ver PDF</strong> descargarla.</p></div>
+</div>
+<div class="advertencia">No puedes pedir el mismo producto dos veces en una solicitud, todas las cantidades deben ser mayores a cero y el origen debe ser distinto de tu local.</div>
+
+<h2>Atender una solicitud (local origen)</h2>
+<div class="tarjeta pasos">
+  <div class="paso"><h3>1. Comenzar atención</h3><p>Cuando te llega una solicitud <span class="e-pend">Pendiente</span>, presiona <span class="ui-boton">Comenzar atención</span>. Pasa a <span class="e-proc">En Proceso</span> y el local que pidió recibe el aviso <em>"… está atendiendo tu solicitud"</em>.</p></div>
+  <div class="paso"><h3>2. Aprueba cantidades</h3><p>Presiona <span class="ui-boton sec">Editar</span>. Verás <em>Cantidad solicitada</em>, <em>Stock actual</em> y <strong>Cantidad aprobada</strong>. Aprueba lo que realmente vas a enviar: puede ser menos de lo pedido, pero no más que tu stock. Usa <span class="ui-boton sec">Actualizar</span> para guardar sin finalizar.</p></div>
+  <div class="paso"><h3>3. ¿Va con despacho?</h3><p>Marca <strong>"Requiere delivery"</strong> si la mercadería se envía en camión: la solicitud aparecerá en las rutas de despacho.</p></div>
+  <div class="paso"><h3>4. Finaliza</h3><p>Presiona <span class="ui-boton">Finalizar solicitud</span> y confirma con <span class="ui-boton">Confirmar y finalizar</span>. En ese momento se descuenta de tu local lo aprobado, se suma al local destino, y queda un movimiento <strong>Transferencia</strong> en el Historial por cada producto.</p></div>
+</div>
+
+<h2>Recibir (local destino)</h2>
+<p>Cuando la solicitud está <span class="e-fin">Finalizado</span>, abre el detalle (👁️ <strong>Ver detalle</strong>). En la columna <strong>Recibido</strong> anota lo que realmente llegó y presiona <span class="ui-boton">Guardar recepción</span>.</p>
+<div class="tip">Si recibiste <strong>menos</strong> de lo aprobado, al guardar la recepción el sistema corrige el stock: la diferencia vuelve al local origen y se resta del tuyo. Así ambos locales quedan con lo real.</div>
+
+<h2>Pon a prueba lo aprendido</h2>
+<div class="tarjeta quiz">
+  <p class="pregunta">1. Creaste una solicitud a Local Centro hace un rato. Sigue Pendiente. ¿Ya se movió el stock?</p>
+  <div class="opciones">
+    <button data-explica="Crear la solicitud no mueve stock: solo avisa al origen.">Sí, al crearla</button>
+    <button data-explica="En Proceso tampoco mueve stock: el origen está preparando y aprobando cantidades.">Se moverá cuando pase a En Proceso</button>
+    <button data-ok data-explica="El stock se mueve solo cuando el local origen presiona Finalizar solicitud y confirma.">No, se mueve recién cuando el origen la finaliza</button>
+  </div>
+</div>
+<div class="tarjeta quiz">
+  <p class="pregunta">2. Te pidieron 20 unidades y solo tienes 12. ¿Qué haces como local origen?</p>
+  <div class="opciones">
+    <button data-ok data-explica="La cantidad aprobada puede ser menor a la solicitada, pero no mayor a tu stock.">Apruebo 12 y finalizo</button>
+    <button data-explica="El sistema no deja aprobar más que tu stock actual.">Apruebo 20 igual</button>
+    <button data-explica="No hace falta: puedes aprobar parcialmente.">Elimino la solicitud y le pido que haga otra</button>
+  </div>
+</div>
+<div class="tarjeta quiz">
+  <p class="pregunta">3. Te aprobaron 10 cajas pero llegaron 9. ¿Qué haces?</p>
+  <div class="opciones">
+    <button data-explica="Una merma da de baja producto perdido en tu local, pero la caja nunca llegó a tu local.">Registro una merma de 1 caja</button>
+    <button data-ok data-explica="Al guardar la recepción con 9, la caja que falta vuelve al stock del origen y se resta del tuyo.">Anoto 9 en Recibido y presiono Guardar recepción</button>
+    <button data-explica="No hace falta otra solicitud para corregir lo recibido.">Creo otra solicitud por 1 caja</button>
+  </div>
+</div>
+<div class="tarjeta quiz-resumen"></div>
+</main>
+
+<script>
+(function () {
+  // --- Paso a paso ---
+  document.querySelectorAll(".pasos").forEach(function (cont) {
+    var pasos = cont.querySelectorAll(".paso");
+    if (!pasos.length) return;
+    var i = 0;
+    var barra = document.createElement("div"); barra.className = "pasos-barra"; barra.innerHTML = "<i></i>";
+    cont.insertBefore(barra, cont.firstChild);
+    var nav = document.createElement("div"); nav.className = "pasos-nav";
+    nav.innerHTML = '<button class="btn" type="button">← Anterior</button><span></span><button class="btn prim" type="button">Siguiente →</button>';
+    cont.appendChild(nav);
+    var ant = nav.children[0], txt = nav.children[1], sig = nav.children[2];
+    function mostrar() {
+      pasos.forEach(function (p, k) { p.classList.toggle("activo", k === i); });
+      txt.textContent = "Paso " + (i + 1) + " de " + pasos.length;
+      barra.firstChild.style.width = ((i + 1) / pasos.length * 100) + "%";
+      ant.disabled = i === 0; sig.disabled = i === pasos.length - 1;
+      avisarAlto();
+    }
+    ant.onclick = function () { if (i > 0) { i--; mostrar(); } };
+    sig.onclick = function () { if (i < pasos.length - 1) { i++; mostrar(); } };
+    mostrar();
+  });
+
+  // --- Quiz ---
+  var quizzes = document.querySelectorAll(".quiz");
+  function actualizarResumen() {
+    var resp = 0, ok = 0;
+    quizzes.forEach(function (q) { if (q.dataset.respondida) { resp++; if (q.dataset.respondida === "ok") ok++; } });
+    document.querySelectorAll(".quiz-resumen").forEach(function (r) {
+      r.textContent = resp < quizzes.length
+        ? "Respondiste " + resp + " de " + quizzes.length + " preguntas."
+        : (ok === quizzes.length ? "🎉 ¡" + ok + " de " + quizzes.length + " correctas! Dominas esta lección."
+                                 : ok + " de " + quizzes.length + " correctas. Revisa las explicaciones y vuelve a intentarlo cuando quieras.");
+    });
+  }
+  quizzes.forEach(function (q) {
+    var botones = q.querySelectorAll(".opciones button");
+    var fb = q.querySelector(".feedback");
+    if (!fb) { fb = document.createElement("p"); fb.className = "feedback"; q.appendChild(fb); }
+    botones.forEach(function (b) {
+      b.type = "button";
+      b.onclick = function () {
+        if (q.dataset.respondida) return;
+        var ok = b.hasAttribute("data-ok");
+        q.dataset.respondida = ok ? "ok" : "mal";
+        botones.forEach(function (x) { x.disabled = true; if (x.hasAttribute("data-ok")) x.classList.add("correcta"); });
+        if (!ok) b.classList.add("incorrecta");
+        fb.className = "feedback " + (ok ? "ok" : "mal");
+        fb.textContent = (ok ? "✔ Correcto. " : "✘ No es correcto. ") + (b.dataset.explica || "");
+        var reintentar = document.createElement("button");
+        reintentar.className = "btn"; reintentar.type = "button"; reintentar.textContent = "Intentar de nuevo";
+        reintentar.style.marginTop = "8px";
+        reintentar.onclick = function () {
+          delete q.dataset.respondida; fb.textContent = ""; fb.className = "feedback"; reintentar.remove();
+          botones.forEach(function (x) { x.disabled = false; x.classList.remove("correcta", "incorrecta"); });
+          actualizarResumen(); avisarAlto();
+        };
+        if (!ok) q.appendChild(reintentar);
+        actualizarResumen(); avisarAlto();
+      };
+    });
+  });
+  actualizarResumen();
+
+  // --- Alto del iframe: el visor del backoffice ajusta su altura con este mensaje ---
+  function avisarAlto() {
+    // Alto del contenido (no del viewport), para que el iframe también pueda achicarse
+    var alto = Math.ceil(document.body.getBoundingClientRect().height);
+    try { parent.postMessage({ tipo: "capacitacion:alto", alto: alto }, "*"); } catch (e) {}
+  }
+  window.avisarAlto = avisarAlto;
+  window.addEventListener("load", avisarAlto);
+  if (window.ResizeObserver) new ResizeObserver(avisarAlto).observe(document.body);
+})();
+</script>
+<script>
+(function () {
+  var info = [
+    { t: "Pendiente", d: "La creó el local destino y el local origen todavía no la toma.",
+      o: "Puede presionar <strong>Comenzar atención</strong> para tomarla.", de: "Puede <strong>Editar</strong> la nota y los productos mientras siga pendiente. No puede aprobar cantidades." },
+    { t: "En Proceso", d: "El local origen la está preparando.",
+      o: "<strong>Editar</strong> para aprobar cantidades, marcar <strong>Requiere delivery</strong>, <strong>Actualizar</strong> y finalmente <strong>Finalizar solicitud</strong>.", de: "Espera. Ya no puede modificarla; la ve en su lista con el estado actualizado." },
+    { t: "Finalizado", d: "El stock aprobado ya se movió del origen al destino y quedó en el Historial.",
+      o: "Puede cambiar <strong>Requiere delivery</strong> (Guardar cambio delivery) y descargar el PDF.", de: "Registra lo que llegó en la columna <strong>Recibido</strong> y presiona <strong>Guardar recepción</strong>." }
+  ];
+  var det = document.getElementById("detalle"), botones = document.querySelectorAll("#diagrama .estado");
+  function mostrar(i) {
+    botones.forEach(function (b) { b.classList.toggle("activo", +b.dataset.e === i); });
+    var e = info[i];
+    det.innerHTML = "<h3>" + e.t + "</h3><p>" + e.d + "</p><div class='roles'><div class='rol'><strong>📤 Local origen (quien envía)</strong>" + e.o +
+      "</div><div class='rol'><strong>📥 Local destino (quien pidió)</strong>" + e.de + "</div></div>";
+    avisarAlto();
+  }
+  botones.forEach(function (b) { b.onclick = function () { mostrar(+b.dataset.e); }; });
+  mostrar(0);
+})();
+</script>
+</body>
+</html>

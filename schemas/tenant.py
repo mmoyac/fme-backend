@@ -2,7 +2,7 @@
 Schemas para gestión de Tenants (Multi-tenant SaaS).
 """
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional
+from typing import List, Optional
 from datetime import datetime
 
 
@@ -18,7 +18,7 @@ class TenantBase(BaseModel):
 
 class TenantCreate(TenantBase):
     """Schema para crear un Tenant."""
-    pass
+    modulos: List[str] = Field(default_factory=list, description="Módulos contratados (utils/modulos.py); el núcleo siempre está incluido")
 
 
 class TenantUpdate(BaseModel):

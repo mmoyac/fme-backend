@@ -23,6 +23,7 @@ from schemas.despacho import (
     ResumenDespachoResponse, NotaPickingResponse, EscanearCodigoBarrasRequest,
     EscanearCodigoBarrasResponse, ItemPendienteDespacho
 )
+from services.entrega_pedido import registrar_entrega
 from routers.auth import get_current_active_user
 
 router = APIRouter()
@@ -501,6 +502,7 @@ def actualizar_despacho_general(
                     if old_estado != EstadoDespacho.ENTREGADO:
                         # Solo actualizar fecha_entrega la primera vez
                         despacho.fecha_entrega = datetime.now()
+                    registrar_entrega(db, pedido, current_user.id, cambiar_estado=False)  # add-modalidad-entrega-pedido
         
         # Si se marca como EN_RUTA, guardar timestamp
         if despacho_update.estado_despacho == EstadoDespacho.EN_RUTA and old_estado != EstadoDespacho.EN_RUTA:
@@ -763,6 +765,7 @@ def confirmar_entrega(
         
         if estado_entregado:
             pedido.estado_id = estado_entregado.id
+            registrar_entrega(db, pedido, current_user.id, cambiar_estado=False)  # add-modalidad-entrega-pedido
     
     db.commit()
     

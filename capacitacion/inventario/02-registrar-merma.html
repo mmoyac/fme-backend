@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Registrar una merma</title>
+<!-- Lección del Centro de Capacitación. Basada en _plantilla.html: al editarla, actualizar "Última revisión". -->
+<style>
+  :root {
+    /* Paleta del backoffice (tailwind: slate-900/800/700, primary, secondary, accent) */
+    --primario: #5ec8f2; --primario-osc: #2b9ccc; --secundario: #45a29a; --acento: #daa520;
+    --texto: #f1f5f9; --suave: #9ca3af; --borde: #334155; --borde-fuerte: #475569;
+    --fondo: #0f172a; --tarjeta: #1e293b; --campo: #334155; --cabecera-tabla: #273449;
+    --ok: #4ade80; --ok-fondo: rgba(34,197,94,.12); --ok-borde: rgba(34,197,94,.45);
+    --error: #f87171; --error-fondo: rgba(239,68,68,.12); --error-borde: rgba(239,68,68,.5);
+    --aviso: #fbbf24; --aviso-fondo: rgba(245,158,11,.12); --aviso-borde: rgba(245,158,11,.45);
+    --info-fondo: rgba(94,200,242,.10); --info-borde: rgba(94,200,242,.4);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--texto);
+         background: var(--fondo); line-height: 1.55; font-size: 15px; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 40px; }
+  header.leccion { background: linear-gradient(135deg, #1e3a5f, #1f4f4b); color: #fff; border-bottom: 3px solid var(--primario);
+         padding: 22px 16px; }
+  header.leccion > div { max-width: 860px; margin: 0 auto; }
+  header.leccion .modulo { text-transform: uppercase; font-size: 12px; letter-spacing: .08em; color: var(--primario); font-weight: 700; }
+  header.leccion h1 { margin: 4px 0 6px; font-size: 26px; line-height: 1.2; }
+  header.leccion .meta { font-size: 13px; opacity: .92; }
+  h2 { font-size: 20px; margin: 32px 0 10px; }
+  h3 { font-size: 16px; margin: 20px 0 8px; }
+  .tarjeta { background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 12px; padding: 16px 18px; margin: 14px 0; }
+  .objetivos { background: var(--info-fondo); border-color: var(--info-borde); }
+  .objetivos ul { margin: 6px 0 0; padding-left: 20px; }
+  .tip, .advertencia { border-radius: 10px; padding: 12px 14px 12px 44px; margin: 14px 0; position: relative; }
+  .tip { background: var(--ok-fondo); border: 1px solid var(--ok-borde); }
+  .advertencia { background: var(--aviso-fondo); border: 1px solid var(--aviso-borde); }
+  .tip::before, .advertencia::before { position: absolute; left: 14px; top: 11px; font-size: 18px; }
+  .tip::before { content: "💡"; }
+  .advertencia::before { content: "⚠️"; }
+  .ui-boton { display: inline-block; background: var(--primario); color: #0f172a; border-radius: 6px; padding: 1px 8px;
+              font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .ui-boton.sec { background: var(--campo); color: var(--texto); border: 1px solid var(--borde-fuerte); }
+  .ui-tab { display: inline-block; border-bottom: 2px solid var(--primario); padding: 0 4px; font-weight: 600; white-space: nowrap; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--tarjeta); }
+  th, td { border: 1px solid var(--borde); padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: var(--cabecera-tabla); }
+  .tabla-scroll { overflow-x: auto; }
+  .chip { display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: 12px; font-weight: 600; }
+  button { font: inherit; cursor: pointer; }
+
+  /* Paso a paso */
+  .pasos .paso { display: none; }
+  .pasos .paso.activo { display: block; }
+  .pasos .paso h3 { margin-top: 0; }
+  .pasos-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  .pasos-barra { height: 6px; background: var(--borde); border-radius: 3px; overflow: hidden; margin-bottom: 14px; }
+  .pasos-barra > i { display: block; height: 100%; background: var(--primario); transition: width .25s; }
+  .btn { border: 1px solid var(--borde-fuerte); background: var(--campo); color: var(--texto); border-radius: 8px; padding: 7px 14px; }
+  .btn.prim { background: var(--primario); border-color: var(--primario); color: #0f172a; font-weight: 600; }
+  .btn:disabled { opacity: .45; cursor: default; }
+
+  /* Quiz */
+  .quiz .pregunta { font-weight: 600; margin: 0 0 10px; }
+  .quiz .opciones { display: grid; gap: 8px; }
+  .quiz .opciones button { text-align: left; border: 1px solid var(--borde-fuerte); background: var(--campo); color: var(--texto); border-radius: 8px; padding: 9px 12px; }
+  .quiz .opciones button:hover:not(:disabled) { border-color: var(--primario); }
+  .quiz .opciones button.correcta { background: var(--ok-fondo); border-color: var(--ok); }
+  .quiz .opciones button:disabled { cursor: default; }
+  .quiz .opciones button.incorrecta { background: var(--error-fondo); border-color: var(--error); }
+  .quiz .feedback { margin: 10px 0 0; font-size: 14px; }
+  .quiz .feedback.ok { color: var(--ok); }
+  .quiz .feedback.mal { color: var(--error); }
+  .quiz-resumen { font-weight: 600; text-align: center; padding: 14px; }
+  @media (max-width: 520px) { header.leccion h1 { font-size: 22px; } }
+.modal-demo { background: var(--tarjeta); border: 1px solid var(--borde-fuerte); border-radius: 12px; padding: 16px; max-width: 420px; }
+.modal-demo h4 { margin: 0 0 10px; }
+.modal-demo .dato { font-size: 14px; margin: 2px 0; }
+.modal-demo label { display: block; font-size: 13px; color: var(--suave); margin-top: 10px; }
+.modal-demo input { width: 100%; background: var(--campo); color: var(--texto); border: 1px solid var(--borde-fuerte); border-radius: 6px; padding: 7px 9px; font: inherit; margin-top: 3px; }
+.modal-demo .acciones { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.btn.merma { background: #ea580c; border-color: #ea580c; color: #fff; font-weight: 600; }
+.msg { margin-top: 10px; font-size: 14px; }
+.msg.mal { color: var(--error); } .msg.ok { color: var(--ok); }
+</style>
+</head>
+<body>
+<header class="leccion"><div>
+  <div class="modulo">Inventario · Lección 2</div>
+  <h1>Registrar una merma</h1>
+  <div class="meta">⏱ 5 minutos · Última revisión: 2026-11-17</div>
+</div></header>
+
+<main>
+<section class="tarjeta objetivos">
+  <strong>Al terminar vas a saber:</strong>
+  <ul>
+    <li>Qué es una merma y cuándo registrarla.</li>
+    <li>Registrarla paso a paso desde Existencias.</li>
+    <li>Qué cambia en el stock y dónde queda el registro.</li>
+  </ul>
+</section>
+
+<h2>¿Qué es una merma?</h2>
+<p>Es producto que se pierde y ya no se puede vender ni usar: se venció, se rompió, se dañó en el transporte o se echó a perder. Registrarla mantiene el stock del sistema igual al stock real y deja constancia de por qué bajó.</p>
+<div class="tip">Registra la merma <strong>en el local donde ocurrió</strong>. Si el pan se quemó en Local Norte, la merma va en la fila de Local Norte.</div>
+
+<h2>Paso a paso</h2>
+<div class="tarjeta pasos">
+  <div class="paso"><h3>1. Busca el producto</h3><p>En <strong>Inventario</strong>, pestaña <span class="ui-tab">Existencias</span>, busca el producto por nombre o SKU.</p></div>
+  <div class="paso"><h3>2. Presiona "↓ Merma" en el local</h3><p>En la fila del local donde ocurrió la pérdida, presiona el botón naranjo <span class="ui-boton" style="background:#ea580c;color:#fff">↓ Merma</span>. Si el local no tiene stock, el botón aparece deshabilitado (<em>"Sin stock para ajustar"</em>).</p></div>
+  <div class="paso"><h3>3. Revisa los datos</h3><p>Se abre <strong>"⬇ Ajuste por Merma"</strong> con el producto, el local y el <em>stock actual</em>. Verifica que sea el local correcto.</p></div>
+  <div class="paso"><h3>4. Escribe la cantidad y el motivo</h3><p>En <strong>"Cantidad a descontar *"</strong> va cuántas unidades se perdieron (solo números enteros, sin superar el stock actual). El <strong>motivo</strong> es opcional, pero muy útil: <em>"Producto vencido"</em>, <em>"Daño en transporte"</em>…</p></div>
+  <div class="paso"><h3>5. Confirma</h3><p>Presiona <span class="ui-boton" style="background:#ea580c;color:#fff">⬇ Confirmar Merma</span>. El stock se descuenta al instante y la tarjeta se actualiza.</p></div>
+</div>
+
+<h2>Practica con el formulario</h2>
+<p>Este formulario se comporta como el real (pero no guarda nada). Prueba con 0, con más de 12 y con una cantidad válida:</p>
+<div class="modal-demo">
+  <h4>⬇ Ajuste por Merma</h4>
+  <div class="dato"><strong>Producto:</strong> Marraqueta</div>
+  <div class="dato"><strong>Local:</strong> Local Centro</div>
+  <div class="dato"><strong>Stock actual:</strong> <span style="color:var(--ok)" id="m-stock">12</span></div>
+  <label>Cantidad a descontar *<input type="number" id="m-cant" placeholder="Máx. 12"></label>
+  <label>Motivo (opcional)<input type="text" id="m-motivo" placeholder="Ej: Producto vencido, daño en transporte..."></label>
+  <div class="acciones"><button class="btn" type="button" id="m-reset">Cancelar</button><button class="btn merma" type="button" id="m-ok" disabled>⬇ Confirmar Merma</button></div>
+  <div class="msg" id="m-msg"></div>
+</div>
+
+<h2>¿Qué queda registrado?</h2>
+<ul>
+  <li>El stock del local baja en la cantidad indicada (nunca queda negativo).</li>
+  <li>En la pestaña <span class="ui-tab">Historial</span> aparece un movimiento de tipo <strong>Merma</strong>, con el local como origen, tu nombre como usuario y el motivo en las notas. Si no escribiste motivo, la nota dice <em>"Merma registrada por …"</em> con tu nombre.</li>
+  <li>La Tienda Online (WEB / Global) también baja, porque suma los locales físicos.</li>
+</ul>
+<div class="advertencia">Una merma confirmada no se deshace desde la pantalla. Si te equivocaste de cantidad o de local, avisa a un administrador: lo más limpio es corregirlo con un conteo de inventario del local.</div>
+
+<h2>Pon a prueba lo aprendido</h2>
+<div class="tarjeta quiz">
+  <p class="pregunta">1. Llegaron 3 frascos rotos en el despacho que recibió Local Sur. ¿Dónde registras la merma?</p>
+  <div class="opciones">
+    <button data-explica="La fila WEB / Global no tiene botón de merma: es la suma de los locales.">En la fila Tienda Online (WEB / Global)</button>
+    <button data-ok data-explica="La pérdida ocurrió en el stock de Local Sur, así que se descuenta ahí.">En la fila de Local Sur</button>
+    <button data-explica="Una transferencia mueve stock entre locales; no sirve para dar de baja producto perdido.">Con una transferencia a otro local</button>
+  </div>
+</div>
+<div class="tarjeta quiz">
+  <p class="pregunta">2. ¿Dónde puedes revisar después quién registró una merma y por qué?</p>
+  <div class="opciones">
+    <button data-ok data-explica="Cada merma deja un movimiento tipo Merma con usuario, fecha y el motivo en las notas.">En la pestaña Historial, filtrando por tipo Merma</button>
+    <button data-explica="Valorización muestra cuánto vale el stock actual, no los movimientos.">En la pestaña Valorización</button>
+    <button data-explica="Sí queda registro: en el Historial.">En ningún lado, solo cambia el número</button>
+  </div>
+</div>
+<div class="tarjeta quiz-resumen"></div>
+</main>
+
+<script>
+(function () {
+  // --- Paso a paso ---
+  document.querySelectorAll(".pasos").forEach(function (cont) {
+    var pasos = cont.querySelectorAll(".paso");
+    if (!pasos.length) return;
+    var i = 0;
+    var barra = document.createElement("div"); barra.className = "pasos-barra"; barra.innerHTML = "<i></i>";
+    cont.insertBefore(barra, cont.firstChild);
+    var nav = document.createElement("div"); nav.className = "pasos-nav";
+    nav.innerHTML = '<button class="btn" type="button">← Anterior</button><span></span><button class="btn prim" type="button">Siguiente →</button>';
+    cont.appendChild(nav);
+    var ant = nav.children[0], txt = nav.children[1], sig = nav.children[2];
+    function mostrar() {
+      pasos.forEach(function (p, k) { p.classList.toggle("activo", k === i); });
+      txt.textContent = "Paso " + (i + 1) + " de " + pasos.length;
+      barra.firstChild.style.width = ((i + 1) / pasos.length * 100) + "%";
+      ant.disabled = i === 0; sig.disabled = i === pasos.length - 1;
+      avisarAlto();
+    }
+    ant.onclick = function () { if (i > 0) { i--; mostrar(); } };
+    sig.onclick = function () { if (i < pasos.length - 1) { i++; mostrar(); } };
+    mostrar();
+  });
+
+  // --- Quiz ---
+  var quizzes = document.querySelectorAll(".quiz");
+  function actualizarResumen() {
+    var resp = 0, ok = 0;
+    quizzes.forEach(function (q) { if (q.dataset.respondida) { resp++; if (q.dataset.respondida === "ok") ok++; } });
+    document.querySelectorAll(".quiz-resumen").forEach(function (r) {
+      r.textContent = resp < quizzes.length
+        ? "Respondiste " + resp + " de " + quizzes.length + " preguntas."
+        : (ok === quizzes.length ? "🎉 ¡" + ok + " de " + quizzes.length + " correctas! Dominas esta lección."
+                                 : ok + " de " + quizzes.length + " correctas. Revisa las explicaciones y vuelve a intentarlo cuando quieras.");
+    });
+  }
+  quizzes.forEach(function (q) {
+    var botones = q.querySelectorAll(".opciones button");
+    var fb = q.querySelector(".feedback");
+    if (!fb) { fb = document.createElement("p"); fb.className = "feedback"; q.appendChild(fb); }
+    botones.forEach(function (b) {
+      b.type = "button";
+      b.onclick = function () {
+        if (q.dataset.respondida) return;
+        var ok = b.hasAttribute("data-ok");
+        q.dataset.respondida = ok ? "ok" : "mal";
+        botones.forEach(function (x) { x.disabled = true; if (x.hasAttribute("data-ok")) x.classList.add("correcta"); });
+        if (!ok) b.classList.add("incorrecta");
+        fb.className = "feedback " + (ok ? "ok" : "mal");
+        fb.textContent = (ok ? "✔ Correcto. " : "✘ No es correcto. ") + (b.dataset.explica || "");
+        var reintentar = document.createElement("button");
+        reintentar.className = "btn"; reintentar.type = "button"; reintentar.textContent = "Intentar de nuevo";
+        reintentar.style.marginTop = "8px";
+        reintentar.onclick = function () {
+          delete q.dataset.respondida; fb.textContent = ""; fb.className = "feedback"; reintentar.remove();
+          botones.forEach(function (x) { x.disabled = false; x.classList.remove("correcta", "incorrecta"); });
+          actualizarResumen(); avisarAlto();
+        };
+        if (!ok) q.appendChild(reintentar);
+        actualizarResumen(); avisarAlto();
+      };
+    });
+  });
+  actualizarResumen();
+
+  // --- Alto del iframe: el visor del backoffice ajusta su altura con este mensaje ---
+  function avisarAlto() {
+    // Alto del contenido (no del viewport), para que el iframe también pueda achicarse
+    var alto = Math.ceil(document.body.getBoundingClientRect().height);
+    try { parent.postMessage({ tipo: "capacitacion:alto", alto: alto }, "*"); } catch (e) {}
+  }
+  window.avisarAlto = avisarAlto;
+  window.addEventListener("load", avisarAlto);
+  if (window.ResizeObserver) new ResizeObserver(avisarAlto).observe(document.body);
+})();
+</script>
+<script>
+(function () {
+  var stock = 12, c = document.getElementById("m-cant"), ok = document.getElementById("m-ok"), msg = document.getElementById("m-msg"), st = document.getElementById("m-stock");
+  c.oninput = function () { ok.disabled = c.value === ""; msg.textContent = ""; };
+  document.getElementById("m-reset").onclick = function () { c.value = ""; document.getElementById("m-motivo").value = ""; ok.disabled = true; msg.textContent = ""; };
+  ok.onclick = function () {
+    var n = parseInt(c.value, 10);
+    msg.className = "msg mal";
+    if (!(n > 0)) { msg.textContent = "❌ La cantidad debe ser mayor a cero"; }
+    else if (n > stock) { msg.textContent = "❌ No puede superar el stock actual (" + stock + ")"; }
+    else {
+      stock -= n; st.textContent = stock; c.placeholder = "Máx. " + stock;
+      msg.className = "msg ok";
+      var motivo = document.getElementById("m-motivo").value.trim();
+      msg.textContent = "✔ Merma registrada. Stock de Local Centro: " + (stock + n) + " → " + stock + ". En el Historial queda un movimiento Merma con la nota: \"" + (motivo || "Merma registrada por (tu nombre)") + "\".";
+      c.value = ""; ok.disabled = true;
+    }
+    avisarAlto();
+  };
+})();
+</script>
+</body>
+</html>

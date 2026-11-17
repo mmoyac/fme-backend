@@ -9,6 +9,7 @@ from database.database import get_db
 from database import models
 from schemas import compras as schemas
 from routers.auth import get_current_active_user
+from services.costo_promedio import registrar_entrada_costo
 
 router = APIRouter(
     prefix="/compras",
@@ -266,13 +267,22 @@ def recibir_compra(compra_id: int, db: Session = Depends(get_db), current_user =
         producto = db.query(models.Producto).filter(models.Producto.id == det.producto_id).first()
         factor = float(producto.factor_conversion_compra) if (producto and producto.factor_conversion_compra) else 1.0
         cantidad_en_unidad_inventario = float(det.cantidad) * factor
+
+        # Costo promedio ponderado: se calcula ANTES de sumar al stock (add-valorizacion-inventario)
+        if producto:
+            registrar_entrada_costo(
+                db, producto.id, cantidad_en_unidad_inventario, float(det.precio_unitario) / factor
+            )
+
         inventario.cantidad_stock = float(inventario.cantidad_stock) + cantidad_en_unidad_inventario
 
-        # B. Actualizar Costo del Producto
-        # Si tiene factor de conversión, el precio unitario es por unidad de compra (ej: saco)
-        # → hay que convertir a precio por unidad de inventario (ej: kg)
+        # B. Actualizar último costo del Producto
+        # precio_compra se guarda POR UNIDAD DE COMPRA (ej: saco), igual que en el formulario de
+        # productos y en el costeo de recetas (que lo divide por factor_conversion_compra).
+        # Antes se guardaba ya dividido por el factor y la receta dividía dos veces.
+        # El costo por unidad de inventario (ej: kg) vive en costo_promedio.
         if producto:
-            producto.precio_compra = float(det.precio_unitario) / factor
+            producto.precio_compra = float(det.precio_unitario)
     
     db_compra.estado = "RECIBIDA"
     with _errores_bd_a_400(db, "recibir la compra"):

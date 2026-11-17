@@ -16,6 +16,7 @@ from schemas.orden_trabajo import (
     AvanzarEtapaRequest, CerrarOTRequest,
 )
 from routers.auth import get_current_active_user
+from utils.permisos import verificar_rol, bloquear_roles, ROLES_ADMIN
 from services.tenant_service import obtener_siguiente_numero_ot
 
 router = APIRouter()
@@ -279,12 +280,17 @@ def crear_orden_trabajo(
     current_user=Depends(get_current_active_user),
 ):
     """Crea una nueva Orden de Trabajo con sus ítems. Estado inicial: PENDIENTE."""
+    bloquear_roles(current_user)  # rol produccion solo finaliza (no crea OT)
     # Validar tipo OT
     tipo_ot = db.query(models.TipoOT).filter(
         models.TipoOT.id == data.tipo_ot_id, models.TipoOT.activo == True
     ).first()
     if not tipo_ot:
         raise HTTPException(status_code=400, detail="Tipo OT inválido o inactivo")
+
+    # Solo administradores solicitan producción (change add-rol-produccion-op)
+    if tipo_ot.codigo == "OP":
+        verificar_rol(current_user, ROLES_ADMIN)
 
     # Validar local
     local = db.query(models.Local).filter(
@@ -348,6 +354,7 @@ def crear_orden_trabajo(
             fecha_programada=data.fecha_programada or datetime.now(timezone.utc),
             notas=f"Generada automáticamente desde OT {numero_ot}" + (f" | {data.notas}" if data.notas else ""),
             estado="PLANIFICADA",
+            solicitado_por_id=current_user.id,
         )
         db.add(op)
         db.flush()
@@ -388,6 +395,7 @@ def actualizar_orden_trabajo(
     current_user=Depends(get_current_active_user),
 ):
     """Actualiza campos opcionales de la OT (solo si no está cerrada/cancelada)."""
+    bloquear_roles(current_user)  # rol produccion solo finaliza (no edita OT)
     ot = db.query(models.OrdenTrabajo).join(models.EstadoOT).filter(
         models.OrdenTrabajo.id == ot_id,
         models.OrdenTrabajo.tenant_id == current_user.tenant_id,
@@ -512,6 +520,7 @@ def cancelar_orden_trabajo(
     current_user=Depends(get_current_active_user),
 ):
     """Cancela una OT activa."""
+    bloquear_roles(current_user)  # rol produccion solo finaliza (no cancela OT)
     ot = db.query(models.OrdenTrabajo).join(models.EstadoOT).filter(
         models.OrdenTrabajo.id == ot_id,
         models.OrdenTrabajo.tenant_id == current_user.tenant_id,

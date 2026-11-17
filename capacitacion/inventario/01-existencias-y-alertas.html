@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Existencias y alertas de stock</title>
+<!-- Lección del Centro de Capacitación. Basada en _plantilla.html: al editarla, actualizar "Última revisión". -->
+<style>
+  :root {
+    /* Paleta del backoffice (tailwind: slate-900/800/700, primary, secondary, accent) */
+    --primario: #5ec8f2; --primario-osc: #2b9ccc; --secundario: #45a29a; --acento: #daa520;
+    --texto: #f1f5f9; --suave: #9ca3af; --borde: #334155; --borde-fuerte: #475569;
+    --fondo: #0f172a; --tarjeta: #1e293b; --campo: #334155; --cabecera-tabla: #273449;
+    --ok: #4ade80; --ok-fondo: rgba(34,197,94,.12); --ok-borde: rgba(34,197,94,.45);
+    --error: #f87171; --error-fondo: rgba(239,68,68,.12); --error-borde: rgba(239,68,68,.5);
+    --aviso: #fbbf24; --aviso-fondo: rgba(245,158,11,.12); --aviso-borde: rgba(245,158,11,.45);
+    --info-fondo: rgba(94,200,242,.10); --info-borde: rgba(94,200,242,.4);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--texto);
+         background: var(--fondo); line-height: 1.55; font-size: 15px; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 40px; }
+  header.leccion { background: linear-gradient(135deg, #1e3a5f, #1f4f4b); color: #fff; border-bottom: 3px solid var(--primario);
+         padding: 22px 16px; }
+  header.leccion > div { max-width: 860px; margin: 0 auto; }
+  header.leccion .modulo { text-transform: uppercase; font-size: 12px; letter-spacing: .08em; color: var(--primario); font-weight: 700; }
+  header.leccion h1 { margin: 4px 0 6px; font-size: 26px; line-height: 1.2; }
+  header.leccion .meta { font-size: 13px; opacity: .92; }
+  h2 { font-size: 20px; margin: 32px 0 10px; }
+  h3 { font-size: 16px; margin: 20px 0 8px; }
+  .tarjeta { background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 12px; padding: 16px 18px; margin: 14px 0; }
+  .objetivos { background: var(--info-fondo); border-color: var(--info-borde); }
+  .objetivos ul { margin: 6px 0 0; padding-left: 20px; }
+  .tip, .advertencia { border-radius: 10px; padding: 12px 14px 12px 44px; margin: 14px 0; position: relative; }
+  .tip { background: var(--ok-fondo); border: 1px solid var(--ok-borde); }
+  .advertencia { background: var(--aviso-fondo); border: 1px solid var(--aviso-borde); }
+  .tip::before, .advertencia::before { position: absolute; left: 14px; top: 11px; font-size: 18px; }
+  .tip::before { content: "💡"; }
+  .advertencia::before { content: "⚠️"; }
+  .ui-boton { display: inline-block; background: var(--primario); color: #0f172a; border-radius: 6px; padding: 1px 8px;
+              font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .ui-boton.sec { background: var(--campo); color: var(--texto); border: 1px solid var(--borde-fuerte); }
+  .ui-tab { display: inline-block; border-bottom: 2px solid var(--primario); padding: 0 4px; font-weight: 600; white-space: nowrap; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--tarjeta); }
+  th, td { border: 1px solid var(--borde); padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: var(--cabecera-tabla); }
+  .tabla-scroll { overflow-x: auto; }
+  .chip { display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: 12px; font-weight: 600; }
+  button { font: inherit; cursor: pointer; }
+
+  /* Paso a paso */
+  .pasos .paso { display: none; }
+  .pasos .paso.activo { display: block; }
+  .pasos .paso h3 { margin-top: 0; }
+  .pasos-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  .pasos-barra { height: 6px; background: var(--borde); border-radius: 3px; overflow: hidden; margin-bottom: 14px; }
+  .pasos-barra > i { display: block; height: 100%; background: var(--primario); transition: width .25s; }
+  .btn { border: 1px solid var(--borde-fuerte); background: var(--campo); color: var(--texto); border-radius: 8px; padding: 7px 14px; }
+  .btn.prim { background: var(--primario); border-color: var(--primario); color: #0f172a; font-weight: 600; }
+  .btn:disabled { opacity: .45; cursor: default; }
+
+  /* Quiz */
+  .quiz .pregunta { font-weight: 600; margin: 0 0 10px; }
+  .quiz .opciones { display: grid; gap: 8px; }
+  .quiz .opciones button { text-align: left; border: 1px solid var(--borde-fuerte); background: var(--campo); color: var(--texto); border-radius: 8px; padding: 9px 12px; }
+  .quiz .opciones button:hover:not(:disabled) { border-color: var(--primario); }
+  .quiz .opciones button.correcta { background: var(--ok-fondo); border-color: var(--ok); }
+  .quiz .opciones button:disabled { cursor: default; }
+  .quiz .opciones button.incorrecta { background: var(--error-fondo); border-color: var(--error); }
+  .quiz .feedback { margin: 10px 0 0; font-size: 14px; }
+  .quiz .feedback.ok { color: var(--ok); }
+  .quiz .feedback.mal { color: var(--error); }
+  .quiz-resumen { font-weight: 600; text-align: center; padding: 14px; }
+  @media (max-width: 520px) { header.leccion h1 { font-size: 22px; } }
+.tabs-demo { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
+.tabs-demo button { border: 1px solid var(--borde-fuerte); background: var(--campo); color: var(--texto); border-radius: 8px; padding: 6px 12px; }
+.tabs-demo button.activa { background: var(--primario); color: #0f172a; border-color: var(--primario); font-weight: 600; }
+.tab-info { min-height: 48px; }
+.punto { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: middle; margin-right: 6px; }
+.p-verde { background: #22c55e; } .p-amarillo { background: #eab308; } .p-rojo { background: #ef4444; }
+.producto-demo { background: var(--campo); border-radius: 10px; padding: 12px 14px; }
+.producto-demo .fila { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-top: 1px solid var(--borde-fuerte); gap: 8px; }
+.producto-demo .fila:first-of-type { border-top: 0; }
+.web { color: var(--primario); font-size: 12px; font-weight: 600; }
+.umbral-min { color: #facc15; } .umbral-crit { color: #f87171; }
+.sim-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.sim-grid label { font-size: 13px; color: var(--suave); display: block; }
+.sim-grid input { width: 100%; background: var(--campo); color: var(--texto); border: 1px solid var(--borde-fuerte); border-radius: 6px; padding: 6px 8px; font: inherit; }
+.semaforo-resultado { margin-top: 12px; font-weight: 600; font-size: 16px; }
+@media (max-width: 520px) { .sim-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header class="leccion"><div>
+  <div class="modulo">Inventario · Lección 1</div>
+  <h1>Existencias y alertas de stock</h1>
+  <div class="meta">⏱ 7 minutos · Última revisión: 2026-11-17</div>
+</div></header>
+
+<main>
+<section class="tarjeta objetivos">
+  <strong>Al terminar vas a saber:</strong>
+  <ul>
+    <li>Moverte por las pestañas del módulo Inventario.</li>
+    <li>Leer el stock de cada producto por local y el total de la Tienda Online.</li>
+    <li>Interpretar el semáforo de alertas y encontrar rápido lo que hay que reponer.</li>
+  </ul>
+</section>
+
+<h2>Dónde está</h2>
+<p>En el menú lateral entra a <strong>📈 Inventario</strong>. Arriba tienes cinco pestañas; las mismas que vas a usar en el resto de las lecciones. Toca cada una para ver para qué sirve:</p>
+<div class="tarjeta">
+  <div class="tabs-demo" id="tabs">
+    <button data-info="Stock actual de cada producto en cada local, con el semáforo de alertas y el botón para registrar mermas. Es la pestaña que se abre por defecto.">Existencias</button>
+    <button data-info="Conteos físicos de inventario: cuentas lo que hay en la bodega y el sistema ajusta las diferencias.">Conteo</button>
+    <button data-info="Mover stock al instante de un local a otro (transferencia directa).">Transferencias</button>
+    <button data-info="Registro de todos los movimientos de stock: transferencias, pedidos, mermas, ajustes por conteo y más.">Historial</button>
+    <button data-info="Cuánto vale tu inventario a costo y a precio de venta, con ganancia y margen (valores netos, sin IVA).">Valorización</button>
+  </div>
+  <p class="tab-info" id="tab-info"></p>
+</div>
+<div class="tip">Lo que escribes en la búsqueda y el local que eliges <strong>se mantienen al cambiar de pestaña</strong>. Si buscaste "harina" en Existencias, al pasar a Historial sigues viendo solo harina.</div>
+
+<h2>Cómo se lee un producto</h2>
+<p>Cada producto aparece como una tarjeta, ordenadas alfabéticamente. Arriba están su nombre, el SKU y sus dos umbrales; abajo, una fila por local:</p>
+<div class="producto-demo">
+  <div><strong>Harina sin polvos</strong> · <span style="color:var(--suave)">SKU: HAR-001</span></div>
+  <div style="font-size:13px;margin:4px 0 8px"><span class="umbral-min">Stock mínimo: 20</span> · <span class="umbral-crit">Stock crítico: 8</span></div>
+  <div class="fila"><span><span class="punto p-verde"></span>Local Centro</span><span>45 kg <span class="ui-boton" style="background:#ea580c;color:#fff">↓ Merma</span></span></div>
+  <div class="fila"><span><span class="punto p-amarillo"></span>Local Norte</span><span>15 kg <span class="ui-boton" style="background:#ea580c;color:#fff">↓ Merma</span></span></div>
+  <div class="fila"><span><span class="punto p-rojo"></span>Local Sur</span><span>5 kg <span class="ui-boton" style="background:#ea580c;color:#fff">↓ Merma</span></span></div>
+  <div class="fila"><span><span class="punto p-verde"></span>Tienda Online <span class="web">(WEB / Global)</span></span><span>65 kg</span></div>
+</div>
+<p>Si el producto se compra en otra unidad (por ejemplo, sacos de 25 kg), debajo del stock verás una línea de referencia como <em>"≈ 1,8 × saco"</em>.</p>
+
+<h3>La Tienda Online (WEB / Global)</h3>
+<p>La fila marcada <strong>(WEB / Global)</strong> no es una bodega real: es el local virtual de la tienda online. Su stock es la <strong>suma de todos los locales físicos</strong>. En el ejemplo: 45 + 15 + 5 = 65 kg. Por eso esa fila no tiene botón de merma: lo que se pierde, se registra en el local físico donde pasó.</p>
+
+<h2>El semáforo</h2>
+<p>Cada producto tiene configurados un <strong>stock mínimo</strong> y un <strong>stock crítico</strong>. Con ellos se pinta cada local:</p>
+<table>
+  <tr><th>Color</th><th>Significa</th><th>Regla</th></tr>
+  <tr><td><span class="punto p-verde"></span>Stock OK</td><td>No hace falta hacer nada.</td><td>Stock por encima del mínimo.</td></tr>
+  <tr><td><span class="punto p-amarillo"></span>Stock Mínimo</td><td>Conviene reponer pronto.</td><td>Stock igual o bajo el mínimo, pero sobre el crítico.</td></tr>
+  <tr><td><span class="punto p-rojo"></span>Stock Crítico</td><td>Reposición urgente.</td><td>Stock igual o bajo el crítico.</td></tr>
+</table>
+<p>Pruébalo: cambia los valores y mira qué color resulta.</p>
+<div class="tarjeta">
+  <div class="sim-grid">
+    <label>Stock actual<input type="number" id="s-stock" value="15"></label>
+    <label>Stock mínimo<input type="number" id="s-min" value="20"></label>
+    <label>Stock crítico<input type="number" id="s-crit" value="8"></label>
+  </div>
+  <div class="semaforo-resultado" id="s-res"></div>
+</div>
+<div class="advertencia">Si un producto no tiene umbrales configurados (ambos en 0), solo se pone en rojo cuando se queda sin stock. Si quieres que te avise antes, pide que configuren su stock mínimo y crítico en Productos.</div>
+
+<h2>Encontrar rápido lo que importa</h2>
+<div class="tarjeta pasos">
+  <div class="paso"><h3>1. Busca</h3><p>Escribe en <em>"Buscar producto o SKU..."</em> parte del nombre o el código.</p></div>
+  <div class="paso"><h3>2. Elige un local</h3><p>Si trabajas con varios locales, el selector <em>"Todos los locales"</em> te deja ver uno solo. (Si tu usuario pertenece a un local, ya ves solo el tuyo y este selector no aparece).</p></div>
+  <div class="paso"><h3>3. Solo alertas</h3><p>Marca la casilla <strong>"Solo mostrar alertas"</strong> para dejar únicamente los productos con algún local en amarillo o rojo. Ideal para revisar al empezar el día.</p></div>
+  <div class="paso"><h3>4. La lista de reposición</h3><p>En el <strong>Dashboard</strong>, la tarjeta <strong>"Alertas de Stock"</strong> abre una vista con todos los productos en nivel crítico y mínimo, cuántas unidades faltan para llegar al mínimo (<em>"A reponer"</em>) y el botón <span class="ui-boton">Exportar PDF (lista de compras)</span> para llevarla impresa o enviarla.</p></div>
+</div>
+
+<h2>¿Qué locales ves?</h2>
+<p>Depende de tu usuario:</p>
+<ul>
+  <li><strong>Administrador</strong> (o usuario sin local asignado): ve y opera todos los locales.</li>
+  <li><strong>Usuario de un local</strong>: ve y opera solo su local. Los selectores de local no aparecen o vienen fijos.</li>
+</ul>
+<p>El local de cada usuario lo asigna un administrador en <strong>Usuarios</strong>.</p>
+
+<h2>Pon a prueba lo aprendido</h2>
+<div class="tarjeta quiz">
+  <p class="pregunta">1. Un producto tiene mínimo 20 y crítico 8. En tu local quedan 8 unidades. ¿De qué color se ve?</p>
+  <div class="opciones">
+    <button data-explica="Con 8 no está sobre el mínimo (20), así que no puede estar en verde.">🟢 Verde</button>
+    <button data-explica="Amarillo es cuando está bajo el mínimo pero todavía sobre el crítico. 8 es igual al crítico.">🟡 Amarillo</button>
+    <button data-ok data-explica="Rojo es stock igual o bajo el crítico, y 8 es igual al crítico.">🔴 Rojo</button>
+  </div>
+</div>
+<div class="tarjeta quiz">
+  <p class="pregunta">2. Local Centro tiene 10, Local Norte 4 y la fila Tienda Online (WEB / Global) muestra 14. ¿Qué pasa si vendes 2 en Local Norte?</p>
+  <div class="opciones">
+    <button data-explica="La fila WEB no tiene stock propio: es la suma de los locales físicos, así que también cambia.">Tienda Online sigue en 14</button>
+    <button data-ok data-explica="Norte queda en 2 y la Tienda Online, que suma los locales físicos, pasa a 10 + 2 = 12.">Tienda Online pasa a 12</button>
+    <button data-explica="El stock de la tienda online no se descuenta aparte: se recalcula sumando los locales.">Hay que descontarlo a mano en la Tienda Online</button>
+  </div>
+</div>
+<div class="tarjeta quiz">
+  <p class="pregunta">3. Quieres ver de una vez todo lo que está bajo el mínimo en tus locales. ¿Qué haces?</p>
+  <div class="opciones">
+    <button data-explica="Funciona, pero es lento: tendrías que revisar producto por producto.">Revisar cada tarjeta buscando los puntos de color</button>
+    <button data-ok data-explica="Esa casilla deja solo los productos con algún local en amarillo o rojo. También puedes usar Alertas de Stock en el Dashboard.">Marcar "Solo mostrar alertas" en Existencias</button>
+    <button data-explica="El Historial muestra movimientos pasados, no el estado actual del stock.">Ir a la pestaña Historial</button>
+  </div>
+</div>
+<div class="tarjeta quiz-resumen"></div>
+</main>
+
+<script>
+(function () {
+  // --- Paso a paso ---
+  document.querySelectorAll(".pasos").forEach(function (cont) {
+    var pasos = cont.querySelectorAll(".paso");
+    if (!pasos.length) return;
+    var i = 0;
+    var barra = document.createElement("div"); barra.className = "pasos-barra"; barra.innerHTML = "<i></i>";
+    cont.insertBefore(barra, cont.firstChild);
+    var nav = document.createElement("div"); nav.className = "pasos-nav";
+    nav.innerHTML = '<button class="btn" type="button">← Anterior</button><span></span><button class="btn prim" type="button">Siguiente →</button>';
+    cont.appendChild(nav);
+    var ant = nav.children[0], txt = nav.children[1], sig = nav.children[2];
+    function mostrar() {
+      pasos.forEach(function (p, k) { p.classList.toggle("activo", k === i); });
+      txt.textContent = "Paso " + (i + 1) + " de " + pasos.length;
+      barra.firstChild.style.width = ((i + 1) / pasos.length * 100) + "%";
+      ant.disabled = i === 0; sig.disabled = i === pasos.length - 1;
+      avisarAlto();
+    }
+    ant.onclick = function () { if (i > 0) { i--; mostrar(); } };
+    sig.onclick = function () { if (i < pasos.length - 1) { i++; mostrar(); } };
+    mostrar();
+  });
+
+  // --- Quiz ---
+  var quizzes = document.querySelectorAll(".quiz");
+  function actualizarResumen() {
+    var resp = 0, ok = 0;
+    quizzes.forEach(function (q) { if (q.dataset.respondida) { resp++; if (q.dataset.respondida === "ok") ok++; } });
+    document.querySelectorAll(".quiz-resumen").forEach(function (r) {
+      r.textContent = resp < quizzes.length
+        ? "Respondiste " + resp + " de " + quizzes.length + " preguntas."
+        : (ok === quizzes.length ? "🎉 ¡" + ok + " de " + quizzes.length + " correctas! Dominas esta lección."
+                                 : ok + " de " + quizzes.length + " correctas. Revisa las explicaciones y vuelve a intentarlo cuando quieras.");
+    });
+  }
+  quizzes.forEach(function (q) {
+    var botones = q.querySelectorAll(".opciones button");
+    var fb = q.querySelector(".feedback");
+    if (!fb) { fb = document.createElement("p"); fb.className = "feedback"; q.appendChild(fb); }
+    botones.forEach(function (b) {
+      b.type = "button";
+      b.onclick = function () {
+        if (q.dataset.respondida) return;
+        var ok = b.hasAttribute("data-ok");
+        q.dataset.respondida = ok ? "ok" : "mal";
+        botones.forEach(function (x) { x.disabled = true; if (x.hasAttribute("data-ok")) x.classList.add("correcta"); });
+        if (!ok) b.classList.add("incorrecta");
+        fb.className = "feedback " + (ok ? "ok" : "mal");
+        fb.textContent = (ok ? "✔ Correcto. " : "✘ No es correcto. ") + (b.dataset.explica || "");
+        var reintentar = document.createElement("button");
+        reintentar.className = "btn"; reintentar.type = "button"; reintentar.textContent = "Intentar de nuevo";
+        reintentar.style.marginTop = "8px";
+        reintentar.onclick = function () {
+          delete q.dataset.respondida; fb.textContent = ""; fb.className = "feedback"; reintentar.remove();
+          botones.forEach(function (x) { x.disabled = false; x.classList.remove("correcta", "incorrecta"); });
+          actualizarResumen(); avisarAlto();
+        };
+        if (!ok) q.appendChild(reintentar);
+        actualizarResumen(); avisarAlto();
+      };
+    });
+  });
+  actualizarResumen();
+
+  // --- Alto del iframe: el visor del backoffice ajusta su altura con este mensaje ---
+  function avisarAlto() {
+    // Alto del contenido (no del viewport), para que el iframe también pueda achicarse
+    var alto = Math.ceil(document.body.getBoundingClientRect().height);
+    try { parent.postMessage({ tipo: "capacitacion:alto", alto: alto }, "*"); } catch (e) {}
+  }
+  window.avisarAlto = avisarAlto;
+  window.addEventListener("load", avisarAlto);
+  if (window.ResizeObserver) new ResizeObserver(avisarAlto).observe(document.body);
+})();
+</script>
+<script>
+(function () {
+  var info = document.getElementById("tab-info");
+  var botones = document.querySelectorAll("#tabs button");
+  botones.forEach(function (b, i) {
+    b.type = "button";
+    b.onclick = function () {
+      botones.forEach(function (x) { x.classList.toggle("activa", x === b); });
+      info.textContent = b.dataset.info; avisarAlto();
+    };
+    if (i === 0) b.onclick();
+  });
+  var s = document.getElementById("s-stock"), mi = document.getElementById("s-min"), cr = document.getElementById("s-crit"), r = document.getElementById("s-res");
+  function calc() {
+    var st = parseFloat(s.value) || 0, m = parseFloat(mi.value) || 0, c = parseFloat(cr.value) || 0;
+    if (st <= c) r.innerHTML = '<span class="punto p-rojo"></span>Stock Crítico: ' + st + ' es igual o menor que el crítico (' + c + '). Reponer urgente.';
+    else if (st <= m) r.innerHTML = '<span class="punto p-amarillo"></span>Stock Mínimo: ' + st + ' está sobre el crítico pero igual o bajo el mínimo (' + m + '). Conviene reponer pronto.';
+    else r.innerHTML = '<span class="punto p-verde"></span>Stock OK: ' + st + ' está sobre el mínimo (' + m + ').';
+  }
+  [s, mi, cr].forEach(function (x) { x.oninput = calc; });
+  calc();
+})();
+</script>
+</body>
+</html>

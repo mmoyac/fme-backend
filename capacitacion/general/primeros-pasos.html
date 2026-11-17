@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Primeros pasos en el sistema</title>
+<!-- Lección del Centro de Capacitación. Basada en _plantilla.html: al editarla, actualizar "Última revisión". -->
+<style>
+  :root {
+    /* Paleta del backoffice (tailwind: slate-900/800/700, primary, secondary, accent) */
+    --primario: #5ec8f2; --primario-osc: #2b9ccc; --secundario: #45a29a; --acento: #daa520;
+    --texto: #f1f5f9; --suave: #9ca3af; --borde: #334155; --borde-fuerte: #475569;
+    --fondo: #0f172a; --tarjeta: #1e293b; --campo: #334155; --cabecera-tabla: #273449;
+    --ok: #4ade80; --ok-fondo: rgba(34,197,94,.12); --ok-borde: rgba(34,197,94,.45);
+    --error: #f87171; --error-fondo: rgba(239,68,68,.12); --error-borde: rgba(239,68,68,.5);
+    --aviso: #fbbf24; --aviso-fondo: rgba(245,158,11,.12); --aviso-borde: rgba(245,158,11,.45);
+    --info-fondo: rgba(94,200,242,.10); --info-borde: rgba(94,200,242,.4);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--texto);
+         background: var(--fondo); line-height: 1.55; font-size: 15px; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 40px; }
+  header.leccion { background: linear-gradient(135deg, #1e3a5f, #1f4f4b); color: #fff; border-bottom: 3px solid var(--primario);
+         padding: 22px 16px; }
+  header.leccion > div { max-width: 860px; margin: 0 auto; }
+  header.leccion .modulo { text-transform: uppercase; font-size: 12px; letter-spacing: .08em; color: var(--primario); font-weight: 700; }
+  header.leccion h1 { margin: 4px 0 6px; font-size: 26px; line-height: 1.2; }
+  header.leccion .meta { font-size: 13px; opacity: .92; }
+  h2 { font-size: 20px; margin: 32px 0 10px; }
+  h3 { font-size: 16px; margin: 20px 0 8px; }
+  .tarjeta { background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 12px; padding: 16px 18px; margin: 14px 0; }
+  .objetivos { background: var(--info-fondo); border-color: var(--info-borde); }
+  .objetivos ul { margin: 6px 0 0; padding-left: 20px; }
+  .tip, .advertencia { border-radius: 10px; padding: 12px 14px 12px 44px; margin: 14px 0; position: relative; }
+  .tip { background: var(--ok-fondo); border: 1px solid var(--ok-borde); }
+  .advertencia { background: var(--aviso-fondo); border: 1px solid var(--aviso-borde); }
+  .tip::before, .advertencia::before { position: absolute; left: 14px; top: 11px; font-size: 18px; }
+  .tip::before { content: "💡"; }
+  .advertencia::before { content: "⚠️"; }
+  .ui-boton { display: inline-block; background: var(--primario); color: #0f172a; border-radius: 6px; padding: 1px 8px;
+              font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .ui-boton.sec { background: var(--campo); color: var(--texto); border: 1px solid var(--borde-fuerte); }
+  .ui-tab { display: inline-block; border-bottom: 2px solid var(--primario); padding: 0 4px; font-weight: 600; white-space: nowrap; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--tarjeta); }
+  th, td { border: 1px solid var(--borde); padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: var(--cabecera-tabla); }
+  .tabla-scroll { overflow-x: auto; }
+  .chip { display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: 12px; font-weight: 600; }
+  button { font: inherit; cursor: pointer; }
+
+  /* Paso a paso */
+  .pasos .paso { display: none; }
+  .pasos .paso.activo { display: block; }
+  .pasos .paso h3 { margin-top: 0; }
+  .pasos-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  .pasos-barra { height: 6px; background: var(--borde); border-radius: 3px; overflow: hidden; margin-bottom: 14px; }
+  .pasos-barra > i { display: block; height: 100%; background: var(--primario); transition: width .25s; }
+  .btn { border: 1px solid var(--borde-fuerte); background: var(--campo); color: var(--texto); border-radius: 8px; padding: 7px 14px; }
+  .btn.prim { background: var(--primario); border-color: var(--primario); color: #0f172a; font-weight: 600; }
+  .btn:disabled { opacity: .45; cursor: default; }
+
+  /* Quiz */
+  .quiz .pregunta { font-weight: 600; margin: 0 0 10px; }
+  .quiz .opciones { display: grid; gap: 8px; }
+  .quiz .opciones button { text-align: left; border: 1px solid var(--borde-fuerte); background: var(--campo); color: var(--texto); border-radius: 8px; padding: 9px 12px; }
+  .quiz .opciones button:hover:not(:disabled) { border-color: var(--primario); }
+  .quiz .opciones button.correcta { background: var(--ok-fondo); border-color: var(--ok); }
+  .quiz .opciones button:disabled { cursor: default; }
+  .quiz .opciones button.incorrecta { background: var(--error-fondo); border-color: var(--error); }
+  .quiz .feedback { margin: 10px 0 0; font-size: 14px; }
+  .quiz .feedback.ok { color: var(--ok); }
+  .quiz .feedback.mal { color: var(--error); }
+  .quiz-resumen { font-weight: 600; text-align: center; padding: 14px; }
+  @media (max-width: 520px) { header.leccion h1 { font-size: 22px; } }
+
+</style>
+</head>
+<body>
+<header class="leccion"><div>
+  <div class="modulo">General</div>
+  <h1>Primeros pasos en el sistema</h1>
+  <div class="meta">⏱ 5 minutos · Última revisión: 2026-11-17</div>
+</div></header>
+
+<main>
+<section class="tarjeta objetivos">
+  <strong>Al terminar vas a saber:</strong>
+  <ul>
+    <li>Ingresar al panel de administración.</li>
+    <li>Moverte con el menú y la barra superior.</li>
+    <li>Qué local y qué módulos ves, y dónde encontrar esta capacitación.</li>
+  </ul>
+</section>
+
+<h2>Ingresar</h2>
+<div class="tarjeta pasos">
+  <div class="paso"><h3>1. Abre el panel</h3><p>Entra a la dirección del <strong>Panel de Administración</strong> de tu empresa. Arriba verás el nombre comercial.</p></div>
+  <div class="paso"><h3>2. Tus datos</h3><p>Escribe tu <strong>Correo Electrónico</strong> y tu <strong>Contraseña</strong> (el ícono de ojo la muestra u oculta) y presiona <span class="ui-boton">Iniciar Sesión</span>. Si tu cuenta es de Google, puedes usar <span class="ui-boton sec">Continuar con Google</span>.</p></div>
+  <div class="paso"><h3>3. El Dashboard</h3><p>Al ingresar llegas al <strong>Dashboard Principal</strong>, con el resumen del día y accesos rápidos como <em>Alertas de Stock</em> o el <em>Tablero de Solicitudes</em>.</p></div>
+</div>
+<div class="advertencia">Si ves <em>"Esta cuenta ha sido desactivada"</em>, tu usuario fue suspendido: habla con el administrador del sistema en tu empresa.</div>
+
+<h2>El menú lateral</h2>
+<ul>
+  <li>Muestra solo las secciones que tu rol puede usar. Dos personas con roles distintos ven menús distintos.</li>
+  <li>La sección en la que estás aparece resaltada.</li>
+  <li>En computador, el botón <strong>‹</strong> lo colapsa para ganar espacio y <strong>›</strong> lo vuelve a abrir.</li>
+  <li>En el celular, el menú se abre con el botón <strong>☰ Menú</strong> de abajo y sube como un panel.</li>
+</ul>
+
+<h2>La barra superior</h2>
+<ul>
+  <li>🎓 <strong>Capacitación</strong>: el acceso a estas lecciones, siempre a mano.</li>
+  <li>🔔 <strong>Notificaciones</strong>: por ejemplo, cuando otro local te hace una solicitud de transferencia.</li>
+  <li>Tu <strong>nombre</strong>, tu correo y tu <strong>rol</strong>.</li>
+  <li><span class="ui-boton sec">🚪 Salir</span> para cerrar sesión. Úsalo siempre en computadores compartidos.</li>
+</ul>
+
+<h2>Tu local</h2>
+<p>Cada usuario puede tener un <strong>local asignado</strong>. Si tienes uno, el sistema te muestra y te deja operar solo ese local (stock, mermas, conteos, transferencias desde tu local). Los administradores ven todos los locales.</p>
+<div class="tip">El local no se cambia desde tu sesión: lo asigna un administrador en <strong>Usuarios</strong>. Si cambias de local de trabajo, pídele que actualice tu usuario.</div>
+
+<h2>Módulos de tu plan</h2>
+<p>El sistema está dividido en módulos (Ventas, Inventario, Compras, Producción…). Tu empresa usa los que contrató. Si entras a una sección que no está en el plan, verás <em>"🔒 Tu plan no incluye el módulo …"</em>: no es un error, solo significa que esa funcionalidad no está contratada.</p>
+
+<h2>Esta capacitación</h2>
+<p>La encuentras siempre en la barra superior, en el botón <strong>🎓</strong> junto a la campana de notificaciones, estés en la pantalla que estés. Ahí verás una sección <em>General</em> y una por cada módulo de tu plan que tenga lecciones. Puedes repetir las lecciones y sus preguntas cuantas veces quieras: no se guarda ningún puntaje.</p>
+
+<h2>Pon a prueba lo aprendido</h2>
+<div class="tarjeta quiz">
+  <p class="pregunta">1. Te cambiaron de Local Centro a Local Norte. ¿Cómo actualizas tu local en el sistema?</p>
+  <div class="opciones">
+    <button data-explica="No existe un selector de local en tu sesión.">Lo cambio desde la barra superior</button>
+    <button data-ok data-explica="El local de cada usuario lo asigna un administrador en Usuarios.">Le pido a un administrador que cambie mi local en Usuarios</button>
+    <button data-explica="Cerrar sesión no cambia el local asignado.">Cierro sesión y elijo el local al volver a entrar</button>
+  </div>
+</div>
+<div class="tarjeta quiz">
+  <p class="pregunta">2. Un compañero ve "Producción" en su menú y tú no. ¿Por qué puede ser?</p>
+  <div class="opciones">
+    <button data-ok data-explica="El menú muestra solo las secciones permitidas para el rol de cada usuario.">Porque tenemos roles distintos</button>
+    <button data-explica="El menú no depende del computador sino de tu usuario.">Porque uso otro computador</button>
+    <button data-explica="Si fuera un tema de plan, tampoco lo vería tu compañero: el plan es de la empresa.">Porque mi plan personal no incluye Producción</button>
+  </div>
+</div>
+<div class="tarjeta quiz-resumen"></div>
+</main>
+
+<script>
+(function () {
+  // --- Paso a paso ---
+  document.querySelectorAll(".pasos").forEach(function (cont) {
+    var pasos = cont.querySelectorAll(".paso");
+    if (!pasos.length) return;
+    var i = 0;
+    var barra = document.createElement("div"); barra.className = "pasos-barra"; barra.innerHTML = "<i></i>";
+    cont.insertBefore(barra, cont.firstChild);
+    var nav = document.createElement("div"); nav.className = "pasos-nav";
+    nav.innerHTML = '<button class="btn" type="button">← Anterior</button><span></span><button class="btn prim" type="button">Siguiente →</button>';
+    cont.appendChild(nav);
+    var ant = nav.children[0], txt = nav.children[1], sig = nav.children[2];
+    function mostrar() {
+      pasos.forEach(function (p, k) { p.classList.toggle("activo", k === i); });
+      txt.textContent = "Paso " + (i + 1) + " de " + pasos.length;
+      barra.firstChild.style.width = ((i + 1) / pasos.length * 100) + "%";
+      ant.disabled = i === 0; sig.disabled = i === pasos.length - 1;
+      avisarAlto();
+    }
+    ant.onclick = function () { if (i > 0) { i--; mostrar(); } };
+    sig.onclick = function () { if (i < pasos.length - 1) { i++; mostrar(); } };
+    mostrar();
+  });
+
+  // --- Quiz ---
+  var quizzes = document.querySelectorAll(".quiz");
+  function actualizarResumen() {
+    var resp = 0, ok = 0;
+    quizzes.forEach(function (q) { if (q.dataset.respondida) { resp++; if (q.dataset.respondida === "ok") ok++; } });
+    document.querySelectorAll(".quiz-resumen").forEach(function (r) {
+      r.textContent = resp < quizzes.length
+        ? "Respondiste " + resp + " de " + quizzes.length + " preguntas."
+        : (ok === quizzes.length ? "🎉 ¡" + ok + " de " + quizzes.length + " correctas! Dominas esta lección."
+                                 : ok + " de " + quizzes.length + " correctas. Revisa las explicaciones y vuelve a intentarlo cuando quieras.");
+    });
+  }
+  quizzes.forEach(function (q) {
+    var botones = q.querySelectorAll(".opciones button");
+    var fb = q.querySelector(".feedback");
+    if (!fb) { fb = document.createElement("p"); fb.className = "feedback"; q.appendChild(fb); }
+    botones.forEach(function (b) {
+      b.type = "button";
+      b.onclick = function () {
+        if (q.dataset.respondida) return;
+        var ok = b.hasAttribute("data-ok");
+        q.dataset.respondida = ok ? "ok" : "mal";
+        botones.forEach(function (x) { x.disabled = true; if (x.hasAttribute("data-ok")) x.classList.add("correcta"); });
+        if (!ok) b.classList.add("incorrecta");
+        fb.className = "feedback " + (ok ? "ok" : "mal");
+        fb.textContent = (ok ? "✔ Correcto. " : "✘ No es correcto. ") + (b.dataset.explica || "");
+        var reintentar = document.createElement("button");
+        reintentar.className = "btn"; reintentar.type = "button"; reintentar.textContent = "Intentar de nuevo";
+        reintentar.style.marginTop = "8px";
+        reintentar.onclick = function () {
+          delete q.dataset.respondida; fb.textContent = ""; fb.className = "feedback"; reintentar.remove();
+          botones.forEach(function (x) { x.disabled = false; x.classList.remove("correcta", "incorrecta"); });
+          actualizarResumen(); avisarAlto();
+        };
+        if (!ok) q.appendChild(reintentar);
+        actualizarResumen(); avisarAlto();
+      };
+    });
+  });
+  actualizarResumen();
+
+  // --- Alto del iframe: el visor del backoffice ajusta su altura con este mensaje ---
+  function avisarAlto() {
+    // Alto del contenido (no del viewport), para que el iframe también pueda achicarse
+    var alto = Math.ceil(document.body.getBoundingClientRect().height);
+    try { parent.postMessage({ tipo: "capacitacion:alto", alto: alto }, "*"); } catch (e) {}
+  }
+  window.avisarAlto = avisarAlto;
+  window.addEventListener("load", avisarAlto);
+  if (window.ResizeObserver) new ResizeObserver(avisarAlto).observe(document.body);
+})();
+</script>
+</body>
+</html>

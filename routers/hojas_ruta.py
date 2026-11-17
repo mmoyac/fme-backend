@@ -17,6 +17,7 @@ from database.models import (
     SolicitudTransferencia, ItemSolicitudTransferencia, EstadoEnrolamiento, Local,
 )
 from services.webhook_service import trigger_pedido_entregado
+from services.entrega_pedido import registrar_entrega
 from routers.auth import get_current_active_user
 
 router = APIRouter(prefix="/api/hojas-ruta", tags=["Hojas de Ruta"])
@@ -713,6 +714,9 @@ def marcar_entregado(
     pedido = db.query(Pedido).filter(Pedido.id == hi.pedido_id).first()
     if estado_entregado and pedido:
         pedido.estado_id = estado_entregado.id
+        # Trazabilidad de la entrega en el pedido (add-modalidad-entrega-pedido)
+        registrar_entrega(db, pedido, current_user.id, cambiar_estado=False,
+                          fecha=hi.fecha_entrega, nota=body.notas_entrega)
 
     # Si todos los items están entregados → completar hoja de ruta
     todos_entregados = db.query(HojaRutaItem).filter(

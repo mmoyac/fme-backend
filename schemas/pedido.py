@@ -2,8 +2,9 @@
 Schemas Pydantic para Pedido.
 """
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, List
+from typing import Optional, List, Literal
 from datetime import datetime
+from uuid import UUID
 from enum import Enum
 
 
@@ -102,10 +103,16 @@ class PedidoCreateBackoffice(BaseModel):
     # Delivery: si True el pedido queda CONFIRMADO para asignación de ruta (requiere cliente registrado)
     requiere_delivery: bool = Field(default=False, description="Si True, el pedido queda CONFIRMADO en vez de ENTREGADO para programar delivery")
     costo_delivery: Optional[float] = Field(default=None, ge=0, description="Costo de delivery acordado. Cobro aparte, no suma al total.")
+    modalidad_entrega: Optional[str] = Field(default=None, description="RETIRO | DESPACHO. Si falta, se deriva de requiere_delivery")
     # Canal de venta (1=POS, 2=LANDING, 3=WHATSAPP, 4=TELEFONO)
     canal_venta_id: Optional[int] = Field(default=None, description="ID del canal de origen de la venta")
     # tenant_id solo requerido cuando se usa X-API-Key (integraciones externas)
     tenant_id: Optional[int] = Field(default=None, description="ID del tenant (requerido solo con X-API-Key)")
+    # Idempotencia / ventas offline (change add-ventas-offline-backoffice)
+    client_uuid: Optional[UUID] = Field(default=None, description="Clave de idempotencia generada por el cliente. Reenviar la misma venta con el mismo valor no la duplica.")
+    fecha_venta_cliente: Optional[datetime] = Field(default=None, description="Momento real de la venta en el cliente (ventas registradas sin conexión)")
+    origen: Literal["ONLINE", "OFFLINE"] = Field(default="ONLINE", description="ONLINE si se registró en línea; OFFLINE si se sincronizó desde la cola local")
+    numero_provisorio: Optional[str] = Field(default=None, max_length=50, description="Número impreso en el comprobante interno offline")
     items: List[ItemPedidoCreateBackoffice] = Field(..., min_length=1)
 
 
@@ -159,6 +166,14 @@ class PedidoResponse(BaseModel):
     # Delivery y canal de venta
     costo_delivery: Optional[float] = None
     canal_venta_id: Optional[int] = None
+    # Entrega (add-modalidad-entrega-pedido)
+    modalidad_entrega: Optional[str] = Field(None, description="RETIRO | DESPACHO")
+    fecha_entrega: Optional[datetime] = None
+    entregado_por_id: Optional[int] = None
+    entregado_por_nombre: Optional[str] = None
+    retirado_por_nombre: Optional[str] = None
+    retirado_por_rut: Optional[str] = None
+    nota_entrega: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -218,6 +233,14 @@ class PedidoConRelaciones(BaseModel):
     puntos_usados: Optional[int] = None
     descuento_puntos: Optional[float] = None
     costo_delivery: Optional[float] = None
+    # Entrega (add-modalidad-entrega-pedido)
+    modalidad_entrega: Optional[str] = Field(None, description="RETIRO | DESPACHO")
+    fecha_entrega: Optional[datetime] = None
+    entregado_por_id: Optional[int] = None
+    entregado_por_nombre: Optional[str] = None
+    retirado_por_nombre: Optional[str] = None
+    retirado_por_rut: Optional[str] = None
+    nota_entrega: Optional[str] = None
 
     # Control SII (Facturación Electrónica)
     tipo_documento_tributario_id: Optional[int] = None
@@ -252,6 +275,13 @@ class PedidoConRelaciones(BaseModel):
     items: List["ItemPedidoResponse"] = []
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class RetiroPedidoRequest(BaseModel):
+    """Registro de retiro en local (add-modalidad-entrega-pedido)."""
+    retirado_por_nombre: Optional[str] = Field(None, max_length=120)
+    retirado_por_rut: Optional[str] = Field(None, max_length=12)
+    nota_entrega: Optional[str] = None
 
 
 class PedidoConfirmacion(BaseModel):

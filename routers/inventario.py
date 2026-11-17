@@ -2,8 +2,8 @@
 Router para endpoints de Inventario.
 Consultas de disponibilidad y stock.
 """
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from database.database import get_db
@@ -12,6 +12,9 @@ from schemas.inventario_consulta import InventarioResumen, InventarioDetalle
 from schemas.inventario import InventarioResponse, InventarioUpdate
 from services import inventario_service
 from routers.auth import get_current_active_user
+from utils.alcance_local import exigir_local, local_de_alcance
+from schemas.valorizacion import ValorizacionResponse
+from services.valorizacion_service import calcular_valorizacion, valorizacion_a_excel
 
 router = APIRouter()
 
@@ -236,6 +239,7 @@ def ajuste_merma(
     ).first()
     if not local:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Local no encontrado")
+    exigir_local(current_user, local_id)  # add-inventario-alcance-por-local
 
     db_inventario = db.query(Inventario).filter(
         Inventario.producto_id == producto_id,
@@ -274,3 +278,46 @@ def ajuste_merma(
         "stock_nuevo": db_inventario.cantidad_stock,
         "usuario": current_user.nombre_completo or current_user.email
     }
+
+
+# --------------------------------------------------------------------------
+# Valorización de inventario (change OpenSpec: add-valorizacion-inventario)
+# --------------------------------------------------------------------------
+
+
+def _local_valorizacion(current_user, local_id: Optional[int]) -> Optional[int]:
+    """Usuario de tienda: siempre su local, ignore lo que envíe."""
+    propio = local_de_alcance(current_user)
+    return propio if propio is not None else local_id
+
+
+@router.get("/valorizacion", response_model=ValorizacionResponse)
+def obtener_valorizacion(
+    local_id: Optional[int] = Query(None),
+    categoria_id: Optional[int] = Query(None),
+    q: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user),
+):
+    return calcular_valorizacion(
+        db, current_user.tenant_id, _local_valorizacion(current_user, local_id), categoria_id, q
+    )
+
+
+@router.get("/valorizacion/excel")
+def exportar_valorizacion_excel(
+    local_id: Optional[int] = Query(None),
+    categoria_id: Optional[int] = Query(None),
+    q: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user),
+):
+    data = calcular_valorizacion(
+        db, current_user.tenant_id, _local_valorizacion(current_user, local_id), categoria_id, q
+    )
+    contenido, nombre = valorizacion_a_excel(data)
+    return Response(
+        content=contenido,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
+    )

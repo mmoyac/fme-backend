@@ -412,6 +412,7 @@ class Producto(Base):
     # Costos y precios
     precio_compra = Column(Numeric(12, 2), nullable=True)  # Para materias primas
     costo_fabricacion = Column(Numeric(10, 2), nullable=True)  # Calculado automáticamente
+    costo_promedio = Column(Numeric(12, 4), nullable=True)  # Promedio ponderado neto global (add-valorizacion-inventario)
     
     # Stock
     stock_minimo = Column(Numeric(10, 3), default=0)
@@ -805,13 +806,65 @@ class MovimientoInventario(Base):
     tipo_movimiento = Column(String, nullable=False)  # TRANSFERENCIA, AJUSTE, PEDIDO, ENTRADA_INICIAL
     referencia_id = Column(Integer, nullable=True)  # ID del pedido si es por pedido
     notas = Column(String)
-    usuario = Column(String, default="admin")  # Futuro: FK a tabla usuarios
+    usuario = Column(String, default="admin")  # Nombre/email (texto, compatibilidad)
+    usuario_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)  # Auditoría con FK (conteos, etc.)
     fecha_movimiento = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
     
     # Relaciones
     producto = relationship("Producto")
     local_origen = relationship("Local", foreign_keys=[local_origen_id])
     local_destino = relationship("Local", foreign_keys=[local_destino_id])
+
+
+class ConteoInventario(Base):
+    """Conteo físico de inventario de un local (completo o parcial). Change: add-conteo-inventario."""
+    __tablename__ = "conteos_inventario"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    local_id = Column(Integer, ForeignKey("locales.id", ondelete="RESTRICT"), nullable=False, index=True)
+    tipo = Column(String(10), nullable=False)  # COMPLETO | PARCIAL
+    estado = Column(String(15), nullable=False, default="EN_PROCESO", index=True)  # EN_PROCESO | FINALIZADO | CANCELADO
+    observacion = Column(Text, nullable=True)
+    usuario_creador_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    fecha_inicio = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    usuario_cierre_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
+    fecha_cierre = Column(DateTime(timezone=True), nullable=True)
+
+    local = relationship("Local")
+    usuario_creador = relationship("User", foreign_keys=[usuario_creador_id])
+    usuario_cierre = relationship("User", foreign_keys=[usuario_cierre_id])
+    items = relationship("ConteoInventarioItem", back_populates="conteo", cascade="all, delete-orphan",
+                         order_by="ConteoInventarioItem.id")
+
+    __table_args__ = (
+        # Un solo conteo EN_PROCESO por local (índice único parcial en PostgreSQL)
+        Index("uq_conteo_local_en_proceso", "local_id", unique=True,
+              postgresql_where=(estado == "EN_PROCESO")),
+    )
+
+
+class ConteoInventarioItem(Base):
+    """Línea de un conteo: stock del sistema vs cantidad contada, con auditoría de captura."""
+    __tablename__ = "conteo_inventario_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conteo_id = Column(Integer, ForeignKey("conteos_inventario.id", ondelete="CASCADE"), nullable=False, index=True)
+    producto_id = Column(Integer, ForeignKey("productos.id", ondelete="RESTRICT"), nullable=False)
+    stock_sistema = Column(Numeric(10, 3), nullable=True)
+    cantidad_contada = Column(Numeric(10, 3), nullable=True)
+    diferencia = Column(Numeric(10, 3), nullable=True)
+    ajuste_aplicado = Column(Numeric(10, 3), nullable=True)
+    usuario_captura_id = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
+    fecha_captura = Column(DateTime(timezone=True), nullable=True)
+
+    conteo = relationship("ConteoInventario", back_populates="items")
+    producto = relationship("Producto")
+    usuario_captura = relationship("User", foreign_keys=[usuario_captura_id])
+
+    __table_args__ = (
+        UniqueConstraint("conteo_id", "producto_id", name="uq_conteo_item_producto"),
+    )
 
 
 class Precio(Base):
@@ -918,10 +971,26 @@ class Pedido(Base):
     token_seguimiento = Column(String(64), nullable=True, unique=True, index=True)  # Token público para consulta de estado
     costo_delivery = Column(Numeric(10, 2), nullable=True, default=None)  # Costo de delivery (cobro aparte, no suma al total)
     inventario_descontado = Column(Boolean, default=False)  # Flag para evitar doble descuento
+
+    # Entrega (change add-modalidad-entrega-pedido)
+    modalidad_entrega = Column(String(10), nullable=False, default="RETIRO", server_default="RETIRO")  # RETIRO | DESPACHO
+    fecha_entrega = Column(DateTime(timezone=True), nullable=True)
+    entregado_por_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    retirado_por_nombre = Column(String(120), nullable=True)
+    retirado_por_rut = Column(String(12), nullable=True)
+    nota_entrega = Column(Text, nullable=True)
     cotizacion_id = Column(Integer, ForeignKey("cotizaciones.id", ondelete="SET NULL"), nullable=True)  # Cotización que originó este pedido
     notas = Column(Text, nullable=True)
     notas_admin = Column(Text, nullable=True)
-    
+
+    # Ventas offline / idempotencia (change add-ventas-offline-backoffice)
+    client_uuid = Column(String(36), nullable=True)  # Clave de idempotencia generada por el POS; único por tenant
+    fecha_venta_cliente = Column(DateTime(timezone=True), nullable=True)  # Momento real de la venta (si se registró offline)
+    origen = Column(String(10), nullable=False, default="ONLINE", server_default="ONLINE")  # ONLINE | OFFLINE
+    turno_caja_id = Column(Integer, ForeignKey("turnos_caja.id", ondelete="SET NULL"), nullable=True, index=True)
+    numero_provisorio = Column(String(50), nullable=True)  # Número impreso en el comprobante offline
+    diferencia_precio = Column(Boolean, nullable=False, default=False, server_default="false")
+
     # Campos de puntos
     puntos_ganados = Column(Integer, default=0)    # Puntos ganados en este pedido
     puntos_usados = Column(Integer, default=0)     # Puntos usados como descuento
@@ -947,6 +1016,7 @@ class Pedido(Base):
     tenant = relationship("Tenant", back_populates="pedidos")
     cliente = relationship("Cliente", back_populates="pedidos")
     usuario = relationship("User", foreign_keys=[usuario_id])
+    entregado_por = relationship("User", foreign_keys=[entregado_por_id])
     estado_pedido = relationship("EstadoPedido", back_populates="pedidos")
     local = relationship("Local", back_populates="pedidos", foreign_keys=[local_id])
     local_despacho = relationship("Local", foreign_keys=[local_despacho_id])
@@ -1051,6 +1121,16 @@ class ItemPedido(Base):
 # 4. AutenticaciÃƒÂ³n y Usuarios
 # --------------------------------------------------
 
+class TenantModulo(Base):
+    """Módulo contratado por un tenant (catálogo en utils/modulos.py)."""
+    __tablename__ = "tenant_modulos"
+
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), primary_key=True)
+    modulo = Column(String(30), primary_key=True)
+    activado_en = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    activado_por = Column(String(255), nullable=True)  # email del admin de plataforma o 'migracion'
+
+
 class Role(Base):
     """Roles de usuario (e.g., admin, vendedor). Scoped por tenant."""
     __tablename__ = "roles"
@@ -1088,7 +1168,8 @@ class MenuItem(Base):
     href = Column(String, nullable=False)
     icon = Column(String)  # Emoji o identificador de icono
     orden = Column(Integer, default=0)
-    
+    modulo = Column(String(30), nullable=True)  # utils/modulos.py; NULL = núcleo
+
     # Relaciones
     roles = relationship("Role", secondary=role_menu_permissions, back_populates="menus")
 
@@ -1208,10 +1289,14 @@ class OrdenProduccion(Base):
     fecha_finalizacion = Column(DateTime(timezone=True), nullable=True)
     estado = Column(String, default="PLANIFICADA") # PLANIFICADA, FINALIZADA, CANCELADA
     notas = Column(Text)
-    
+    solicitado_por_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    producido_por_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
     # Relaciones
     local = relationship("Local")
     detalles = relationship("DetalleOrdenProduccion", back_populates="orden", cascade="all, delete-orphan")
+    solicitado_por = relationship("User", foreign_keys=[solicitado_por_id])
+    producido_por = relationship("User", foreign_keys=[producido_por_id])
 
 
 class DetalleOrdenProduccion(Base):
@@ -1225,7 +1310,8 @@ class DetalleOrdenProduccion(Base):
     
     cantidad_programada = Column(Numeric(10, 3), nullable=False)
     cantidad_producida = Column(Numeric(10, 3), nullable=True) # Se llena al finalizar
-    
+    motivo_diferencia = Column(Text, nullable=True)  # Motivo opcional si se produjo distinto a lo programado
+
     # Relaciones
     orden = relationship("OrdenProduccion", back_populates="detalles")
     producto = relationship("Producto")

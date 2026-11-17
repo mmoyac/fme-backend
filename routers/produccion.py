@@ -1,5 +1,6 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime
@@ -8,6 +9,8 @@ from database.database import get_db
 from database import models
 from schemas import produccion as schemas_prod
 from routers.auth import get_current_active_user
+from utils.permisos import require_roles, ROLES_ADMIN, ROLES_PRODUCCION
+from services.costo_promedio import registrar_entrada_costo
 
 router = APIRouter(
     prefix="/produccion",
@@ -79,7 +82,7 @@ def listar_ordenes(db: Session = Depends(get_db), current_user = Depends(get_cur
     ).order_by(models.OrdenProduccion.id.desc()).all()
 
 @router.delete("/ordenes/{orden_id}")
-def eliminar_orden(orden_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
+def eliminar_orden(orden_id: int, db: Session = Depends(get_db), current_user = Depends(require_roles(ROLES_ADMIN))):
     orden = db.query(models.OrdenProduccion).join(models.Local).filter(
         models.OrdenProduccion.id == orden_id,
         models.Local.tenant_id == current_user.tenant_id
@@ -93,6 +96,73 @@ def eliminar_orden(orden_id: int, db: Session = Depends(get_db), current_user = 
     db.delete(orden)
     db.commit()
     return {"message": "Orden eliminada"}
+
+@router.put("/ordenes/{orden_id}/cantidades", response_model=schemas_prod.OrdenProduccionRead)
+def editar_cantidades_orden(
+    orden_id: int,
+    data: schemas_prod.EdicionCantidadesOrden,
+    db: Session = Depends(get_db),
+    current_user = Depends(require_roles(ROLES_ADMIN)),
+):
+    """
+    Edita las cantidades programadas de una OP PLANIFICADA (solo admin).
+    Si la OP viene de un pedido (vía OT), no se puede programar menos de lo que el pedido
+    necesita: cantidad del ítem del pedido menos el stock actual del local de la OP.
+    Se refleja en los ítems de la OT vinculada y queda en su registro de actividad.
+    """
+    orden = db.query(models.OrdenProduccion).join(models.Local).filter(
+        models.OrdenProduccion.id == orden_id,
+        models.Local.tenant_id == current_user.tenant_id
+    ).first()
+    if not orden:
+        raise HTTPException(status_code=404, detail="Orden no encontrada")
+    if orden.estado != "PLANIFICADA":
+        raise HTTPException(status_code=400, detail="Solo se pueden editar órdenes planificadas")
+
+    ot = db.query(models.OrdenTrabajo).filter(models.OrdenTrabajo.op_id == orden.id).first()
+    detalles = {d.id: d for d in orden.detalles}
+    cambios = []
+    for ed in data.detalles:
+        det = detalles.get(ed.detalle_id)
+        if not det:
+            raise HTTPException(status_code=400, detail=f"El detalle {ed.detalle_id} no pertenece a la orden")
+        nueva = float(ed.cantidad_programada)
+        # Mínimo exigido por el pedido vinculado
+        if ot and ot.pedido_id:
+            requerido = db.query(func.coalesce(func.sum(models.ItemPedido.cantidad), 0)).filter(
+                models.ItemPedido.pedido_id == ot.pedido_id,
+                models.ItemPedido.producto_id == det.producto_id,
+            ).scalar() or 0
+            inv = db.query(models.Inventario).filter(
+                models.Inventario.producto_id == det.producto_id,
+                models.Inventario.local_id == orden.local_id,
+            ).first()
+            stock = float(inv.cantidad_stock) if inv else 0.0
+            minimo = max(float(requerido) - max(stock, 0.0), 0.0)
+            if nueva < minimo:
+                nombre = det.producto.nombre if det.producto else det.producto_id
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{nombre}: el pedido vinculado necesita al menos {minimo:g}; no se puede programar {nueva:g}",
+                )
+        anterior = float(det.cantidad_programada)
+        if nueva != anterior:
+            det.cantidad_programada = nueva
+            cambios.append(f"{det.producto.nombre if det.producto else det.producto_id}: {anterior:g} → {nueva:g}")
+            if ot:
+                for it in db.query(models.OtItem).filter(models.OtItem.ot_id == ot.id, models.OtItem.producto_id == det.producto_id):
+                    it.cantidad = nueva
+
+    if cambios and ot:
+        detalle_log = "Cantidades de la OP editadas: " + "; ".join(cambios)
+        if data.motivo:
+            detalle_log += f". Motivo: {data.motivo}"
+        db.add(models.OtLog(ot_id=ot.id, accion="EDITADA", etapa_id=ot.etapa_actual_id,
+                            usuario_id=current_user.id, detalle=detalle_log))
+    db.commit()
+    db.refresh(orden)
+    return orden
+
 
 @router.get("/ordenes/{orden_id}/requisitos")
 def calcular_requisitos_orden(orden_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
@@ -140,7 +210,7 @@ def calcular_requisitos_orden(orden_id: int, db: Session = Depends(get_db), curr
     return list(consumos_totales.values())
 
 @router.post("/ordenes", response_model=schemas_prod.OrdenProduccionRead)
-def crear_orden(orden: schemas_prod.OrdenProduccionCreate, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
+def crear_orden(orden: schemas_prod.OrdenProduccionCreate, db: Session = Depends(get_db), current_user = Depends(require_roles(ROLES_ADMIN))):
     # Validar que el local pertenezca al tenant
     local = db.query(models.Local).filter(
         models.Local.id == orden.local_id,
@@ -195,7 +265,8 @@ def crear_orden(orden: schemas_prod.OrdenProduccionCreate, db: Session = Depends
         local_id=orden.local_id,
         fecha_programada=orden.fecha_programada,
         notas=orden.notas,
-        estado="PLANIFICADA"
+        estado="PLANIFICADA",
+        solicitado_por_id=current_user.id,
     )
     db.add(nuevo_orden)
     db.commit()
@@ -213,7 +284,7 @@ def crear_orden(orden: schemas_prod.OrdenProduccionCreate, db: Session = Depends
     return nuevo_orden
 
 @router.post("/ordenes/{orden_id}/finalizar")
-def finalizar_orden(orden_id: int, confirmacion: schemas_prod.ConfirmacionFinalizacion = None, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
+def finalizar_orden(orden_id: int, confirmacion: schemas_prod.ConfirmacionFinalizacion = None, db: Session = Depends(get_db), current_user = Depends(require_roles(ROLES_PRODUCCION))):
     orden = db.query(models.OrdenProduccion).join(models.Local).filter(
         models.OrdenProduccion.id == orden_id,
         models.Local.tenant_id == current_user.tenant_id
@@ -226,6 +297,7 @@ def finalizar_orden(orden_id: int, confirmacion: schemas_prod.ConfirmacionFinali
     
     # Mapeo de ajustes si existen
     ajustes_prod_map = {a.detalle_id: float(a.cantidad_producida_real) for a in confirmacion.detalles_ajustes} if confirmacion else {}
+    motivos_map = {a.detalle_id: (a.motivo_diferencia or "").strip() or None for a in confirmacion.detalles_ajustes} if confirmacion else {}
     ajustes_insumos_map = {a.producto_id: float(a.cantidad_consumida_real) for a in confirmacion.insumos_ajustes} if confirmacion else {}
 
     # Lógica de Validación de Stock (Pre-chequeo)
@@ -338,8 +410,13 @@ def finalizar_orden(orden_id: int, confirmacion: schemas_prod.ConfirmacionFinali
             )
             db.add(inventario_final)
 
+        # Costo promedio ponderado con el costo de fabricación, ANTES de sumar al stock (add-valorizacion-inventario)
+        if detalle.producto and detalle.producto.costo_fabricacion is not None:
+            registrar_entrada_costo(db, detalle.producto_id, cantidad_real, detalle.producto.costo_fabricacion)
+
         inventario_final.cantidad_stock = float(inventario_final.cantidad_stock) + cantidad_real
         detalle.cantidad_producida = cantidad_real  # Guardamos lo real
+        detalle.motivo_diferencia = motivos_map.get(detalle.id)
 
         # Movimiento: entrada de producto terminado por producción
         db.add(models.MovimientoInventario(
@@ -355,6 +432,7 @@ def finalizar_orden(orden_id: int, confirmacion: schemas_prod.ConfirmacionFinali
 
     orden.fecha_finalizacion = datetime.now()
     orden.estado = "FINALIZADA"
+    orden.producido_por_id = current_user.id
     if confirmacion and confirmacion.notas_finalizacion:
         if orden.notas:
              orden.notas += f" | Cierre: {confirmacion.notas_finalizacion}"

@@ -67,6 +67,7 @@ class ProductoResponse(ProductoBase):
     """Schema de respuesta de Producto."""
     id: int
     stock_actual: float = 0  # Campo calculado para visualización
+    costo_promedio: Optional[Decimal] = None  # Solo lectura (add-valorizacion-inventario)
     # Información de categoría
     categoria_nombre: Optional[str] = None
     categoria_puntos_fidelidad: Optional[int] = None

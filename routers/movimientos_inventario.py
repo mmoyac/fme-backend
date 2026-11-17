@@ -14,6 +14,7 @@ from schemas.movimiento_inventario import (
     MovimientoInventarioResponse
 )
 from routers.auth import get_current_active_user
+from utils.alcance_local import exigir_local, local_de_alcance
 
 router = APIRouter()
 
@@ -57,6 +58,8 @@ def transferir_inventario(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Local de origen o destino no encontrado"
         )
+    # Usuario de tienda: solo puede transferir desde su local (add-inventario-alcance-por-local)
+    exigir_local(current_user, transferencia.local_origen_id)
     
     # Obtener inventario origen
     inv_origen = db.query(Inventario).filter(
@@ -133,23 +136,34 @@ def listar_movimientos(
     producto_id: Optional[int] = None,
     local_id: Optional[int] = None,
     tipo_movimiento: Optional[str] = None,
+    q: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
 ):
     """
     Lista el historial de movimientos de inventario del tenant.
-    
+
     **Filtros opcionales:**
     - producto_id: Movimientos de un producto específico
+    - q: Búsqueda por nombre o SKU del producto (contiene, sin distinguir mayúsculas)
     - local_id: Movimientos que involucran un local (origen o destino)
     - tipo_movimiento: TRANSFERENCIA, AJUSTE, PEDIDO, etc.
     """
+    # Usuario de tienda: solo movimientos de su local, ignora otro filtro (add-inventario-alcance-por-local)
+    propio = local_de_alcance(current_user)
+    if propio is not None:
+        local_id = propio
+
     # Filtrar por tenant mediante join con Producto
     query = db.query(MovimientoInventario).join(Producto).filter(Producto.tenant_id == current_user.tenant_id)
     
     if producto_id:
         query = query.filter(MovimientoInventario.producto_id == producto_id)
-    
+
+    if q and q.strip():
+        patron = f"%{q.strip()}%"
+        query = query.filter(Producto.nombre.ilike(patron) | Producto.sku.ilike(patron))
+
     if local_id:
         query = query.filter(
             (MovimientoInventario.local_origen_id == local_id) |

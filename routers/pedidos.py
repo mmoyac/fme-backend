@@ -1,15 +1,17 @@
 """
 Router para endpoints de Pedidos.
 """
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, status, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
+from sqlalchemy.exc import IntegrityError
 import io
 from decimal import Decimal
 
 from database.database import get_db
+from services.entrega_pedido import registrar_entrega, modalidad_desde_request, datos_entrega
 from database.models import Pedido, ItemPedido, Cliente, Producto, Local, Inventario, MovimientoInventario, TurnoCaja, OperacionCaja, TipoOperacionCaja, EstadoTurnoCaja, TipoPedido, StockCajasProveedor, MedioPago, CobroPendiente, TipoDocumento
 from schemas.pedido import (
     PedidoCreateFrontend,
@@ -18,6 +20,7 @@ from schemas.pedido import (
     PedidoResponse,
     PedidoConRelaciones,
     PedidoUpdate,
+    RetiroPedidoRequest,
     EstadoPedido
 )
 
@@ -30,6 +33,7 @@ from services.tenant_service import obtener_siguiente_numero_pedido, get_tenant_
 from services.notas_credito_service import NotasCreditoService
 from services.webhook_service import trigger_pedido_confirmado
 import secrets as _secrets
+from utils.modulos import require_modulo
 
 router = APIRouter()
 
@@ -553,7 +557,7 @@ def registrar_venta_en_caja(pedido: Pedido, usuario_actual_id: int, db: Session)
     # por lo que no necesitamos actualizar campos en TurnoCaja
 
 
-@router.post("/", response_model=PedidoConfirmacion, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=PedidoConfirmacion, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_modulo("tienda_online"))])
 def crear_pedido_frontend(
     request: Request,
     pedido_data: PedidoCreateFrontend, 
@@ -737,6 +741,7 @@ def crear_pedido_frontend(
         puntos_usados=puntos_usar,
         descuento_puntos=descuento_puntos,
         canal_venta_id=2,  # LANDING — pedidos desde la tienda online
+        modalidad_entrega="DESPACHO",  # la tienda online solo despacha (add-modalidad-entrega-pedido)
         tipo_documento_tributario_id=tipo_doc_boleta.id if tipo_doc_boleta else None,
     )
     db.add(db_pedido)
@@ -784,6 +789,30 @@ def crear_pedido_frontend(
     )
 
 
+def _respuesta_pedido_existente(db: Session, tenant_id: int, client_uuid: str):
+    """Si ya existe un pedido con este client_uuid en el tenant, arma la misma
+    respuesta que entregó su creación original (marcada con duplicado=True)."""
+    existente = db.query(Pedido).filter(
+        Pedido.tenant_id == tenant_id,
+        Pedido.client_uuid == client_uuid,
+    ).first()
+    if not existente:
+        return None
+    codigo_estado = existente.estado_pedido.codigo if existente.estado_pedido else 'PENDIENTE'
+    return {
+        "pedido_id": existente.id,
+        "numero_pedido": existente.numero_pedido,
+        "monto_total": float(existente.monto_total or 0),
+        "estado": codigo_estado,
+        "mensaje": "Venta ya registrada previamente (reintento ignorado)",
+        "puntos_ganados": existente.puntos_ganados or 0,
+        "puntos_usados": existente.puntos_usados or 0,
+        "descuento_puntos": float(existente.descuento_puntos or 0),
+        "auto_confirmado": codigo_estado != 'PENDIENTE',
+        "duplicado": True,
+    }
+
+
 @router.post("/backoffice", response_model=dict, status_code=status.HTTP_201_CREATED)
 def crear_pedido_backoffice(
     pedido_data: PedidoCreateBackoffice,
@@ -812,6 +841,14 @@ def crear_pedido_backoffice(
             raise HTTPException(status_code=400, detail="Se requiere tenant_id en el body cuando se usa X-API-Key")
     else:
         tenant_id_efectivo = current_user.tenant_id
+
+    # 0. Idempotencia: si esta venta ya fue registrada (reintento tras corte de red),
+    #    devolver la existente sin repetir efectos (inventario, puntos, caja).
+    client_uuid = str(pedido_data.client_uuid) if pedido_data.client_uuid else None
+    if client_uuid:
+        respuesta_existente = _respuesta_pedido_existente(db, tenant_id_efectivo, client_uuid)
+        if respuesta_existente:
+            return JSONResponse(status_code=status.HTTP_200_OK, content=respuesta_existente)
 
     # 1. Validar que el cliente exista y pertenezca al tenant
     cliente = db.query(Cliente).filter(Cliente.id == pedido_data.cliente_id, Cliente.tenant_id == tenant_id_efectivo).first()
@@ -952,11 +989,25 @@ def crear_pedido_backoffice(
         puntos_usados=puntos_usar,
         descuento_puntos=descuento_puntos,
         canal_venta_id=getattr(pedido_data, 'canal_venta_id', None),
-        costo_delivery=getattr(pedido_data, 'costo_delivery', None)
+        costo_delivery=getattr(pedido_data, 'costo_delivery', None),
+        client_uuid=client_uuid,
+        fecha_venta_cliente=pedido_data.fecha_venta_cliente,
+        origen=pedido_data.origen,
+        numero_provisorio=pedido_data.numero_provisorio,
     )
     db.add(db_pedido)
-    db.flush()  # Para obtener el ID
-    
+    try:
+        db.flush()  # Para obtener el ID
+    except IntegrityError:
+        # Carrera: otro request con el mismo client_uuid se registró entre la
+        # verificación inicial y este flush. Devolver el pedido ganador.
+        db.rollback()
+        if client_uuid:
+            respuesta_existente = _respuesta_pedido_existente(db, tenant_id_efectivo, client_uuid)
+            if respuesta_existente:
+                return JSONResponse(status_code=status.HTTP_200_OK, content=respuesta_existente)
+        raise
+
     # 7. Crear items del pedido PRIMERO
     for item_info in items_a_crear:
         item = ItemPedido(
@@ -1102,6 +1153,11 @@ def crear_pedido_backoffice(
     
     # Si el vendedor marcó delivery, el pedido queda solo CONFIRMADO (no ENTREGADO)
     requiere_delivery = getattr(pedido_data, 'requiere_delivery', False)
+    # Modalidad de entrega persistida (add-modalidad-entrega-pedido)
+    db_pedido.modalidad_entrega = modalidad_desde_request(
+        getattr(pedido_data, 'modalidad_entrega', None), requiere_delivery
+    )
+    requiere_delivery = db_pedido.modalidad_entrega == 'DESPACHO'
     
     estado_final_id = estado_pendiente.id
     mensaje_final = f"Pedido creado exitosamente con medio de pago: {medio_pago.nombre}"
@@ -1133,7 +1189,10 @@ def crear_pedido_backoffice(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"No hay caja abierta en el local '{local.nombre}'. Debe abrir un turno de caja antes de crear pedidos."
             )
-        
+
+        # Registrar el turno con que se vendió (cuadratura de caja / ventas offline)
+        db_pedido.turno_caja_id = turno_abierto.id
+
         # Descontar inventario
         descontar_inventario(db_pedido, local.id, db)
         
@@ -1167,6 +1226,8 @@ def crear_pedido_backoffice(
         else:
             db_pedido.estado_id = estado_entregado.id
             estado_final_id = estado_entregado.id
+            # Venta en mesón: retiro entregado en el acto por el vendedor
+            registrar_entrega(db, db_pedido, current_user.id, cambiar_estado=False)
         
         # Marcar como pagado según medio de pago
         _es_diferido = medio_pago.permite_cheque or (medio_pago.plazo_dias or 0) > 0
@@ -1291,11 +1352,14 @@ def listar_pedidos(
     estado: str = None,
     fecha: str = None,
     tipo_pedido_id: int = None,
+    modalidad_entrega: Optional[str] = None,
+    entregado: Optional[bool] = None,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
 ):
     """
     Lista todos los pedidos del tenant con filtros opcionales.
+    - modalidad_entrega: RETIRO | DESPACHO; entregado: true/false (add-modalidad-entrega-pedido)
     
     **Uso:** Backoffice - Tabla de pedidos
     """
@@ -1333,6 +1397,18 @@ def listar_pedidos(
 
     if tipo_pedido_id:
         query = query.filter(Pedido.tipo_pedido_id == tipo_pedido_id)
+
+    if modalidad_entrega:
+        query = query.filter(Pedido.modalidad_entrega == modalidad_entrega.strip().upper())
+    if entregado is not None:
+        # Entregado = tiene fecha de entrega o está en estado ENTREGADO (pedidos antiguos sin fecha)
+        from sqlalchemy import or_ as _or, and_ as _and
+        from database.models import EstadoPedido as _EP
+        ids_entregado = [e.id for e in db.query(_EP).filter(_EP.codigo == 'ENTREGADO').all()]
+        cond = _or(Pedido.fecha_entrega.isnot(None), Pedido.estado_id.in_(ids_entregado))
+        ids_cancelado = [e.id for e in db.query(_EP).filter(_EP.codigo == 'CANCELADO').all()]
+        query = query.filter(cond if entregado else _and(
+            Pedido.fecha_entrega.is_(None), ~Pedido.estado_id.in_(ids_entregado + ids_cancelado)))
     
     pedidos = query.order_by(Pedido.fecha_pedido.desc()).offset(skip).limit(limit).all()
 
@@ -1367,6 +1443,7 @@ def listar_pedidos(
             'total': pedido.monto_total,
             'monto_total': pedido.monto_total,  # Alias para compatibilidad
             'costo_delivery': float(pedido.costo_delivery) if pedido.costo_delivery else None,
+            **datos_entrega(pedido),
             'estado': pedido.estado_pedido.codigo if pedido.estado_pedido else None,
             'pagado': pedido.es_pagado,
             'inventario_descontado': pedido.inventario_descontado,
@@ -1438,6 +1515,42 @@ def listar_pedidos(
     return result
 
 
+@router.post("/{pedido_id}/retiro", response_model=dict)
+def marcar_pedido_retirado(
+    pedido_id: int,
+    body: RetiroPedidoRequest,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    """
+    Registra que el cliente retiró el pedido en el local (change add-modalidad-entrega-pedido).
+    Solo pedidos RETIRO en estado CONFIRMADO o EN_PREPARACION. Pasa el pedido a ENTREGADO
+    guardando quién lo entregó, cuándo y (opcional) quién lo retiró.
+    """
+    pedido = db.query(Pedido).filter(
+        Pedido.id == pedido_id, Pedido.tenant_id == current_user.tenant_id
+    ).first()
+    if not pedido:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    if pedido.modalidad_entrega != "RETIRO":
+        raise HTTPException(status_code=400, detail="Este pedido es de despacho; se entrega desde la hoja de ruta")
+    estado = pedido.estado_pedido.codigo if pedido.estado_pedido else None
+    if estado not in ("CONFIRMADO", "EN_PREPARACION"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Solo se puede marcar como retirado un pedido confirmado o en preparación (estado actual: {estado})",
+        )
+    registrar_entrega(
+        db, pedido, current_user.id,
+        retirado_por_nombre=body.retirado_por_nombre,
+        retirado_por_rut=body.retirado_por_rut,
+        nota=body.nota_entrega,
+    )
+    db.commit()
+    db.refresh(pedido)
+    return {"id": pedido.id, "numero_pedido": pedido.numero_pedido, "estado": "ENTREGADO", **datos_entrega(pedido)}
+
+
 @router.get("/{pedido_id}", response_model=PedidoConRelaciones)
 def obtener_pedido(pedido_id: int, db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
     """
@@ -1466,6 +1579,7 @@ def obtener_pedido(pedido_id: int, db: Session = Depends(get_db), current_user =
         'numero_pedido': pedido.numero_pedido,
         'fecha_pedido': pedido.fecha_pedido,
         'total': pedido.monto_total,
+        **datos_entrega(pedido),
         'estado': pedido.estado_pedido.codigo if pedido.estado_pedido else None,
         'pagado': pedido.es_pagado,
         'inventario_descontado': pedido.inventario_descontado,
@@ -1784,6 +1898,9 @@ def actualizar_pedido(
             NotasCreditoService.crear_si_corresponde(pedido, db)
 
         pedido.estado_id = nuevo_estado_id
+        # Cambio manual a ENTREGADO: dejar quién y cuándo (add-modalidad-entrega-pedido)
+        if nuevo_estado_id == ID_ENTREGADO:
+            registrar_entrega(db, pedido, current_user.id, cambiar_estado=False)
 
         # Para CAJAS_VARIABLES: si el pedido ya estaba marcado como pagado ANTES de la
         # confirmación, generar la comisión ahora que el precio real ya fue fijado.

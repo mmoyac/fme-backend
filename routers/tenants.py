@@ -8,9 +8,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from database.database import get_db
-from database.models import Tenant, Producto, Cliente, Pedido, User, Local, ConfiguracionLanding, Role
+from database.models import Tenant, Producto, Cliente, Pedido, User, Local, ConfiguracionLanding, Role, MenuItem, TenantModulo
+from utils.modulos import validar_modulos
 from schemas.tenant import TenantCreate, TenantUpdate, TenantResponse
-from routers.auth import get_current_active_user
+from routers.auth import get_current_superadmin
 from utils.security import get_password_hash
 
 router = APIRouter()
@@ -22,16 +23,13 @@ def listar_tenants(
     limit: int = 100,
     activo: bool = None,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_superadmin)
 ):
     """
     Lista todos los tenants del sistema con estadísticas.
     
     **Solo accesible por super administradores.**
     """
-    # TODO: Validar que el usuario sea super admin (tenant_id = 1 y rol admin)
-    # Por ahora permitir cualquier usuario autenticado
-    
     query = db.query(Tenant)
     
     if activo is not None:
@@ -68,7 +66,7 @@ def listar_tenants(
 def obtener_tenant(
     tenant_id: int,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_superadmin)
 ):
     """
     Obtiene un tenant por ID con estadísticas.
@@ -103,7 +101,7 @@ def obtener_tenant(
 def crear_tenant(
     tenant_data: TenantCreate,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_superadmin)
 ):
     """
     Crea un nuevo tenant.
@@ -131,6 +129,11 @@ def crear_tenant(
                 detail=f"Ya existe un tenant con el dominio '{dominio_principal}'"
             )
     
+    modulos_solicitados = set(tenant_data.modulos)
+    error_modulos = validar_modulos(modulos_solicitados)
+    if error_modulos:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=error_modulos)
+
     # Crear tenant
     new_tenant = Tenant(
         codigo=tenant_data.codigo,
@@ -142,9 +145,12 @@ def crear_tenant(
     )
     
     db.add(new_tenant)
+    db.flush()
+    for modulo in sorted(modulos_solicitados):
+        db.add(TenantModulo(tenant_id=new_tenant.id, modulo=modulo, activado_por=current_user.email))
     db.commit()
     db.refresh(new_tenant)
-    
+
     # ========================================
     # CREAR LOCAL WEB (Virtual)
     # ========================================
@@ -224,9 +230,20 @@ def crear_tenant(
         tenant_id=new_tenant.id
     )
     db.add(role_admin)
+
+    # Rol produccion: finaliza OP informando cantidades reales (change add-rol-produccion-op)
+    role_produccion = Role(
+        nombre='produccion',
+        descripcion='Producción: informa cantidades reales de las órdenes de producción',
+        tenant_id=new_tenant.id
+    )
+    role_produccion.menus = db.query(MenuItem).filter(
+        (MenuItem.href == '/admin/produccion') | (MenuItem.href.like('/admin/produccion/%'))
+    ).all()
+    db.add(role_produccion)
     db.commit()
     db.refresh(role_admin)
-    
+
     # Crear usuario admin con contraseña temporal
     usuario_admin = User(
         tenant_id=new_tenant.id,
@@ -266,7 +283,7 @@ def actualizar_tenant(
     tenant_id: int,
     tenant_data: TenantUpdate,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_superadmin)
 ):
     """
     Actualiza un tenant existente.
@@ -345,7 +362,7 @@ def actualizar_tenant(
 def eliminar_tenant(
     tenant_id: int,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_superadmin)
 ):
     """
     Elimina un tenant (soft delete recomendado en producción).
@@ -379,7 +396,7 @@ def eliminar_tenant(
 def listar_usuarios_tenant(
     tenant_id: int,
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_superadmin)
 ):
     """
     Obtener lista de usuarios de un tenant específico.

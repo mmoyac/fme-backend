@@ -8,10 +8,11 @@ from services.payment_service import payment_service
 from services.webhook_service import trigger_pedido_confirmado
 from routers.auth import get_current_active_user
 from routers.pedidos import descontar_inventario
+from utils.modulos import require_modulo
 
 router = APIRouter()
 
-@router.post("/create_preference/{pedido_id}")
+@router.post("/create_preference/{pedido_id}", dependencies=[Depends(require_modulo("tienda_online"))])
 def create_payment_preference(
     pedido_id: int, 
     db: Session = Depends(get_db)
@@ -41,7 +42,7 @@ def create_payment_preference(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/process_payment")
+@router.post("/process_payment", dependencies=[Depends(require_modulo("tienda_online"))])
 async def process_payment(request: Request, db: Session = Depends(get_db)):
     """
     Procesa el pago enviado por el Payment Brick.

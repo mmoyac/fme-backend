@@ -15,9 +15,10 @@ import traceback
 logger = logging.getLogger("fme.cors")
 
 from routers.auth import get_current_active_user
+from utils.modulos import require_modulo
 
 # Importar routers
-from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, admin_utils, payments, test_payments, maestras, recetas, produccion, compras, cheques, puntos, caja, enrolamiento, gemini_vision, precios_proveedor, stock_cajas, alertas, tipos_pedido, despachos, configuracion, debug_menu, admin_configuracion_landing, tenants, etiquetas, paleta_colores, solicitudes_transferencia, locales_cliente, preventa, hojas_ruta, vehiculos, comisiones, canales_venta, cobranza, notas_credito, devoluciones, superadmin, oauth, notifications, ordenes_trabajo, cotizaciones
+from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, admin_utils, payments, test_payments, maestras, recetas, produccion, compras, cheques, puntos, caja, enrolamiento, gemini_vision, precios_proveedor, stock_cajas, alertas, tipos_pedido, despachos, configuracion, debug_menu, admin_configuracion_landing, tenants, etiquetas, paleta_colores, solicitudes_transferencia, locales_cliente, preventa, hojas_ruta, vehiculos, comisiones, canales_venta, cobranza, notas_credito, devoluciones, superadmin, oauth, notifications, ordenes_trabajo, cotizaciones, conteos_inventario, capacitacion
 
 
 app = FastAPI(
@@ -170,6 +171,8 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
         if is_origin_allowed(origin, allowed):
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Access-Control-Allow-Credentials"] = "true"
+            # Permite al frontend leer el nombre de archivo de las descargas (exportar a Excel)
+            response.headers["Access-Control-Expose-Headers"] = "Content-Disposition"
         return response
 
 
@@ -189,12 +192,13 @@ async def health_check():
     return {"status": "ok", "service": "fme-backend"}
 
 # Registrar routers
-app.include_router(inventario.router, prefix="/api/inventario", tags=["Inventario"], dependencies=[Depends(get_current_active_user)])
+app.include_router(inventario.router, prefix="/api/inventario", tags=["Inventario"], dependencies=[Depends(require_modulo("inventario")), Depends(get_current_active_user)])
 app.include_router(productos.router, prefix="/api/productos", tags=["Productos"])
 app.include_router(locales.router, prefix="/api/locales", tags=["Locales"], dependencies=[Depends(get_current_active_user)])
 app.include_router(precios.router, prefix="/api/precios", tags=["Precios"], dependencies=[Depends(get_current_active_user)])
-app.include_router(pedidos.router, prefix="/api/pedidos", tags=["Pedidos"])
-app.include_router(movimientos_inventario.router, prefix="/api/movimientos", tags=["Movimientos"], dependencies=[Depends(get_current_active_user)])
+app.include_router(pedidos.router, prefix="/api/pedidos", tags=["Pedidos"], dependencies=[Depends(require_modulo("ventas"))])
+app.include_router(movimientos_inventario.router, prefix="/api/movimientos", tags=["Movimientos"], dependencies=[Depends(require_modulo("inventario")), Depends(get_current_active_user)])
+app.include_router(conteos_inventario.router, prefix="/api/conteos-inventario", tags=["Conteo Inventario"], dependencies=[Depends(require_modulo("inventario")), Depends(get_current_active_user)])
 app.include_router(clientes.router, prefix="/api/clientes", tags=["Clientes"], dependencies=[Depends(get_current_active_user)])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"], dependencies=[Depends(get_current_active_user)])
 app.include_router(admin_users.router, prefix="/api/admin", tags=["Administración Usuarios"])
@@ -203,46 +207,47 @@ app.include_router(auth.router, prefix="/api/auth", tags=["Autenticación"])
 app.include_router(payments.router, prefix="/api/payments", tags=["Pagos"])
 app.include_router(test_payments.router, prefix="/api/test", tags=["⚠️ TEST ONLY - ELIMINAR EN PRODUCCIÓN"])
 app.include_router(maestras.router, prefix="/api/maestras", tags=["Tablas Maestras"], dependencies=[Depends(get_current_active_user)])
-app.include_router(recetas.router, prefix="/api/recetas", tags=["Recetas"], dependencies=[Depends(get_current_active_user)])
-app.include_router(produccion.router, prefix="/api", tags=["Producción"])
-app.include_router(compras.router, prefix="/api", tags=["Compras"], dependencies=[Depends(get_current_active_user)])
-app.include_router(cheques.router, prefix="/api/cheques", tags=["Cheques"], dependencies=[Depends(get_current_active_user)])
-app.include_router(cobranza.router, prefix="/api/cobranza", tags=["Cobranza"], dependencies=[Depends(get_current_active_user)])
-app.include_router(notas_credito.router, prefix="/api/notas-credito", tags=["Notas de Crédito"], dependencies=[Depends(get_current_active_user)])
-app.include_router(devoluciones.router, prefix="/api/devoluciones", tags=["Devoluciones"], dependencies=[Depends(get_current_active_user)])
-app.include_router(puntos.router, tags=["Puntos"])
-app.include_router(caja.router, prefix="/api/caja", tags=["Caja"], dependencies=[Depends(get_current_active_user)])
+app.include_router(recetas.router, prefix="/api/recetas", tags=["Recetas"], dependencies=[Depends(require_modulo("produccion")), Depends(get_current_active_user)])
+app.include_router(produccion.router, prefix="/api", tags=["Producción"], dependencies=[Depends(require_modulo("produccion"))])
+app.include_router(compras.router, prefix="/api", tags=["Compras"], dependencies=[Depends(require_modulo("compras")), Depends(get_current_active_user)])
+app.include_router(cheques.router, prefix="/api/cheques", tags=["Cheques"], dependencies=[Depends(require_modulo("cobranza")), Depends(get_current_active_user)])
+app.include_router(cobranza.router, prefix="/api/cobranza", tags=["Cobranza"], dependencies=[Depends(require_modulo("cobranza")), Depends(get_current_active_user)])
+app.include_router(notas_credito.router, prefix="/api/notas-credito", tags=["Notas de Crédito"], dependencies=[Depends(require_modulo("cobranza")), Depends(get_current_active_user)])
+app.include_router(devoluciones.router, prefix="/api/devoluciones", tags=["Devoluciones"], dependencies=[Depends(require_modulo("cobranza")), Depends(get_current_active_user)])
+app.include_router(puntos.router, tags=["Puntos"], dependencies=[Depends(require_modulo("fidelizacion"))])
+app.include_router(caja.router, prefix="/api/caja", tags=["Caja"], dependencies=[Depends(require_modulo("ventas")), Depends(get_current_active_user)])
 app.include_router(tipos_pedido.router, prefix="/api/tipos-pedido", tags=["Tipos de Pedido"])
-app.include_router(ordenes_trabajo.router, prefix="/api/ordenes-trabajo", tags=["Órdenes de Trabajo"])
-app.include_router(cotizaciones.router, prefix="/api/cotizaciones", tags=["Cotizaciones"])
-app.include_router(enrolamiento.router, prefix="/api/enrolamiento", tags=["Enrolamiento WMS"], dependencies=[Depends(get_current_active_user)])
-app.include_router(preventa.router, prefix="/api/preventa", tags=["Pre-Venta Cajas"], dependencies=[Depends(get_current_active_user)])
-app.include_router(preventa.router_pdf, prefix="/api/preventa", tags=["Pre-Venta Cajas PDF"])
-app.include_router(gemini_vision.router, tags=["Gemini Vision"], dependencies=[Depends(get_current_active_user)])
-app.include_router(precios_proveedor.router, prefix="/api/precios-proveedor", tags=["Precios Proveedor"], dependencies=[Depends(get_current_active_user)])
-app.include_router(stock_cajas.router, prefix="/api/stock-cajas", tags=["Stock Cajas"], dependencies=[Depends(get_current_active_user)])
+app.include_router(ordenes_trabajo.router, prefix="/api/ordenes-trabajo", tags=["Órdenes de Trabajo"], dependencies=[Depends(require_modulo("produccion"))])
+app.include_router(cotizaciones.router, prefix="/api/cotizaciones", tags=["Cotizaciones"], dependencies=[Depends(require_modulo("cotizaciones"))])
+app.include_router(enrolamiento.router, prefix="/api/enrolamiento", tags=["Enrolamiento WMS"], dependencies=[Depends(require_modulo("compras")), Depends(get_current_active_user)])
+app.include_router(preventa.router, prefix="/api/preventa", tags=["Pre-Venta Cajas"], dependencies=[Depends(require_modulo("preventa")), Depends(get_current_active_user)])
+app.include_router(preventa.router_pdf, prefix="/api/preventa", tags=["Pre-Venta Cajas PDF"], dependencies=[Depends(require_modulo("preventa"))])
+app.include_router(gemini_vision.router, tags=["Gemini Vision"], dependencies=[Depends(require_modulo("compras")), Depends(get_current_active_user)])
+app.include_router(precios_proveedor.router, prefix="/api/precios-proveedor", tags=["Precios Proveedor"], dependencies=[Depends(require_modulo("compras")), Depends(get_current_active_user)])
+app.include_router(stock_cajas.router, prefix="/api/stock-cajas", tags=["Stock Cajas"], dependencies=[Depends(require_modulo("preventa")), Depends(get_current_active_user)])
+app.include_router(capacitacion.router, prefix="/api/capacitacion", tags=["Capacitación"], dependencies=[Depends(get_current_active_user)])
 app.include_router(alertas.router, prefix="/api/alertas", tags=["Alertas"], dependencies=[Depends(get_current_active_user)])
-app.include_router(despachos.router, prefix="/api/despachos", tags=["Despachos"], dependencies=[Depends(get_current_active_user)])
+app.include_router(despachos.router, prefix="/api/despachos", tags=["Despachos"], dependencies=[Depends(require_modulo("despacho")), Depends(get_current_active_user)])
 app.include_router(configuracion.router, prefix="/api/config", tags=["Configuración"])
-app.include_router(admin_configuracion_landing.router, prefix="/api/admin/configuracion-landing", tags=["Admin - Configuración Landing"], dependencies=[Depends(get_current_active_user)])
+app.include_router(admin_configuracion_landing.router, prefix="/api/admin/configuracion-landing", tags=["Admin - Configuración Landing"], dependencies=[Depends(require_modulo("tienda_online")), Depends(get_current_active_user)])
 app.include_router(tenants.router, prefix="/api/tenants", tags=["Tenants (Multi-tenant SaaS)"])
 app.include_router(superadmin.router, prefix="/api/superadmin", tags=["Super Admin (Plataforma)"])
 app.include_router(oauth.router, prefix="/api/auth", tags=["OAuth"])
-app.include_router(etiquetas.router, tags=["Etiquetas"], dependencies=[Depends(get_current_active_user)])
-app.include_router(paleta_colores.router, prefix="/api/paleta-colores", tags=["Paletas de Colores"], dependencies=[Depends(get_current_active_user)])
+app.include_router(etiquetas.router, tags=["Etiquetas"], dependencies=[Depends(require_modulo("etiquetado")), Depends(get_current_active_user)])
+app.include_router(paleta_colores.router, prefix="/api/paleta-colores", tags=["Paletas de Colores"], dependencies=[Depends(require_modulo("tienda_online")), Depends(get_current_active_user)])
 app.include_router(debug_menu.router, prefix="/api/debug", tags=["Debug Menu"])
 
 # Registrar router de locales_cliente (locales propios de cliente)
 app.include_router(locales_cliente.router)
 
 # Registrar router de solicitudes de transferencia
-app.include_router(solicitudes_transferencia.router)
+app.include_router(solicitudes_transferencia.router, dependencies=[Depends(require_modulo("inventario")), Depends(get_current_active_user)])
 app.include_router(notifications.router)
-app.include_router(comisiones.router, prefix="/api/comisiones", tags=["Comisiones Vendedores"], dependencies=[Depends(get_current_active_user)])
+app.include_router(comisiones.router, prefix="/api/comisiones", tags=["Comisiones Vendedores"], dependencies=[Depends(require_modulo("comisiones")), Depends(get_current_active_user)])
 
 # Registrar router de hojas de ruta
-app.include_router(hojas_ruta.router)
-app.include_router(vehiculos.router, dependencies=[Depends(get_current_active_user)])
+app.include_router(hojas_ruta.router, dependencies=[Depends(require_modulo("despacho"))])
+app.include_router(vehiculos.router, dependencies=[Depends(require_modulo("despacho")), Depends(get_current_active_user)])
 app.include_router(canales_venta.router, prefix="/api/canales-venta", tags=["Canales de Venta"])
 
 @app.get("/")

@@ -1,12 +1,14 @@
 """
 Router para endpoints de Precios.
 """
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import date
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from database.database import get_db
-from database.models import Precio, Producto, Local
+from database.models import Precio, Producto, Local, CategoriaProducto, UnidadMedida
+from utils.excel import generar_xlsx, FORMATO_CLP
 from schemas.precio import PrecioResponse, PrecioCreate, PrecioUpdate
 from routers.auth import get_current_active_user
 
@@ -37,6 +39,72 @@ def listar_precios(
     
     precios = query.offset(skip).limit(limit).all()
     return precios
+
+
+@router.get("/excel")
+def exportar_precios_excel(
+    q: Optional[str] = None,
+    local_id: Optional[int] = None,
+    categoria_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    """
+    Exporta a Excel los precios del tenant con los mismos filtros de la pantalla de Precios
+    (búsqueda por nombre/SKU, local y categoría). Los productos sin precio en el filtro
+    aparecen igual, marcados "Sin precio". Pedido del cliente: reunión 16-11-26, punto 1.6.1.
+    """
+    productos_q = (
+        db.query(Producto, CategoriaProducto.nombre)
+        .outerjoin(CategoriaProducto, CategoriaProducto.id == Producto.categoria_id)
+        .filter(Producto.tenant_id == current_user.tenant_id)
+    )
+    if q and q.strip():
+        patron = f"%{q.strip()}%"
+        productos_q = productos_q.filter(Producto.nombre.ilike(patron) | Producto.sku.ilike(patron))
+    if categoria_id:
+        productos_q = productos_q.filter(Producto.categoria_id == categoria_id)
+    productos = productos_q.order_by(Producto.nombre).all()
+
+    precios_q = (
+        db.query(Precio, Local.nombre, UnidadMedida.nombre)
+        .join(Local, Local.id == Precio.local_id)
+        .join(UnidadMedida, UnidadMedida.id == Precio.unidad_medida_id)
+        .filter(Precio.producto_id.in_([p.id for p, _ in productos] or [0]),
+                Local.tenant_id == current_user.tenant_id)
+    )
+    if local_id:
+        precios_q = precios_q.filter(Precio.local_id == local_id)
+    por_producto = {}
+    for precio, local_nombre, unidad_nombre in precios_q.order_by(Local.nombre, UnidadMedida.nombre).all():
+        por_producto.setdefault(precio.producto_id, []).append((local_nombre, unidad_nombre, precio.monto_precio))
+
+    filas = []
+    for p, categoria in productos:
+        incluye_iva = bool(p.precio_incluye_iva)
+        lista = por_producto.get(p.id)
+        if not lista:
+            filas.append([p.sku, p.nombre, categoria, None, None, None, None, None, "Sin precio"])
+            continue
+        for local_nombre, unidad_nombre, monto in lista:
+            monto = float(monto)
+            neto = round(monto / 1.19, 2) if incluye_iva else monto
+            filas.append([p.sku, p.nombre, categoria, local_nombre, unidad_nombre, monto,
+                          "Sí" if incluye_iva else "No", neto, None if p.activo else "Producto inactivo"])
+
+    contenido = generar_xlsx(
+        "Precios",
+        ["SKU", "Producto", "Categoría", "Local", "Unidad", "Precio", "Incluye IVA", "Precio neto", "Observación"],
+        filas,
+        anchos=[14, 38, 20, 18, 16, 12, 11, 13, 20],
+        formatos={5: FORMATO_CLP, 7: FORMATO_CLP},
+    )
+    nombre = f"precios_{date.today().isoformat()}.xlsx"
+    return Response(
+        content=contenido,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
+    )
 
 
 @router.post("/", response_model=PrecioResponse, status_code=status.HTTP_201_CREATED)

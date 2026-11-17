@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conteo de inventario</title>
+<!-- Lección del Centro de Capacitación. Basada en _plantilla.html: al editarla, actualizar "Última revisión". -->
+<style>
+  :root {
+    /* Paleta del backoffice (tailwind: slate-900/800/700, primary, secondary, accent) */
+    --primario: #5ec8f2; --primario-osc: #2b9ccc; --secundario: #45a29a; --acento: #daa520;
+    --texto: #f1f5f9; --suave: #9ca3af; --borde: #334155; --borde-fuerte: #475569;
+    --fondo: #0f172a; --tarjeta: #1e293b; --campo: #334155; --cabecera-tabla: #273449;
+    --ok: #4ade80; --ok-fondo: rgba(34,197,94,.12); --ok-borde: rgba(34,197,94,.45);
+    --error: #f87171; --error-fondo: rgba(239,68,68,.12); --error-borde: rgba(239,68,68,.5);
+    --aviso: #fbbf24; --aviso-fondo: rgba(245,158,11,.12); --aviso-borde: rgba(245,158,11,.45);
+    --info-fondo: rgba(94,200,242,.10); --info-borde: rgba(94,200,242,.4);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--texto);
+         background: var(--fondo); line-height: 1.55; font-size: 15px; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 40px; }
+  header.leccion { background: linear-gradient(135deg, #1e3a5f, #1f4f4b); color: #fff; border-bottom: 3px solid var(--primario);
+         padding: 22px 16px; }
+  header.leccion > div { max-width: 860px; margin: 0 auto; }
+  header.leccion .modulo { text-transform: uppercase; font-size: 12px; letter-spacing: .08em; color: var(--primario); font-weight: 700; }
+  header.leccion h1 { margin: 4px 0 6px; font-size: 26px; line-height: 1.2; }
+  header.leccion .meta { font-size: 13px; opacity: .92; }
+  h2 { font-size: 20px; margin: 32px 0 10px; }
+  h3 { font-size: 16px; margin: 20px 0 8px; }
+  .tarjeta { background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 12px; padding: 16px 18px; margin: 14px 0; }
+  .objetivos { background: var(--info-fondo); border-color: var(--info-borde); }
+  .objetivos ul { margin: 6px 0 0; padding-left: 20px; }
+  .tip, .advertencia { border-radius: 10px; padding: 12px 14px 12px 44px; margin: 14px 0; position: relative; }
+  .tip { background: var(--ok-fondo); border: 1px solid var(--ok-borde); }
+  .advertencia { background: var(--aviso-fondo); border: 1px solid var(--aviso-borde); }
+  .tip::before, .advertencia::before { position: absolute; left: 14px; top: 11px; font-size: 18px; }
+  .tip::before { content: "💡"; }
+  .advertencia::before { content: "⚠️"; }
+  .ui-boton { display: inline-block; background: var(--primario); color: #0f172a; border-radius: 6px; padding: 1px 8px;
+              font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .ui-boton.sec { background: var(--campo); color: var(--texto); border: 1px solid var(--borde-fuerte); }
+  .ui-tab { display: inline-block; border-bottom: 2px solid var(--primario); padding: 0 4px; font-weight: 600; white-space: nowrap; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--tarjeta); }
+  th, td { border: 1px solid var(--borde); padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: var(--cabecera-tabla); }
+  .tabla-scroll { overflow-x: auto; }
+  .chip { display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: 12px; font-weight: 600; }
+  button { font: inherit; cursor: pointer; }
+
+  /* Paso a paso */
+  .pasos .paso { display: none; }
+  .pasos .paso.activo { display: block; }
+  .pasos .paso h3 { margin-top: 0; }
+  .pasos-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  .pasos-barra { height: 6px; background: var(--borde); border-radius: 3px; overflow: hidden; margin-bottom: 14px; }
+  .pasos-barra > i { display: block; height: 100%; background: var(--primario); transition: width .25s; }
+  .btn { border: 1px solid var(--borde-fuerte); background: var(--campo); color: var(--texto); border-radius: 8px; padding: 7px 14px; }
+  .btn.prim { background: var(--primario); border-color: var(--primario); color: #0f172a; font-weight: 600; }
+  .btn:disabled { opacity: .45; cursor: default; }
+
+  /* Quiz */
+  .quiz .pregunta { font-weight: 600; margin: 0 0 10px; }
+  .quiz .opciones { display: grid; gap: 8px; }
+  .quiz .opciones button { text-align: left; border: 1px solid var(--borde-fuerte); background: var(--campo); color: var(--texto); border-radius: 8px; padding: 9px 12px; }
+  .quiz .opciones button:hover:not(:disabled) { border-color: var(--primario); }
+  .quiz .opciones button.correcta { background: var(--ok-fondo); border-color: var(--ok); }
+  .quiz .opciones button:disabled { cursor: default; }
+  .quiz .opciones button.incorrecta { background: var(--error-fondo); border-color: var(--error); }
+  .quiz .feedback { margin: 10px 0 0; font-size: 14px; }
+  .quiz .feedback.ok { color: var(--ok); }
+  .quiz .feedback.mal { color: var(--error); }
+  .quiz-resumen { font-weight: 600; text-align: center; padding: 14px; }
+  @media (max-width: 520px) { header.leccion h1 { font-size: 22px; } }
+.tipos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.tipo { background: var(--campo); border-radius: 10px; padding: 12px 14px; }
+.tipo strong { display: block; font-size: 16px; margin-bottom: 4px; }
+.conteo-demo td input { width: 80px; background: var(--fondo); color: var(--texto); border: 1px solid var(--borde-fuerte); border-radius: 6px; padding: 4px 6px; font: inherit; }
+.neg { color: var(--error); font-weight: 600; } .pos { color: var(--ok); font-weight: 600; }
+.barra { height: 8px; background: var(--borde); border-radius: 4px; overflow: hidden; margin: 6px 0 12px; }
+.barra > i { display: block; height: 100%; background: var(--primario); width: 0; transition: width .25s; }
+.final-res { background: var(--info-fondo); border: 1px solid var(--info-borde); border-radius: 10px; padding: 10px 14px; margin-top: 12px; font-size: 14px; }
+.chip.amar { background: rgba(234,179,8,.18); color: #facc15; } .chip.verde { background: rgba(34,197,94,.18); color: #4ade80; } .chip.gris { background: rgba(148,163,184,.2); color: #cbd5e1; }
+@media (max-width: 520px) { .tipos { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header class="leccion"><div>
+  <div class="modulo">Inventario · Lección 5</div>
+  <h1>Conteo de inventario</h1>
+  <div class="meta">⏱ 9 minutos · Última revisión: 2026-11-17</div>
+</div></header>
+
+<main>
+<section class="tarjeta objetivos">
+  <strong>Al terminar vas a saber:</strong>
+  <ul>
+    <li>Iniciar un conteo completo o parcial de un local.</li>
+    <li>Registrar lo contado y leer las diferencias con el sistema.</li>
+    <li>Finalizar el conteo para que el sistema ajuste el stock, o cancelarlo.</li>
+  </ul>
+</section>
+
+<h2>¿Para qué sirve?</h2>
+<p>Con el uso diario, el stock del sistema y lo que realmente hay en la bodega se van separando (errores, mermas no registradas, ventas mal ingresadas). El conteo sirve para <strong>contar lo que hay físicamente</strong> y que el sistema <strong>corrija automáticamente las diferencias</strong>, dejando registro de cada ajuste.</p>
+
+<h2>Completo o parcial</h2>
+<div class="tipos">
+  <div class="tipo"><strong>Completo</strong>Todos los productos del local. Se cargan solos al iniciar: los productos activos que tienen stock registrado en ese local. Ideal para el conteo mensual.</div>
+  <div class="tipo"><strong>Parcial</strong>Eliges productos o categorías. Empieza vacío y vas agregando lo que quieres contar. Ideal para revisar algo puntual, por ejemplo "solo lácteos".</div>
+</div>
+
+<h2>Paso a paso</h2>
+<div class="tarjeta pasos">
+  <div class="paso"><h3>1. Nuevo conteo</h3><p>En <strong>Inventario</strong>, pestaña <span class="ui-tab">Conteo</span>, presiona <span class="ui-boton">+ Nuevo conteo</span>.</p></div>
+  <div class="paso"><h3>2. Local, tipo y observación</h3><p>Elige el <strong>Local</strong> (si tu usuario pertenece a un local, viene fijo), el <strong>Tipo</strong> (Completo o Parcial) y, si quieres, una observación como <em>"conteo mensual noviembre"</em>. Presiona <span class="ui-boton">Iniciar conteo</span>.</p></div>
+  <div class="paso"><h3>3. (Parcial) Agrega productos</h3><p>En un conteo parcial usa <strong>"Agregar producto"</strong> (busca por SKU o nombre) o <strong>"o toda una categoría"</strong> y presiona <span class="ui-boton sec">Agregar</span>. Los productos que ya están no se duplican.</p></div>
+  <div class="paso"><h3>4. Cuenta</h3><p>Para cada producto escribe lo que contaste en la columna <strong>Contado</strong>. Se guarda solo al salir del campo o al presionar Enter, y aparece ✓. Puedes usar decimales (por ejemplo 12,5 kg).</p></div>
+  <div class="paso"><h3>5. Revisa diferencias</h3><p>La columna <strong>Diferencia</strong> es <em>contado − sistema</em>: en <span class="neg">rojo</span> si falta, en <span class="pos">verde</span> si sobra. Arriba ves <em>"Contados: X de Y"</em> y <em>"Con diferencia: N"</em>. Usa <strong>"Solo pendientes"</strong> para ver lo que te falta contar.</p></div>
+  <div class="paso"><h3>6. Finaliza</h3><p>Presiona <span class="ui-boton">Finalizar y ajustar stock</span>. Un resumen te dice cuántos productos se ajustarán y cuántos quedaron sin contar. Confirma con <span class="ui-boton">Finalizar y ajustar</span>. Esta acción no se puede deshacer.</p></div>
+</div>
+
+<div class="tip">¿Prefieres contar en papel? Presiona <span class="ui-boton" style="background:#059669;color:#fff">⬇ Exportar Excel</span> con el conteo en proceso: obtienes una planilla con todos los productos, su stock del sistema y una columna para anotar. Después lo traspasas a la pantalla.</div>
+
+<h2>Practica: un conteo de 4 productos</h2>
+<p>Escribe lo que "contaste" y luego finaliza. Fíjate en qué pasa con los que no cuentas.</p>
+<div class="tarjeta">
+  <div id="c-prog"></div>
+  <div class="barra"><i id="c-barra"></i></div>
+  <div class="tabla-scroll"><table class="conteo-demo">
+    <thead><tr><th>Producto</th><th>Sistema</th><th>Contado</th><th>Diferencia</th></tr></thead>
+    <tbody id="c-filas"></tbody>
+  </table></div>
+  <div style="text-align:right;margin-top:12px"><button class="btn" type="button" id="c-reset">Reiniciar</button> <button class="btn prim" type="button" id="c-fin" disabled>Finalizar y ajustar stock</button></div>
+  <div id="c-res"></div>
+</div>
+
+<h2>Reglas importantes</h2>
+<ul>
+  <li><strong>Un conteo en proceso por local.</strong> Si ya hay uno abierto, el sistema te avisa: <em>"El local ya tiene un conteo en proceso (#N)"</em>. Termínalo o cancélalo antes de empezar otro.</li>
+  <li><strong>Lo no contado no se toca.</strong> Al finalizar, solo se ajustan los productos con cantidad contada.</li>
+  <li><strong>El stock nunca queda negativo.</strong> Si el ajuste calculado lo dejara bajo cero, se ajusta hasta 0 y la línea muestra <em>"aplicado N"</em>.</li>
+  <li><strong>Cada ajuste queda en el Historial</strong> como <em>Ajuste por conteo</em>, con un enlace <em>"Ver conteo #N"</em>.</li>
+  <li><strong>Cancelar</strong> un conteo no modifica ningún stock. Un conteo finalizado o cancelado no se puede reabrir.</li>
+</ul>
+<p>Los estados son: <span class="chip amar">En proceso</span> <span class="chip verde">Finalizado</span> <span class="chip gris">Cancelado</span>.</p>
+
+<div class="advertencia">Mientras el conteo está abierto el local sigue vendiendo. La columna <em>Sistema</em> se "congela" en el momento en que guardas lo contado de cada producto, así que cuenta y registra producto por producto, sin dejar pasar mucho tiempo entre contar y escribir.</div>
+
+<h2>Pon a prueba lo aprendido</h2>
+<div class="tarjeta quiz">
+  <p class="pregunta">1. El sistema dice 50 y contaste 47. ¿Qué pasa al finalizar?</p>
+  <div class="opciones">
+    <button data-explica="La diferencia es contado − sistema = 47 − 50 = −3, no +3.">El stock sube a 53</button>
+    <button data-ok data-explica="Diferencia −3: el stock queda en 47 (lo contado) y se registra un Ajuste por conteo.">El stock queda en 47 y queda un Ajuste por conteo en el Historial</button>
+    <button data-explica="Finalizar sí ajusta el stock de los productos contados con diferencia.">No cambia nada hasta que un administrador lo apruebe</button>
+  </div>
+</div>
+<div class="tarjeta quiz">
+  <p class="pregunta">2. En un conteo completo de 120 productos alcanzaste a contar 100 y finalizas. ¿Qué pasa con los otros 20?</p>
+  <div class="opciones">
+    <button data-explica="Los no contados no se tocan; no se asume que hay 0.">Quedan en 0</button>
+    <button data-ok data-explica="Solo se ajustan los productos con cantidad contada. Los 20 restantes conservan su stock.">Conservan el stock que tenían</button>
+    <button data-explica="Sí se puede finalizar con productos sin contar; el resumen te avisa cuántos son.">No te deja finalizar</button>
+  </div>
+</div>
+<div class="tarjeta quiz">
+  <p class="pregunta">3. Iniciaste un conteo por error en el local equivocado. ¿Qué haces?</p>
+  <div class="opciones">
+    <button data-ok data-explica="Cancelar deja el conteo como Cancelado sin modificar ningún stock.">Cancelar conteo</button>
+    <button data-explica="Finalizar ajustaría el stock con lo contado. No es lo que quieres.">Finalizar sin contar nada</button>
+    <button data-explica="Mientras siga abierto, nadie puede iniciar otro conteo en ese local.">Dejarlo abierto, no molesta</button>
+  </div>
+</div>
+<div class="tarjeta quiz-resumen"></div>
+</main>
+
+<script>
+(function () {
+  // --- Paso a paso ---
+  document.querySelectorAll(".pasos").forEach(function (cont) {
+    var pasos = cont.querySelectorAll(".paso");
+    if (!pasos.length) return;
+    var i = 0;
+    var barra = document.createElement("div"); barra.className = "pasos-barra"; barra.innerHTML = "<i></i>";
+    cont.insertBefore(barra, cont.firstChild);
+    var nav = document.createElement("div"); nav.className = "pasos-nav";
+    nav.innerHTML = '<button class="btn" type="button">← Anterior</button><span></span><button class="btn prim" type="button">Siguiente →</button>';
+    cont.appendChild(nav);
+    var ant = nav.children[0], txt = nav.children[1], sig = nav.children[2];
+    function mostrar() {
+      pasos.forEach(function (p, k) { p.classList.toggle("activo", k === i); });
+      txt.textContent = "Paso " + (i + 1) + " de " + pasos.length;
+      barra.firstChild.style.width = ((i + 1) / pasos.length * 100) + "%";
+      ant.disabled = i === 0; sig.disabled = i === pasos.length - 1;
+      avisarAlto();
+    }
+    ant.onclick = function () { if (i > 0) { i--; mostrar(); } };
+    sig.onclick = function () { if (i < pasos.length - 1) { i++; mostrar(); } };
+    mostrar();
+  });
+
+  // --- Quiz ---
+  var quizzes = document.querySelectorAll(".quiz");
+  function actualizarResumen() {
+    var resp = 0, ok = 0;
+    quizzes.forEach(function (q) { if (q.dataset.respondida) { resp++; if (q.dataset.respondida === "ok") ok++; } });
+    document.querySelectorAll(".quiz-resumen").forEach(function (r) {
+      r.textContent = resp < quizzes.length
+        ? "Respondiste " + resp + " de " + quizzes.length + " preguntas."
+        : (ok === quizzes.length ? "🎉 ¡" + ok + " de " + quizzes.length + " correctas! Dominas esta lección."
+                                 : ok + " de " + quizzes.length + " correctas. Revisa las explicaciones y vuelve a intentarlo cuando quieras.");
+    });
+  }
+  quizzes.forEach(function (q) {
+    var botones = q.querySelectorAll(".opciones button");
+    var fb = q.querySelector(".feedback");
+    if (!fb) { fb = document.createElement("p"); fb.className = "feedback"; q.appendChild(fb); }
+    botones.forEach(function (b) {
+      b.type = "button";
+      b.onclick = function () {
+        if (q.dataset.respondida) return;
+        var ok = b.hasAttribute("data-ok");
+        q.dataset.respondida = ok ? "ok" : "mal";
+        botones.forEach(function (x) { x.disabled = true; if (x.hasAttribute("data-ok")) x.classList.add("correcta"); });
+        if (!ok) b.classList.add("incorrecta");
+        fb.className = "feedback " + (ok ? "ok" : "mal");
+        fb.textContent = (ok ? "✔ Correcto. " : "✘ No es correcto. ") + (b.dataset.explica || "");
+        var reintentar = document.createElement("button");
+        reintentar.className = "btn"; reintentar.type = "button"; reintentar.textContent = "Intentar de nuevo";
+        reintentar.style.marginTop = "8px";
+        reintentar.onclick = function () {
+          delete q.dataset.respondida; fb.textContent = ""; fb.className = "feedback"; reintentar.remove();
+          botones.forEach(function (x) { x.disabled = false; x.classList.remove("correcta", "incorrecta"); });
+          actualizarResumen(); avisarAlto();
+        };
+        if (!ok) q.appendChild(reintentar);
+        actualizarResumen(); avisarAlto();
+      };
+    });
+  });
+  actualizarResumen();
+
+  // --- Alto del iframe: el visor del backoffice ajusta su altura con este mensaje ---
+  function avisarAlto() {
+    // Alto del contenido (no del viewport), para que el iframe también pueda achicarse
+    var alto = Math.ceil(document.body.getBoundingClientRect().height);
+    try { parent.postMessage({ tipo: "capacitacion:alto", alto: alto }, "*"); } catch (e) {}
+  }
+  window.avisarAlto = avisarAlto;
+  window.addEventListener("load", avisarAlto);
+  if (window.ResizeObserver) new ResizeObserver(avisarAlto).observe(document.body);
+})();
+</script>
+<script>
+(function () {
+  var base = [["Harina sin polvos (kg)", 50], ["Azúcar (kg)", 20], ["Levadura (un)", 3], ["Mantequilla (kg)", 12]];
+  var filas = document.getElementById("c-filas"), fin = document.getElementById("c-fin"), res = document.getElementById("c-res");
+  var datos, cerrado;
+  function fmt(n) { return (n > 0 ? "+" : "") + String(n).replace(".", ","); }
+  function render() {
+    filas.innerHTML = "";
+    var contados = 0, conDif = 0;
+    datos.forEach(function (d, i) {
+      var tr = document.createElement("tr");
+      var dif = d.contado === null ? null : Math.round((d.contado - d.sis) * 1000) / 1000;
+      if (d.contado !== null) { contados++; if (dif !== 0) conDif++; }
+      var celdaCont = cerrado ? (d.contado === null ? "No contado" : String(d.contado).replace(".", ",")) :
+        '<input type="number" step="0.001" min="0" data-i="' + i + '" value="' + (d.contado === null ? "" : d.contado) + '">' + (d.contado !== null ? " ✓" : "");
+      var celdaDif = dif === null ? "-" : '<span class="' + (dif < 0 ? "neg" : dif > 0 ? "pos" : "") + '">' + fmt(dif) + "</span>" +
+        (cerrado && d.aplicado !== undefined && d.aplicado !== dif ? ' <span class="chip amar">aplicado ' + fmt(d.aplicado) + "</span>" : "");
+      tr.innerHTML = "<td>" + d.nom + "</td><td>" + d.sis + "</td><td>" + celdaCont + "</td><td>" + celdaDif + "</td>";
+      filas.appendChild(tr);
+    });
+    document.getElementById("c-prog").textContent = "Contados: " + contados + " de " + datos.length + " · Con diferencia: " + conDif;
+    document.getElementById("c-barra").style.width = (contados / datos.length * 100) + "%";
+    fin.disabled = cerrado || contados === 0;
+    filas.querySelectorAll("input").forEach(function (inp) {
+      inp.onchange = function () {
+        var v = inp.value === "" ? null : parseFloat(inp.value);
+        if (v !== null && (isNaN(v) || v < 0)) { inp.value = ""; v = null; }
+        datos[+inp.dataset.i].contado = v; render();
+      };
+    });
+    avisarAlto();
+  }
+  fin.onclick = function () {
+    var ajustados = 0, sinContar = 0, lineas = [];
+    datos.forEach(function (d) {
+      if (d.contado === null) { sinContar++; return; }
+      var dif = Math.round((d.contado - d.sis) * 1000) / 1000;
+      if (dif === 0) return;
+      ajustados++;
+      var nuevo = Math.max(0, d.sis + dif);
+      d.aplicado = Math.round((nuevo - d.sis) * 1000) / 1000;
+      lineas.push(d.nom + ": " + d.sis + " → " + nuevo);
+    });
+    cerrado = true; render();
+    res.innerHTML = '<div class="final-res"><strong>Conteo finalizado.</strong> Se ajustó el stock de ' + ajustados + " producto(s) con diferencia" +
+      (lineas.length ? " (" + lineas.join("; ") + ")" : "") + ". " + sinContar + " producto(s) sin contar no se modificaron. Cada ajuste quedó en el Historial como <em>Ajuste por conteo</em>.</div>";
+    avisarAlto();
+  };
+  document.getElementById("c-reset").onclick = iniciar;
+  function iniciar() { datos = base.map(function (b) { return { nom: b[0], sis: b[1], contado: null }; }); cerrado = false; res.innerHTML = ""; render(); }
+  iniciar();
+})();
+</script>
+</body>
+</html>

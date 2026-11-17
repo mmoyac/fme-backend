@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel
 
 from database.database import get_db
+from services.entrega_pedido import registrar_entrega, modalidad_desde_request
 from database import models
 from schemas.cotizacion import (
     CotizacionCreate, CotizacionUpdate,
@@ -29,6 +30,7 @@ class AceptarCotizacionRequest(BaseModel):
     medio_pago_id: Optional[int] = None
     requiere_delivery: bool = False
     costo_delivery: Optional[float] = None
+    modalidad_entrega: Optional[str] = None  # RETIRO | DESPACHO (si falta, se deriva de requiere_delivery)
 
 router = APIRouter()
 
@@ -434,6 +436,7 @@ def aceptar_cotizacion(
         notas=data.notas,
         inventario_descontado=False,
         costo_delivery=float(data.costo_delivery) if data.requiere_delivery and data.costo_delivery is not None else None,
+        modalidad_entrega=modalidad_desde_request(data.modalidad_entrega, data.requiere_delivery),
     )
     db.add(pedido)
     db.flush()
@@ -472,6 +475,10 @@ def aceptar_cotizacion(
 
     # ── Si faltan ítems → crear OT tipo OP ───────────────────────────────────
     ot_id = None
+    # Notas de la cotización y de la aceptación → visibles para producción en la OT/OP
+    notas_para_produccion = " | ".join(
+        n.strip() for n in (getattr(cotizacion, "notas", None), data.notas) if n and n.strip()
+    )
     if items_sin_stock and local_fab:
         tipo_op = db.query(models.TipoOT).filter(models.TipoOT.codigo == "OP").first()
         estado_ot_pendiente = db.query(models.EstadoOT).filter(models.EstadoOT.codigo == "PENDIENTE").first()
@@ -492,7 +499,8 @@ def aceptar_cotizacion(
                 local_id=local_fab.id,
                 pedido_id=pedido.id,
                 cotizacion_id=cotizacion.id,
-                notas=f"Generada al aceptar cotización {cotizacion.numero_cotizacion}",
+                notas=f"Generada al aceptar cotización {cotizacion.numero_cotizacion}"
+                      + (f". Notas: {notas_para_produccion}" if notas_para_produccion else ""),
                 creado_por_id=current_user.id,
             )
             db.add(ot)
@@ -510,17 +518,25 @@ def aceptar_cotizacion(
             op = models.OrdenProduccion(
                 local_id=local_fab.id,
                 fecha_programada=datetime.now(timezone.utc),
-                notas=f"Generada desde cotización {cotizacion.numero_cotizacion}",
+                notas=f"Generada desde cotización {cotizacion.numero_cotizacion}"
+                      + (f". Notas: {notas_para_produccion}" if notas_para_produccion else ""),
                 estado="PLANIFICADA",
+                solicitado_por_id=current_user.id,
             )
             db.add(op)
             db.flush()
             for item_faltante in items_sin_stock:
-                if unidad_default:
+                # Unidad del propio producto (antes se usaba la primera unidad activa del sistema,
+                # lo que dejaba OP de sopaipillas en "g"); la unidad por defecto queda solo de respaldo
+                unidad_producto_id = db.query(models.Producto.unidad_medida_id).filter(
+                    models.Producto.id == item_faltante["producto_id"]
+                ).scalar()
+                unidad_id = unidad_producto_id or (unidad_default.id if unidad_default else None)
+                if unidad_id:
                     db.add(models.DetalleOrdenProduccion(
                         orden_id=op.id,
                         producto_id=item_faltante["producto_id"],
-                        unidad_medida_id=unidad_default.id,
+                        unidad_medida_id=unidad_id,
                         cantidad_programada=item_faltante["cantidad_faltante"],
                     ))
             ot.op_id = op.id

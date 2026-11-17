@@ -17,12 +17,14 @@ class ItemSolicitudTransferenciaResponse(ItemSolicitudTransferenciaCreate):
     cantidad_recibida: Optional[int] = None
 
 class SolicitudTransferenciaCreate(BaseModel):
-    tenant_id: int
+    # tenant_id, usuario_solicitante_id y estado_id los fija el servidor (fix-seguridad-inventario);
+    # se aceptan por compatibilidad con clientes antiguos pero se ignoran.
+    tenant_id: Optional[int] = None
     local_origen_id: int
     local_destino_id: int
-    usuario_solicitante_id: int
+    usuario_solicitante_id: Optional[int] = None
     usuario_finalizador_id: Optional[int] = None
-    estado_id: int
+    estado_id: Optional[int] = None
     nota: Optional[str] = None
     items: List[ItemSolicitudTransferenciaCreate]
 

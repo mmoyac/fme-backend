@@ -2,7 +2,9 @@ from datetime import timedelta
 from typing import Annotated, Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Header
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm, HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy import event
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 from jose import JWTError, jwt
 import os
 
@@ -11,6 +13,7 @@ from database.models import User, Role, MenuItem as MenuItemModel, Tenant
 from schemas.auth import Token, UserCreate, User as UserSchema, MenuItem
 from utils.security import verify_password, create_access_token, get_password_hash, SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 from services import tenant_service
+from utils.modulos import modulos_de_tenant
 
 INTEGRATION_API_KEY = os.getenv("INTEGRATION_API_KEY")
 
@@ -21,6 +24,28 @@ router = APIRouter()
 # 2. HTTPBearer: For manual token pasting (e.g. valid when testing existing tokens)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/token", auto_error=False)
 security_scheme = HTTPBearer(auto_error=False)
+
+# Atributo no mapeado donde se guarda el tenant en que opera un superadmin durante la request.
+_CTX_TENANT_ATTR = "_ctx_tenant_id"
+
+
+def _aplicar_contexto_tenant(user: User, tenant_id: int) -> None:
+    """Hace que un superadmin opere dentro de `tenant_id` SIN modificar su fila en la BD.
+
+    `set_committed_value` asigna el valor sin marcar el atributo como modificado, por lo que
+    ningún flush/commit de la request lo escribe en `users.tenant_id`.
+    """
+    setattr(user, _CTX_TENANT_ATTR, tenant_id)
+    set_committed_value(user, "tenant_id", tenant_id)
+
+
+@event.listens_for(User, "refresh")
+def _reaplicar_contexto_tenant(target, context, attrs):
+    # Tras un commit la sesión expira el objeto y lo recarga desde la BD; sin esto el
+    # superadmin volvería a su tenant de origen a mitad de la request.
+    ctx = target.__dict__.get(_CTX_TENANT_ATTR)
+    if ctx is not None:
+        set_committed_value(target, "tenant_id", ctx)
 
 def get_current_user(
     token: Annotated[str, Depends(oauth2_scheme)],
@@ -60,7 +85,7 @@ def get_current_user(
             raise credentials_exception
         # Si el token tiene tenant_id (modo "operando en tenant"), inyectarlo en el objeto
         if tenant_id:
-            user.tenant_id = tenant_id
+            _aplicar_contexto_tenant(user, tenant_id)
         return user
 
     # Usuario normal: buscar por email Y tenant_id
@@ -141,7 +166,7 @@ def get_current_user_or_api_key(
         if user is None or not user.is_active or not user.is_superadmin:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuario no encontrado o inactivo")
         if tenant_id:
-            user.tenant_id = tenant_id
+            _aplicar_contexto_tenant(user, tenant_id)
         return user
 
     query = db.query(User).filter(User.email == email)
@@ -326,19 +351,23 @@ def read_users_me(current_user: Annotated[User, Depends(get_current_active_user)
         "tenant_id": current_user.tenant_id,
         "tenant_nombre": tenant.nombre if tenant else None,
         "tenant_dominio": tenant.dominio_principal if tenant else None,
-        "role": current_user.role
+        "role": current_user.role,
+        "modulos": sorted(modulos_de_tenant(db, current_user.tenant_id)),
     }
-    
+
     return user_dict
 
 @router.get("/menu", response_model=List[MenuItem])
-def get_user_menu(current_user: User = Depends(get_current_active_user)):
+def get_user_menu(current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
     """
-    Obtiene los items de menú permitidos para el rol del usuario actual.
+    Obtiene los items de menú permitidos para el rol del usuario actual,
+    excluyendo los de módulos que su tenant no tiene contratados.
     """
     role = current_user.role
     if not role:
         return []
-    
+
+    contratados = modulos_de_tenant(db, current_user.tenant_id)
+    visibles = [m for m in role.menus if m.modulo is None or m.modulo in contratados]
     # Ordenar por campo 'orden'
-    return sorted(role.menus, key=lambda x: x.orden)
+    return sorted(visibles, key=lambda x: x.orden or 0)

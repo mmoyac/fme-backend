@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
 from database.database import get_db
-from database.models import User, Tenant, Producto, Cliente, Pedido, Role
+from database.models import User, Tenant, Producto, Cliente, Pedido, Role, TenantModulo
+from utils.modulos import MODULOS, REQUIERE, modulos_de_tenant, validar_cambio
 from schemas.tenant import TenantResponse, TenantCreate, TenantUpdate
 from routers.auth import get_current_superadmin
 from utils.security import create_access_token, get_password_hash, ACCESS_TOKEN_EXPIRE_MINUTES
@@ -140,6 +141,69 @@ def estadisticas_plataforma(
         "total_pedidos": db.query(func.count(Pedido.id)).scalar() or 0,
         "total_clientes": db.query(func.count(Cliente.id)).scalar() or 0,
     }
+
+
+class ModuloCatalogo(BaseModel):
+    codigo: str
+    nombre: str
+    requiere: List[str]
+
+
+class ModulosTenantRequest(BaseModel):
+    modulos: List[str]
+
+
+class ModulosTenantResponse(BaseModel):
+    tenant_id: int
+    modulos: List[str]
+
+
+@router.get("/modulos", response_model=List[ModuloCatalogo])
+def catalogo_modulos(current_user: User = Depends(get_current_superadmin)):
+    """Catálogo de módulos contratables (el núcleo siempre está incluido y no figura)."""
+    return [
+        ModuloCatalogo(codigo=c, nombre=n, requiere=sorted(REQUIERE.get(c, frozenset())))
+        for c, n in MODULOS.items()
+    ]
+
+
+@router.get("/tenants/{tenant_id}/modulos", response_model=ModulosTenantResponse)
+def obtener_modulos_tenant(
+    tenant_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_superadmin)
+):
+    if not db.query(Tenant.id).filter(Tenant.id == tenant_id).first():
+        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+    return ModulosTenantResponse(tenant_id=tenant_id, modulos=sorted(modulos_de_tenant(db, tenant_id)))
+
+
+@router.put("/tenants/{tenant_id}/modulos", response_model=ModulosTenantResponse)
+def actualizar_modulos_tenant(
+    tenant_id: int,
+    body: ModulosTenantRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_superadmin)
+):
+    """Reemplaza el conjunto de módulos contratados (idempotente). Valida dependencias."""
+    if not db.query(Tenant.id).filter(Tenant.id == tenant_id).first():
+        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+    actuales = modulos_de_tenant(db, tenant_id)
+    nuevos = set(body.modulos)
+    error = validar_cambio(actuales, nuevos)
+    if error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=error)
+
+    quitar = actuales - nuevos
+    if quitar:
+        db.query(TenantModulo).filter(
+            TenantModulo.tenant_id == tenant_id, TenantModulo.modulo.in_(quitar)
+        ).delete(synchronize_session=False)
+    for modulo in sorted(nuevos - actuales):
+        db.add(TenantModulo(tenant_id=tenant_id, modulo=modulo, activado_por=current_user.email))
+    # TODO(harden-platform-admin fase 2): registrar en la bitácora (agregados/quitados, actor)
+    db.commit()
+    return ModulosTenantResponse(tenant_id=tenant_id, modulos=sorted(nuevos))
 
 
 @router.put("/tenants/{tenant_id}/toggle-activo")

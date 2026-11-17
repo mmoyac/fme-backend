@@ -12,6 +12,7 @@ from database.models import User, Role, MenuItem as MenuItemModel, Local
 from schemas.auth import User as UserSchema, UserCreate, UserUpdate, Role as RoleSchema, RoleCreate, MenuItem as MenuItemSchema, MenuItemCreate
 from routers.auth import get_current_active_user
 from utils.security import get_password_hash
+from utils.modulos import modulos_de_tenant
 
 router = APIRouter()
 
@@ -71,8 +72,13 @@ def listar_items_menu(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
 ):
-    """Listar todos los items de menú disponibles en el sistema."""
-    return db.query(MenuItemModel).order_by(MenuItemModel.orden).all()
+    """Listar los items de menú asignables: núcleo + módulos contratados por el tenant.
+    El superadmin en modo plataforma (sin tenant de contexto real) ve todos."""
+    items = db.query(MenuItemModel).order_by(MenuItemModel.orden).all()
+    if current_user.is_superadmin:
+        return items
+    contratados = modulos_de_tenant(db, current_user.tenant_id)
+    return [m for m in items if m.modulo is None or m.modulo in contratados]
 
 @router.post("/menu_items", response_model=MenuItemSchema, status_code=status.HTTP_201_CREATED)
 def crear_item_menu(
@@ -160,9 +166,24 @@ def actualizar_menu_rol(
     
     # Obtener items correspondientes a los IDs
     items = db.query(MenuItemModel).filter(MenuItemModel.id.in_(menu_ids)).all()
-    
+
+    contratados = modulos_de_tenant(db, current_user.tenant_id)
+    no_contratados = sorted({m.nombre for m in items if m.modulo and m.modulo not in contratados})
+    if no_contratados:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "modulo_no_contratado",
+                "mensaje": f"Menús de módulos no contratados: {', '.join(no_contratados)}",
+            },
+        )
+
+    # Conservar las asignaciones a menús de módulos no contratados (están ocultas en la UI):
+    # así, si el módulo se vuelve a contratar, el rol recupera su menú sin reasignarlo.
+    ocultos = [m for m in role.menus if m.modulo and m.modulo not in contratados]
+
     # Actualizar relación
-    role.menus = items
+    role.menus = items + [m for m in ocultos if m not in items]
     db.commit()
     return None
 

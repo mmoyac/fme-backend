@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import List, Optional
 
 class RoleBase(BaseModel):
     nombre: str
@@ -40,6 +40,7 @@ class User(UserBase):
     tenant_dominio: Optional[str] = None
     is_superadmin: bool = False
     role: Role
+    modulos: List[str] = []  # módulos contratados por el tenant (solo en /users/me)
 
     class Config:
         from_attributes = True
@@ -56,6 +57,7 @@ class MenuItemBase(BaseModel):
     href: str
     icon: Optional[str] = None
     orden: int = 0
+    modulo: Optional[str] = None  # NULL = núcleo
 
 class MenuItemCreate(MenuItemBase):
     pass

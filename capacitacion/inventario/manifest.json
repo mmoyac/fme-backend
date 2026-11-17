@@ -1,0 +1,46 @@
+{
+  "lecciones": [
+    {
+      "slug": "existencias-y-alertas",
+      "titulo": "Existencias y alertas de stock",
+      "descripcion": "Pestañas del módulo, stock por local, Tienda Online consolidada y semáforo de alertas.",
+      "archivo": "01-existencias-y-alertas.html"
+    },
+    {
+      "slug": "registrar-merma",
+      "titulo": "Registrar una merma",
+      "descripcion": "Dar de baja producto vencido o dañado y qué queda registrado.",
+      "archivo": "02-registrar-merma.html"
+    },
+    {
+      "slug": "transferencias-directas",
+      "titulo": "Transferencias directas entre locales",
+      "descripcion": "Mover stock al instante entre locales, con simulador del resultado.",
+      "archivo": "03-transferencias-directas.html"
+    },
+    {
+      "slug": "solicitudes-de-transferencia",
+      "titulo": "Solicitudes de transferencia",
+      "descripcion": "Pedir productos a otro local, atenderlos, despacharlos y recibirlos.",
+      "archivo": "04-solicitudes-de-transferencia.html"
+    },
+    {
+      "slug": "conteo-de-inventario",
+      "titulo": "Conteo de inventario",
+      "descripcion": "Contar la bodega, revisar diferencias y ajustar el stock.",
+      "archivo": "05-conteo-de-inventario.html"
+    },
+    {
+      "slug": "historial-de-movimientos",
+      "titulo": "Historial de movimientos",
+      "descripcion": "Tipos de movimiento, filtros y cómo seguir la trazabilidad del stock.",
+      "archivo": "06-historial-de-movimientos.html"
+    },
+    {
+      "slug": "valorizacion",
+      "titulo": "Valorización del inventario",
+      "descripcion": "Cuánto vale tu stock a costo y a precio de venta, en valores netos.",
+      "archivo": "07-valorizacion.html"
+    }
+  ]
+}

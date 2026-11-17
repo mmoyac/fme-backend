@@ -1,0 +1,7 @@
+schema: spec-driven
+
+rules:
+  proposal:
+    - "Si el change modifica el comportamiento o las pantallas de un módulo que tiene lecciones en fme-backend/capacitacion/<modulo>/, indicarlo en Impact (\"Capacitación: lecciones afectadas ...\")."
+  tasks:
+    - "Si el change modifica el comportamiento o las pantallas de un módulo que tiene lecciones en fme-backend/capacitacion/<modulo>/, incluir un grupo de tareas \"Actualizar capacitación\" que liste las lecciones afectadas (o las nuevas a crear), actualizar su fecha de última revisión y verificar en el visor del backoffice. El change no se considera terminado sin esto."

@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Valorización del inventario</title>
+<!-- Lección del Centro de Capacitación. Basada en _plantilla.html: al editarla, actualizar "Última revisión". -->
+<style>
+  :root {
+    /* Paleta del backoffice (tailwind: slate-900/800/700, primary, secondary, accent) */
+    --primario: #5ec8f2; --primario-osc: #2b9ccc; --secundario: #45a29a; --acento: #daa520;
+    --texto: #f1f5f9; --suave: #9ca3af; --borde: #334155; --borde-fuerte: #475569;
+    --fondo: #0f172a; --tarjeta: #1e293b; --campo: #334155; --cabecera-tabla: #273449;
+    --ok: #4ade80; --ok-fondo: rgba(34,197,94,.12); --ok-borde: rgba(34,197,94,.45);
+    --error: #f87171; --error-fondo: rgba(239,68,68,.12); --error-borde: rgba(239,68,68,.5);
+    --aviso: #fbbf24; --aviso-fondo: rgba(245,158,11,.12); --aviso-borde: rgba(245,158,11,.45);
+    --info-fondo: rgba(94,200,242,.10); --info-borde: rgba(94,200,242,.4);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--texto);
+         background: var(--fondo); line-height: 1.55; font-size: 15px; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 40px; }
+  header.leccion { background: linear-gradient(135deg, #1e3a5f, #1f4f4b); color: #fff; border-bottom: 3px solid var(--primario);
+         padding: 22px 16px; }
+  header.leccion > div { max-width: 860px; margin: 0 auto; }
+  header.leccion .modulo { text-transform: uppercase; font-size: 12px; letter-spacing: .08em; color: var(--primario); font-weight: 700; }
+  header.leccion h1 { margin: 4px 0 6px; font-size: 26px; line-height: 1.2; }
+  header.leccion .meta { font-size: 13px; opacity: .92; }
+  h2 { font-size: 20px; margin: 32px 0 10px; }
+  h3 { font-size: 16px; margin: 20px 0 8px; }
+  .tarjeta { background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 12px; padding: 16px 18px; margin: 14px 0; }
+  .objetivos { background: var(--info-fondo); border-color: var(--info-borde); }
+  .objetivos ul { margin: 6px 0 0; padding-left: 20px; }
+  .tip, .advertencia { border-radius: 10px; padding: 12px 14px 12px 44px; margin: 14px 0; position: relative; }
+  .tip { background: var(--ok-fondo); border: 1px solid var(--ok-borde); }
+  .advertencia { background: var(--aviso-fondo); border: 1px solid var(--aviso-borde); }
+  .tip::before, .advertencia::before { position: absolute; left: 14px; top: 11px; font-size: 18px; }
+  .tip::before { content: "💡"; }
+  .advertencia::before { content: "⚠️"; }
+  .ui-boton { display: inline-block; background: var(--primario); color: #0f172a; border-radius: 6px; padding: 1px 8px;
+              font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .ui-boton.sec { background: var(--campo); color: var(--texto); border: 1px solid var(--borde-fuerte); }
+  .ui-tab { display: inline-block; border-bottom: 2px solid var(--primario); padding: 0 4px; font-weight: 600; white-space: nowrap; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--tarjeta); }
+  th, td { border: 1px solid var(--borde); padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: var(--cabecera-tabla); }
+  .tabla-scroll { overflow-x: auto; }
+  .chip { display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: 12px; font-weight: 600; }
+  button { font: inherit; cursor: pointer; }
+
+  /* Paso a paso */
+  .pasos .paso { display: none; }
+  .pasos .paso.activo { display: block; }
+  .pasos .paso h3 { margin-top: 0; }
+  .pasos-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  .pasos-barra { height: 6px; background: var(--borde); border-radius: 3px; overflow: hidden; margin-bottom: 14px; }
+  .pasos-barra > i { display: block; height: 100%; background: var(--primario); transition: width .25s; }
+  .btn { border: 1px solid var(--borde-fuerte); background: var(--campo); color: var(--texto); border-radius: 8px; padding: 7px 14px; }
+  .btn.prim { background: var(--primario); border-color: var(--primario); color: #0f172a; font-weight: 600; }
+  .btn:disabled { opacity: .45; cursor: default; }
+
+  /* Quiz */
+  .quiz .pregunta { font-weight: 600; margin: 0 0 10px; }
+  .quiz .opciones { display: grid; gap: 8px; }
+  .quiz .opciones button { text-align: left; border: 1px solid var(--borde-fuerte); background: var(--campo); color: var(--texto); border-radius: 8px; padding: 9px 12px; }
+  .quiz .opciones button:hover:not(:disabled) { border-color: var(--primario); }
+  .quiz .opciones button.correcta { background: var(--ok-fondo); border-color: var(--ok); }
+  .quiz .opciones button:disabled { cursor: default; }
+  .quiz .opciones button.incorrecta { background: var(--error-fondo); border-color: var(--error); }
+  .quiz .feedback { margin: 10px 0 0; font-size: 14px; }
+  .quiz .feedback.ok { color: var(--ok); }
+  .quiz .feedback.mal { color: var(--error); }
+  .quiz-resumen { font-weight: 600; text-align: center; padding: 14px; }
+  @media (max-width: 520px) { header.leccion h1 { font-size: 22px; } }
+.calc { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.calc label { font-size: 13px; color: var(--suave); display: block; }
+.calc input { width: 100%; background: var(--campo); color: var(--texto); border: 1px solid var(--borde-fuerte); border-radius: 6px; padding: 7px 9px; font: inherit; margin-top: 3px; }
+.kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+.kpi { border-radius: 10px; padding: 10px; background: var(--campo); }
+.kpi small { display: block; font-size: 12px; color: var(--suave); }
+.kpi b { font-size: 18px; }
+.k1 b { color: #7dd3fc; } .k2 b { color: #4ade80; } .k3 b { color: #fbbf24; } .k4 b { color: #c4b5fd; }
+.formula { font-size: 13px; color: var(--suave); margin-top: 10px; }
+@media (max-width: 600px) { .calc, .kpis { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+<header class="leccion"><div>
+  <div class="modulo">Inventario · Lección 7</div>
+  <h1>Valorización del inventario</h1>
+  <div class="meta">⏱ 6 minutos · Última revisión: 2026-11-17</div>
+</div></header>
+
+<main>
+<section class="tarjeta objetivos">
+  <strong>Al terminar vas a saber:</strong>
+  <ul>
+    <li>Qué muestra la pestaña Valorización y cómo se calculan sus totales.</li>
+    <li>Por qué todo está en valores netos (sin IVA).</li>
+    <li>Qué significan los avisos "Sin costo" y "Sin precio".</li>
+  </ul>
+</section>
+
+<h2>Qué responde</h2>
+<p>La pestaña <span class="ui-tab">Valorización</span> de <strong>Inventario</strong> responde: <em>¿cuánta plata tengo en bodega?</em> y <em>¿cuánto ganaría si vendiera todo ese stock a mi precio actual?</em>. Arriba hay cuatro totales:</p>
+<ul>
+  <li><strong>Valor inventario (costo neto)</strong>: lo que te costó el stock que tienes.</li>
+  <li><strong>Valor venta (neto)</strong>: lo que recibirías vendiéndolo, sin IVA.</li>
+  <li><strong>Ganancia potencial (neta)</strong>: valor venta − valor inventario.</li>
+  <li><strong>Margen</strong>: ganancia ÷ valor venta, en porcentaje.</li>
+</ul>
+
+<h2>Todo en neto, sin IVA</h2>
+<p>El <strong>costo</strong> es el <strong>promedio ponderado</strong> de tus compras y producción, sin IVA. El <strong>precio de venta</strong> que ves en Precios normalmente incluye IVA, así que aquí se divide por 1,19 para compararlo en la misma base. Debajo de cada precio neto aparece, como referencia, el precio con IVA (<em>"… c/IVA"</em>).</p>
+<div class="tip">Ejemplo: un pan que vendes a $1.190 con IVA tiene un precio neto de $1.000. Si te cuesta $600 neto, ganas $400 por unidad: un margen del 40%.</div>
+
+<h2>Calculadora</h2>
+<p>Así se calcula cada fila de la tabla (producto en un local). Cambia los valores:</p>
+<div class="tarjeta">
+  <div class="calc">
+    <label>Stock<input type="number" id="v-stock" value="40"></label>
+    <label>Costo neto unitario ($)<input type="number" id="v-costo" value="600"></label>
+    <label>Precio de venta con IVA ($)<input type="number" id="v-precio" value="1190"></label>
+  </div>
+  <div class="kpis">
+    <div class="kpi k1"><small>Valor inventario</small><b id="v-vi"></b></div>
+    <div class="kpi k2"><small>Valor venta (neto)</small><b id="v-vv"></b></div>
+    <div class="kpi k3"><small>Ganancia</small><b id="v-g"></b></div>
+    <div class="kpi k4"><small>Margen</small><b id="v-m"></b></div>
+  </div>
+  <div class="formula" id="v-form"></div>
+</div>
+
+<h2>Filtros, avisos y Excel</h2>
+<ul>
+  <li>Filtra por <strong>local</strong>, por <strong>categoría</strong> o busca por nombre o SKU. Los totales se recalculan con los filtros.</li>
+  <li>La insignia <strong>Sin costo</strong> indica que ese producto no tiene costo registrado: no suma al valor de inventario ni a la ganancia. La insignia <strong>Sin precio</strong> indica que no tiene precio de venta en ese local. Un aviso amarillo arriba te dice cuántas filas están así.</li>
+  <li><strong>Stock negativo</strong> marca filas donde el stock quedó bajo cero; conviene revisarlas con un conteo.</li>
+  <li><span class="ui-boton" style="background:#059669;color:#fff">Exportar a Excel</span> descarga la tabla con una fila TOTAL.</li>
+</ul>
+<div class="advertencia">Si ves muchos productos "Sin costo", los totales quedan subestimados. El costo se forma con las compras y la producción registradas en el sistema.</div>
+
+<h2>Pon a prueba lo aprendido</h2>
+<div class="tarjeta quiz">
+  <p class="pregunta">1. Un producto se vende a $2.380 con IVA. ¿Qué precio de venta neto usa la Valorización?</p>
+  <div class="opciones">
+    <button data-explica="Ese es el precio con IVA; la valorización lo compara en neto.">$2.380</button>
+    <button data-ok data-explica="$2.380 ÷ 1,19 = $2.000.">$2.000</button>
+    <button data-explica="No se resta un 19% al precio con IVA: se divide por 1,19.">$1.928</button>
+  </div>
+</div>
+<div class="tarjeta quiz">
+  <p class="pregunta">2. Un producto aparece con la insignia "Sin costo". ¿Qué pasa con los totales?</p>
+  <div class="opciones">
+    <button data-explica="No se inventa un costo: simplemente esa fila no suma al valor de inventario.">Se usa su precio de venta como costo</button>
+    <button data-ok data-explica="Sin costo no suma al valor de inventario ni a la ganancia, por eso conviene completarlo.">No suma al valor de inventario ni a la ganancia</button>
+    <button data-explica="La fila sí se muestra, con la insignia para que la identifiques.">La fila no aparece en la tabla</button>
+  </div>
+</div>
+<div class="tarjeta quiz-resumen"></div>
+</main>
+
+<script>
+(function () {
+  // --- Paso a paso ---
+  document.querySelectorAll(".pasos").forEach(function (cont) {
+    var pasos = cont.querySelectorAll(".paso");
+    if (!pasos.length) return;
+    var i = 0;
+    var barra = document.createElement("div"); barra.className = "pasos-barra"; barra.innerHTML = "<i></i>";
+    cont.insertBefore(barra, cont.firstChild);
+    var nav = document.createElement("div"); nav.className = "pasos-nav";
+    nav.innerHTML = '<button class="btn" type="button">← Anterior</button><span></span><button class="btn prim" type="button">Siguiente →</button>';
+    cont.appendChild(nav);
+    var ant = nav.children[0], txt = nav.children[1], sig = nav.children[2];
+    function mostrar() {
+      pasos.forEach(function (p, k) { p.classList.toggle("activo", k === i); });
+      txt.textContent = "Paso " + (i + 1) + " de " + pasos.length;
+      barra.firstChild.style.width = ((i + 1) / pasos.length * 100) + "%";
+      ant.disabled = i === 0; sig.disabled = i === pasos.length - 1;
+      avisarAlto();
+    }
+    ant.onclick = function () { if (i > 0) { i--; mostrar(); } };
+    sig.onclick = function () { if (i < pasos.length - 1) { i++; mostrar(); } };
+    mostrar();
+  });
+
+  // --- Quiz ---
+  var quizzes = document.querySelectorAll(".quiz");
+  function actualizarResumen() {
+    var resp = 0, ok = 0;
+    quizzes.forEach(function (q) { if (q.dataset.respondida) { resp++; if (q.dataset.respondida === "ok") ok++; } });
+    document.querySelectorAll(".quiz-resumen").forEach(function (r) {
+      r.textContent = resp < quizzes.length
+        ? "Respondiste " + resp + " de " + quizzes.length + " preguntas."
+        : (ok === quizzes.length ? "🎉 ¡" + ok + " de " + quizzes.length + " correctas! Dominas esta lección."
+                                 : ok + " de " + quizzes.length + " correctas. Revisa las explicaciones y vuelve a intentarlo cuando quieras.");
+    });
+  }
+  quizzes.forEach(function (q) {
+    var botones = q.querySelectorAll(".opciones button");
+    var fb = q.querySelector(".feedback");
+    if (!fb) { fb = document.createElement("p"); fb.className = "feedback"; q.appendChild(fb); }
+    botones.forEach(function (b) {
+      b.type = "button";
+      b.onclick = function () {
+        if (q.dataset.respondida) return;
+        var ok = b.hasAttribute("data-ok");
+        q.dataset.respondida = ok ? "ok" : "mal";
+        botones.forEach(function (x) { x.disabled = true; if (x.hasAttribute("data-ok")) x.classList.add("correcta"); });
+        if (!ok) b.classList.add("incorrecta");
+        fb.className = "feedback " + (ok ? "ok" : "mal");
+        fb.textContent = (ok ? "✔ Correcto. " : "✘ No es correcto. ") + (b.dataset.explica || "");
+        var reintentar = document.createElement("button");
+        reintentar.className = "btn"; reintentar.type = "button"; reintentar.textContent = "Intentar de nuevo";
+        reintentar.style.marginTop = "8px";
+        reintentar.onclick = function () {
+          delete q.dataset.respondida; fb.textContent = ""; fb.className = "feedback"; reintentar.remove();
+          botones.forEach(function (x) { x.disabled = false; x.classList.remove("correcta", "incorrecta"); });
+          actualizarResumen(); avisarAlto();
+        };
+        if (!ok) q.appendChild(reintentar);
+        actualizarResumen(); avisarAlto();
+      };
+    });
+  });
+  actualizarResumen();
+
+  // --- Alto del iframe: el visor del backoffice ajusta su altura con este mensaje ---
+  function avisarAlto() {
+    // Alto del contenido (no del viewport), para que el iframe también pueda achicarse
+    var alto = Math.ceil(document.body.getBoundingClientRect().height);
+    try { parent.postMessage({ tipo: "capacitacion:alto", alto: alto }, "*"); } catch (e) {}
+  }
+  window.avisarAlto = avisarAlto;
+  window.addEventListener("load", avisarAlto);
+  if (window.ResizeObserver) new ResizeObserver(avisarAlto).observe(document.body);
+})();
+</script>
+<script>
+(function () {
+  function $(id) { return document.getElementById(id); }
+  function pesos(n) { return "$" + Math.round(n).toLocaleString("es-CL"); }
+  function calc() {
+    var s = parseFloat($("v-stock").value) || 0, c = parseFloat($("v-costo").value) || 0, p = parseFloat($("v-precio").value) || 0;
+    var neto = p / 1.19, vi = s * c, vv = s * neto, g = vv - vi;
+    $("v-vi").textContent = pesos(vi); $("v-vv").textContent = pesos(vv); $("v-g").textContent = pesos(g);
+    $("v-m").textContent = vv ? (g / vv * 100).toFixed(1).replace(".", ",") + "%" : "—";
+    $("v-form").textContent = "Precio neto = " + pesos(p) + " ÷ 1,19 = " + pesos(neto) + " · Valor inventario = " + s + " × " + pesos(c) +
+      " · Valor venta = " + s + " × " + pesos(neto) + " · Margen = ganancia ÷ valor venta";
+  }
+  ["v-stock", "v-costo", "v-precio"].forEach(function (id) { $(id).oninput = calc; });
+  calc();
+})();
+</script>
+</body>
+</html>

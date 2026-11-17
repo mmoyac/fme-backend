@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Historial de movimientos</title>
+<!-- Lección del Centro de Capacitación. Basada en _plantilla.html: al editarla, actualizar "Última revisión". -->
+<style>
+  :root {
+    /* Paleta del backoffice (tailwind: slate-900/800/700, primary, secondary, accent) */
+    --primario: #5ec8f2; --primario-osc: #2b9ccc; --secundario: #45a29a; --acento: #daa520;
+    --texto: #f1f5f9; --suave: #9ca3af; --borde: #334155; --borde-fuerte: #475569;
+    --fondo: #0f172a; --tarjeta: #1e293b; --campo: #334155; --cabecera-tabla: #273449;
+    --ok: #4ade80; --ok-fondo: rgba(34,197,94,.12); --ok-borde: rgba(34,197,94,.45);
+    --error: #f87171; --error-fondo: rgba(239,68,68,.12); --error-borde: rgba(239,68,68,.5);
+    --aviso: #fbbf24; --aviso-fondo: rgba(245,158,11,.12); --aviso-borde: rgba(245,158,11,.45);
+    --info-fondo: rgba(94,200,242,.10); --info-borde: rgba(94,200,242,.4);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--texto);
+         background: var(--fondo); line-height: 1.55; font-size: 15px; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px 40px; }
+  header.leccion { background: linear-gradient(135deg, #1e3a5f, #1f4f4b); color: #fff; border-bottom: 3px solid var(--primario);
+         padding: 22px 16px; }
+  header.leccion > div { max-width: 860px; margin: 0 auto; }
+  header.leccion .modulo { text-transform: uppercase; font-size: 12px; letter-spacing: .08em; color: var(--primario); font-weight: 700; }
+  header.leccion h1 { margin: 4px 0 6px; font-size: 26px; line-height: 1.2; }
+  header.leccion .meta { font-size: 13px; opacity: .92; }
+  h2 { font-size: 20px; margin: 32px 0 10px; }
+  h3 { font-size: 16px; margin: 20px 0 8px; }
+  .tarjeta { background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 12px; padding: 16px 18px; margin: 14px 0; }
+  .objetivos { background: var(--info-fondo); border-color: var(--info-borde); }
+  .objetivos ul { margin: 6px 0 0; padding-left: 20px; }
+  .tip, .advertencia { border-radius: 10px; padding: 12px 14px 12px 44px; margin: 14px 0; position: relative; }
+  .tip { background: var(--ok-fondo); border: 1px solid var(--ok-borde); }
+  .advertencia { background: var(--aviso-fondo); border: 1px solid var(--aviso-borde); }
+  .tip::before, .advertencia::before { position: absolute; left: 14px; top: 11px; font-size: 18px; }
+  .tip::before { content: "💡"; }
+  .advertencia::before { content: "⚠️"; }
+  .ui-boton { display: inline-block; background: var(--primario); color: #0f172a; border-radius: 6px; padding: 1px 8px;
+              font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .ui-boton.sec { background: var(--campo); color: var(--texto); border: 1px solid var(--borde-fuerte); }
+  .ui-tab { display: inline-block; border-bottom: 2px solid var(--primario); padding: 0 4px; font-weight: 600; white-space: nowrap; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--tarjeta); }
+  th, td { border: 1px solid var(--borde); padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { background: var(--cabecera-tabla); }
+  .tabla-scroll { overflow-x: auto; }
+  .chip { display: inline-block; border-radius: 999px; padding: 1px 9px; font-size: 12px; font-weight: 600; }
+  button { font: inherit; cursor: pointer; }
+
+  /* Paso a paso */
+  .pasos .paso { display: none; }
+  .pasos .paso.activo { display: block; }
+  .pasos .paso h3 { margin-top: 0; }
+  .pasos-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  .pasos-barra { height: 6px; background: var(--borde); border-radius: 3px; overflow: hidden; margin-bottom: 14px; }
+  .pasos-barra > i { display: block; height: 100%; background: var(--primario); transition: width .25s; }
+  .btn { border: 1px solid var(--borde-fuerte); background: var(--campo); color: var(--texto); border-radius: 8px; padding: 7px 14px; }
+  .btn.prim { background: var(--primario); border-color: var(--primario); color: #0f172a; font-weight: 600; }
+  .btn:disabled { opacity: .45; cursor: default; }
+
+  /* Quiz */
+  .quiz .pregunta { font-weight: 600; margin: 0 0 10px; }
+  .quiz .opciones { display: grid; gap: 8px; }
+  .quiz .opciones button { text-align: left; border: 1px solid var(--borde-fuerte); background: var(--campo); color: var(--texto); border-radius: 8px; padding: 9px 12px; }
+  .quiz .opciones button:hover:not(:disabled) { border-color: var(--primario); }
+  .quiz .opciones button.correcta { background: var(--ok-fondo); border-color: var(--ok); }
+  .quiz .opciones button:disabled { cursor: default; }
+  .quiz .opciones button.incorrecta { background: var(--error-fondo); border-color: var(--error); }
+  .quiz .feedback { margin: 10px 0 0; font-size: 14px; }
+  .quiz .feedback.ok { color: var(--ok); }
+  .quiz .feedback.mal { color: var(--error); }
+  .quiz-resumen { font-weight: 600; text-align: center; padding: 14px; }
+  @media (max-width: 520px) { header.leccion h1 { font-size: 22px; } }
+.chip.azul { background: rgba(59,130,246,.2); color: #93c5fd; } .chip.morado { background: rgba(168,85,247,.2); color: #d8b4fe; }
+.chip.amar { background: rgba(234,179,8,.18); color: #facc15; } .chip.naranjo { background: rgba(234,88,12,.2); color: #fdba74; }
+.chip.teal { background: rgba(20,184,166,.2); color: #5eead4; } .chip.gris { background: rgba(148,163,184,.2); color: #cbd5e1; }
+.ejercicio .caso { font-weight: 600; margin: 0 0 10px; }
+.ejercicio .opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.ejercicio .opts button { border: 1px solid var(--borde-fuerte); background: var(--campo); color: var(--texto); border-radius: 999px; padding: 6px 14px; }
+.ejercicio .opts button.bien { border-color: var(--ok); background: var(--ok-fondo); }
+.ejercicio .opts button.mal { border-color: var(--error); background: var(--error-fondo); }
+.ejercicio .fb { margin-top: 10px; font-size: 14px; min-height: 20px; }
+.ejercicio .pie { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; gap: 8px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<header class="leccion"><div>
+  <div class="modulo">Inventario · Lección 6</div>
+  <h1>Historial de movimientos</h1>
+  <div class="meta">⏱ 6 minutos · Última revisión: 2026-11-17</div>
+</div></header>
+
+<main>
+<section class="tarjeta objetivos">
+  <strong>Al terminar vas a saber:</strong>
+  <ul>
+    <li>Qué tipos de movimiento existen y qué los genera.</li>
+    <li>Filtrar el historial para encontrar un movimiento.</li>
+    <li>Leer la trazabilidad: de dónde salió, a dónde fue, quién y por qué.</li>
+  </ul>
+</section>
+
+<h2>Para qué sirve</h2>
+<p>Cada vez que el stock cambia por una transferencia, un pedido, una merma o un conteo, queda un registro. La pestaña <span class="ui-tab">Historial</span> de <strong>Inventario</strong> te permite responder preguntas como <em>"¿por qué bajó la harina en Local Norte?"</em> o <em>"¿quién registró esta merma?"</em>.</p>
+
+<h2>Los tipos de movimiento</h2>
+<div class="tabla-scroll"><table>
+  <tr><th>Tipo</th><th>Qué lo genera</th><th>Origen → Destino</th></tr>
+  <tr><td><span class="chip azul">Transferencia</span></td><td>Una transferencia directa o una solicitud de transferencia finalizada (nota <em>"Transferencia por solicitud #N"</em>).</td><td>Local que envía → local que recibe</td></tr>
+  <tr><td><span class="chip morado">Pedido</span></td><td>El descuento de stock de un pedido de venta (nota <em>"Descuento por pedido #N"</em>, usuario <em>sistema</em>).</td><td>Local que despacha → —</td></tr>
+  <tr><td><span class="chip amar">Ajuste</span></td><td>La devolución de stock al cancelar un pedido (nota <em>"Devolución por cancelación de pedido #N"</em>).</td><td>— → local</td></tr>
+  <tr><td><span class="chip naranjo">Merma</span></td><td>Una merma registrada desde Existencias (nota = el motivo).</td><td>Local → —</td></tr>
+  <tr><td><span class="chip teal">Ajuste por conteo</span></td><td>Finalizar un conteo con diferencias. Trae el enlace <em>"Ver conteo #N"</em>.</td><td>Local → — si faltaba · — → local si sobraba</td></tr>
+  <tr><td><span class="chip gris">PRODUCCION</span></td><td>Órdenes de producción: consumo de insumos (cantidad negativa) y producto terminado.</td><td>—</td></tr>
+  <tr><td><span class="chip gris">DEVOLUCION</span></td><td>Devoluciones de pedidos (nota <em>"Devolución pedido #N"</em>).</td><td>— → local</td></tr>
+</table></div>
+<div class="tip">Lee la columna <strong>Origen</strong> como "de dónde salió el stock" y <strong>Destino</strong> como "a dónde entró". Un "-" significa que ese lado no aplica: en una merma el stock sale del local y no entra a ningún otro.</div>
+
+<h2>Filtrar y leer</h2>
+<div class="tarjeta pasos">
+  <div class="paso"><h3>1. Busca el producto</h3><p>Escribe en <em>"Buscar producto o SKU..."</em>. La lista se actualiza sola mientras escribes.</p></div>
+  <div class="paso"><h3>2. Filtra por local</h3><p><strong>"Filtrar por Local"</strong> muestra los movimientos donde ese local aparece como origen <strong>o</strong> como destino. Si tu usuario pertenece a un local, ya ves solo los del tuyo.</p></div>
+  <div class="paso"><h3>3. Filtra por tipo</h3><p><strong>"Filtrar por Tipo"</strong>: Transferencia, Pedido, Ajuste, Merma o Ajuste por conteo.</p></div>
+  <div class="paso"><h3>4. Lee la fila</h3><p>Cada fila tiene <strong>Fecha</strong>, <strong>Tipo</strong>, <strong>Producto</strong>, <strong>Origen</strong>, <strong>Destino</strong>, <strong>Cantidad</strong>, <strong>Usuario</strong> y <strong>Notas</strong>. Las notas suelen decir el motivo o el número de pedido, solicitud o conteo.</p></div>
+  <div class="paso"><h3>5. Resumen</h3><p>Arriba, las tarjetas muestran cuántos movimientos hay en total y cuántos son Transferencias, Por Pedidos y Ajustes, según los filtros que aplicaste.</p></div>
+</div>
+<div class="advertencia">El historial muestra los <strong>últimos 100 movimientos</strong> que cumplen los filtros, del más reciente al más antiguo. Si buscas algo más antiguo, filtra por producto y local para acotar.</div>
+
+<h2>Ejercicio: ¿qué tipo de movimiento es?</h2>
+<div class="tarjeta ejercicio">
+  <p class="caso" id="e-caso"></p>
+  <div class="opts" id="e-opts"></div>
+  <div class="fb" id="e-fb"></div>
+  <div class="pie"><span id="e-prog"></span><button class="btn prim" type="button" id="e-sig" disabled>Siguiente caso →</button></div>
+</div>
+
+<h2>Pon a prueba lo aprendido</h2>
+<div class="tarjeta quiz">
+  <p class="pregunta">1. Ves un movimiento con Origen "Local Norte" y Destino "-". ¿Qué tipos podrían ser?</p>
+  <div class="opciones">
+    <button data-explica="Una transferencia siempre tiene origen y destino.">Solo Transferencia</button>
+    <button data-ok data-explica="El stock salió de Norte y no entró a otro local: una merma, un pedido despachado desde Norte o un ajuste por conteo con faltante.">Merma, Pedido o Ajuste por conteo (faltante)</button>
+    <button data-explica="La devolución por cancelación de pedido entra al local: tendría destino.">Ajuste por cancelación de pedido</button>
+  </div>
+</div>
+<div class="tarjeta quiz">
+  <p class="pregunta">2. Quieres saber todo lo que entró y salió de Local Sur. ¿Cómo filtras?</p>
+  <div class="opciones">
+    <button data-ok data-explica="El filtro por local trae los movimientos donde Sur es origen o destino.">Filtrar por Local = Local Sur</button>
+    <button data-explica="La búsqueda es por producto o SKU, no por local.">Escribir "Sur" en la búsqueda</button>
+    <button data-explica="Filtrar por tipo Transferencia dejaría fuera pedidos, mermas y ajustes.">Filtrar por Tipo = Transferencia</button>
+  </div>
+</div>
+<div class="tarjeta quiz-resumen"></div>
+</main>
+
+<script>
+(function () {
+  // --- Paso a paso ---
+  document.querySelectorAll(".pasos").forEach(function (cont) {
+    var pasos = cont.querySelectorAll(".paso");
+    if (!pasos.length) return;
+    var i = 0;
+    var barra = document.createElement("div"); barra.className = "pasos-barra"; barra.innerHTML = "<i></i>";
+    cont.insertBefore(barra, cont.firstChild);
+    var nav = document.createElement("div"); nav.className = "pasos-nav";
+    nav.innerHTML = '<button class="btn" type="button">← Anterior</button><span></span><button class="btn prim" type="button">Siguiente →</button>';
+    cont.appendChild(nav);
+    var ant = nav.children[0], txt = nav.children[1], sig = nav.children[2];
+    function mostrar() {
+      pasos.forEach(function (p, k) { p.classList.toggle("activo", k === i); });
+      txt.textContent = "Paso " + (i + 1) + " de " + pasos.length;
+      barra.firstChild.style.width = ((i + 1) / pasos.length * 100) + "%";
+      ant.disabled = i === 0; sig.disabled = i === pasos.length - 1;
+      avisarAlto();
+    }
+    ant.onclick = function () { if (i > 0) { i--; mostrar(); } };
+    sig.onclick = function () { if (i < pasos.length - 1) { i++; mostrar(); } };
+    mostrar();
+  });
+
+  // --- Quiz ---
+  var quizzes = document.querySelectorAll(".quiz");
+  function actualizarResumen() {
+    var resp = 0, ok = 0;
+    quizzes.forEach(function (q) { if (q.dataset.respondida) { resp++; if (q.dataset.respondida === "ok") ok++; } });
+    document.querySelectorAll(".quiz-resumen").forEach(function (r) {
+      r.textContent = resp < quizzes.length
+        ? "Respondiste " + resp + " de " + quizzes.length + " preguntas."
+        : (ok === quizzes.length ? "🎉 ¡" + ok + " de " + quizzes.length + " correctas! Dominas esta lección."
+                                 : ok + " de " + quizzes.length + " correctas. Revisa las explicaciones y vuelve a intentarlo cuando quieras.");
+    });
+  }
+  quizzes.forEach(function (q) {
+    var botones = q.querySelectorAll(".opciones button");
+    var fb = q.querySelector(".feedback");
+    if (!fb) { fb = document.createElement("p"); fb.className = "feedback"; q.appendChild(fb); }
+    botones.forEach(function (b) {
+      b.type = "button";
+      b.onclick = function () {
+        if (q.dataset.respondida) return;
+        var ok = b.hasAttribute("data-ok");
+        q.dataset.respondida = ok ? "ok" : "mal";
+        botones.forEach(function (x) { x.disabled = true; if (x.hasAttribute("data-ok")) x.classList.add("correcta"); });
+        if (!ok) b.classList.add("incorrecta");
+        fb.className = "feedback " + (ok ? "ok" : "mal");
+        fb.textContent = (ok ? "✔ Correcto. " : "✘ No es correcto. ") + (b.dataset.explica || "");
+        var reintentar = document.createElement("button");
+        reintentar.className = "btn"; reintentar.type = "button"; reintentar.textContent = "Intentar de nuevo";
+        reintentar.style.marginTop = "8px";
+        reintentar.onclick = function () {
+          delete q.dataset.respondida; fb.textContent = ""; fb.className = "feedback"; reintentar.remove();
+          botones.forEach(function (x) { x.disabled = false; x.classList.remove("correcta", "incorrecta"); });
+          actualizarResumen(); avisarAlto();
+        };
+        if (!ok) q.appendChild(reintentar);
+        actualizarResumen(); avisarAlto();
+      };
+    });
+  });
+  actualizarResumen();
+
+  // --- Alto del iframe: el visor del backoffice ajusta su altura con este mensaje ---
+  function avisarAlto() {
+    // Alto del contenido (no del viewport), para que el iframe también pueda achicarse
+    var alto = Math.ceil(document.body.getBoundingClientRect().height);
+    try { parent.postMessage({ tipo: "capacitacion:alto", alto: alto }, "*"); } catch (e) {}
+  }
+  window.avisarAlto = avisarAlto;
+  window.addEventListener("load", avisarAlto);
+  if (window.ResizeObserver) new ResizeObserver(avisarAlto).observe(document.body);
+})();
+</script>
+<script>
+(function () {
+  var tipos = ["Transferencia", "Pedido", "Ajuste", "Merma", "Ajuste por conteo"];
+  var casos = [
+    ["Se quemó una bandeja de pan en Local Centro y se registró desde Existencias.", "Merma", "Lo que se pierde se registra como Merma, con el local como origen."],
+    ["Local Centro finalizó la solicitud #45 que le hizo Local Norte.", "Transferencia", "Una solicitud finalizada genera una Transferencia del origen al destino, con la nota \"Transferencia por solicitud #45\"."],
+    ["Se despachó el pedido #1203 desde Local Sur.", "Pedido", "Al descontar el stock del pedido se genera un movimiento Pedido, con usuario \"sistema\"."],
+    ["Se canceló el pedido #1190 y las unidades pendientes volvieron al local.", "Ajuste", "La cancelación devuelve el stock con un Ajuste: \"Devolución por cancelación de pedido #1190\"."],
+    ["Se finalizó el conteo #12 y faltaban 3 kg de azúcar.", "Ajuste por conteo", "Al finalizar un conteo, cada diferencia genera un Ajuste por conteo, con el enlace \"Ver conteo #12\"."],
+    ["El encargado movió 10 cajas de Centro a Norte desde la pestaña Transferencias.", "Transferencia", "La transferencia directa también se registra como Transferencia."]
+  ];
+  var i = 0, aciertos = 0;
+  var caso = document.getElementById("e-caso"), opts = document.getElementById("e-opts"), fb = document.getElementById("e-fb"), sig = document.getElementById("e-sig"), prog = document.getElementById("e-prog");
+  function mostrar() {
+    if (i >= casos.length) {
+      caso.textContent = "¡Terminaste! Acertaste " + aciertos + " de " + casos.length + " a la primera.";
+      opts.innerHTML = ""; fb.textContent = ""; sig.textContent = "Repetir ejercicio"; sig.disabled = false; prog.textContent = ""; avisarAlto(); return;
+    }
+    var c = casos[i], primerIntento = true;
+    caso.textContent = "Caso " + (i + 1) + ": " + c[0];
+    fb.textContent = ""; sig.disabled = true; sig.textContent = "Siguiente caso →";
+    prog.textContent = "Caso " + (i + 1) + " de " + casos.length;
+    opts.innerHTML = "";
+    tipos.forEach(function (t) {
+      var b = document.createElement("button"); b.type = "button"; b.textContent = t;
+      b.onclick = function () {
+        if (!sig.disabled) return;
+        if (t === c[1]) { b.classList.add("bien"); fb.style.color = "var(--ok)"; fb.textContent = "✔ " + c[2]; sig.disabled = false; if (primerIntento) aciertos++; }
+        else { b.classList.add("mal"); primerIntento = false; fb.style.color = "var(--error)"; fb.textContent = "✘ No es " + t + ". Intenta otra vez."; }
+        avisarAlto();
+      };
+      opts.appendChild(b);
+    });
+    avisarAlto();
+  }
+  sig.onclick = function () { if (i >= casos.length) { i = 0; aciertos = 0; } else i++; mostrar(); };
+  mostrar();
+})();
+</script>
+</body>
+</html>

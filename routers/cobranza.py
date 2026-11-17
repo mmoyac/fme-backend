@@ -76,10 +76,11 @@ def listar_cobranza(
                 c for c in pedido.cheques if c.estado_id not in ids_estados_cobrado
             ]
             sin_cheques = len(pedido.cheques) == 0
+            # Se usa en ambas ramas (monto_total de la respuesta); antes solo se definía sin cheques
+            descuento_nc = sum(float(nc.monto) for nc in pedido.notas_credito) if pedido.notas_credito else 0.0
 
             if sin_cheques:
                 # Pedido con medio cheque pero sin cheques ingresados aún
-                descuento_nc = sum(float(nc.monto) for nc in pedido.notas_credito) if pedido.notas_credito else 0.0
                 monto_pendiente = float(pedido.monto_total) - descuento_nc
                 fecha_venc_proxima = datetime.now(timezone.utc) + timedelta(days=30)
                 dias_vencimiento = 30
@@ -115,7 +116,10 @@ def listar_cobranza(
                 "medio_pago_nombre": pedido.medio_pago.nombre if pedido.medio_pago else None,
                 "tipo_documento": pedido.tipo_documento_tributario.nombre if pedido.tipo_documento_tributario else None,
                 "fecha_creacion": pedido.fecha_pedido.isoformat() if pedido.fecha_pedido else None,
-                "entregado": (pedido.despacho is not None and pedido.despacho.estado_despacho.value == "ENTREGADO") or (pedido.estado_pedido is not None and pedido.estado_pedido.es_final),
+                "entregado": pedido.fecha_entrega is not None or (pedido.despacho is not None and pedido.despacho.estado_despacho.value == "ENTREGADO") or (pedido.estado_pedido is not None and pedido.estado_pedido.es_final),
+                # Modalidad y fecha de entrega (add-modalidad-entrega-pedido)
+                "modalidad_entrega": pedido.modalidad_entrega,
+                "fecha_entrega": pedido.fecha_entrega.isoformat() if pedido.fecha_entrega else None,
                 "estado_pedido_nombre": pedido.estado_pedido.nombre if pedido.estado_pedido else None,
                 "estado_pedido_color": pedido.estado_pedido.color if pedido.estado_pedido else None,
             })
@@ -163,7 +167,10 @@ def listar_cobranza(
                 "tipo_documento": pedido.tipo_documento_tributario.nombre if pedido.tipo_documento_tributario else None,
                 "fecha_creacion": cobro.fecha_creacion.isoformat() if cobro.fecha_creacion else None,
                 "observaciones": cobro.observaciones,
-                "entregado": (pedido.despacho is not None and pedido.despacho.estado_despacho.value == "ENTREGADO") or (pedido.estado_pedido is not None and pedido.estado_pedido.es_final),
+                "entregado": pedido.fecha_entrega is not None or (pedido.despacho is not None and pedido.despacho.estado_despacho.value == "ENTREGADO") or (pedido.estado_pedido is not None and pedido.estado_pedido.es_final),
+                # Modalidad y fecha de entrega (add-modalidad-entrega-pedido)
+                "modalidad_entrega": pedido.modalidad_entrega,
+                "fecha_entrega": pedido.fecha_entrega.isoformat() if pedido.fecha_entrega else None,
                 "estado_pedido_nombre": pedido.estado_pedido.nombre if pedido.estado_pedido else None,
                 "estado_pedido_color": pedido.estado_pedido.color if pedido.estado_pedido else None,
             })
