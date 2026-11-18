@@ -1,0 +1,77 @@
+{
+  "active": false,
+  "connections": {
+    "GET Catálogo Backend": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Respond to Webhook",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "GET Catálogo Backend",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "id": "Ojcal1wIkrB0i1C5",
+  "name": "Masas Estación - Catálogo de Productos",
+  "nodes": [
+    {
+      "name": "Webhook",
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "masas-estacion/catalogo",
+        "responseMode": "responseNode"
+      },
+      "position": [
+        240,
+        300
+      ],
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2
+    },
+    {
+      "name": "GET Catálogo Backend",
+      "parameters": {
+        "method": "GET",
+        "options": {},
+        "url": "https://api.masasestacion.cl/api/productos/catalogo"
+      },
+      "position": [
+        480,
+        300
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Respond to Webhook",
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}"
+      },
+      "position": [
+        720,
+        300
+      ],
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1
+    }
+  ],
+  "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionOrder": "v1",
+    "timezone": "America/Santiago"
+  }
+}

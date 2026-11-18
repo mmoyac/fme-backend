@@ -2,10 +2,10 @@
 """
 Modelos de la base de datos con SQLAlchemy ORM.
 """
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, UniqueConstraint, Index, Text, Table, Numeric, Enum, Date
+from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, ForeignKey, UniqueConstraint, Index, Text, Table, Numeric, Enum, Date, LargeBinary
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from sqlalchemy.dialects.postgresql import JSON
+from sqlalchemy.dialects.postgresql import JSON, JSONB, UUID as PG_UUID
 from .database import Base
 import enum
 
@@ -2195,3 +2195,76 @@ class OtLog(Base):
     ot = relationship("OrdenTrabajo", back_populates="log")
     etapa = relationship("OtEtapaTipo", foreign_keys=[etapa_id])
     usuario = relationship("User", foreign_keys=[usuario_id])
+
+
+# ---------------------------------------------------------------------------
+# Pasarelas de pago (change add-pasarelas-pago; arquitectura portada de EffiCheck)
+# ---------------------------------------------------------------------------
+class PasarelaPago(Base):
+    """Pasarela de pago configurada por tenant. Las credenciales se guardan cifradas (AES-256-GCM) y nunca se devuelven."""
+    __tablename__ = "pasarelas_pago"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    proveedor = Column(String(20), nullable=False)          # SIMULADA | MERCADOPAGO | FLOW | KHIPU
+    nombre_visible = Column(String(60), nullable=False)     # lo que ve el cliente en el checkout
+    ambiente = Column(String(12), nullable=False, default="INTEGRACION", server_default="INTEGRACION")  # INTEGRACION | PRODUCCION
+    credenciales_cifradas = Column(LargeBinary, nullable=True)
+    credenciales_actualizadas_en = Column(DateTime(timezone=True), nullable=True)
+    orden = Column(Integer, nullable=False, default=0, server_default="0")
+    activo = Column(Boolean, nullable=False, default=False, server_default="false")
+    ultima_prueba_en = Column(DateTime(timezone=True), nullable=True)
+    ultima_prueba_ok = Column(Boolean, nullable=True)
+    ultima_prueba_mensaje = Column(String(300), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class PagoOnline(Base):
+    """Intención de pago en línea de un pedido. El resultado lo decide siempre el backend consultando al proveedor."""
+    __tablename__ = "pagos_online"
+    __table_args__ = (
+        UniqueConstraint("orden_comercio", name="uq_pagos_online_orden_comercio"),
+        Index("ix_pagos_online_pasarela_token", "pasarela_id", "token_pasarela"),
+        Index("ix_pagos_online_estado", "estado", "iniciado_en"),
+    )
+
+    id = Column(PG_UUID(as_uuid=False), primary_key=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    pedido_id = Column(Integer, ForeignKey("pedidos.id", ondelete="RESTRICT"), nullable=False, index=True)
+    pasarela_id = Column(Integer, ForeignKey("pasarelas_pago.id", ondelete="RESTRICT"), nullable=False)
+    monto = Column(Numeric(12, 0), nullable=False)
+    estado = Column(String(12), nullable=False, default="INICIADO")  # INICIADO | CONFIRMADO | RECHAZADO | EXPIRADO | EN_REVISION
+    iniciado_en = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    expira_en = Column(DateTime(timezone=True), nullable=False)
+    orden_comercio = Column(String(26), nullable=False)      # UUID en base32 sin relleno (máximo de Webpay)
+    email_pagador = Column(String(255), nullable=True)
+    url_sitio = Column(String(255), nullable=True)           # origen de la landing a la que vuelve el cliente
+    url_pago = Column(Text, nullable=True)                   # redirección al proveedor (para reintentar)
+    token_pasarela = Column(String(200), nullable=True)
+    id_transaccion_proveedor = Column(String(100), nullable=True)
+    codigo_autorizacion = Column(String(60), nullable=True)
+    ultimos_digitos = Column(String(8), nullable=True)
+    respuesta_proveedor = Column(JSONB, nullable=True)       # filtrada a lista blanca (sin datos sensibles)
+    monto_confirmado = Column(Numeric(12, 0), nullable=True)
+    confirmado_en = Column(DateTime(timezone=True), nullable=True)
+    motivo_revision = Column(String(300), nullable=True)
+
+    pedido = relationship("Pedido")
+    pasarela = relationship("PasarelaPago")
+
+
+class VerificacionEmail(Base):
+    """Código de verificación del correo del cliente anónimo de la tienda (se guarda solo el hash)."""
+    __tablename__ = "verificaciones_email"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    email = Column(String(255), nullable=False)               # en minúsculas
+    codigo_hash = Column(String(64), nullable=False)          # HMAC-SHA256(código)
+    expira_en = Column(DateTime(timezone=True), nullable=False)
+    intentos = Column(Integer, nullable=False, default=0, server_default="0")
+    verificado_en = Column(DateTime(timezone=True), nullable=True)
+    anulado = Column(Boolean, nullable=False, default=False, server_default="false")
+    ip = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

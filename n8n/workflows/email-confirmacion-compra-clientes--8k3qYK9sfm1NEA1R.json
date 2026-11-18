@@ -1,0 +1,69 @@
+{
+  "active": true,
+  "connections": {
+    "Pedido Confirmado": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Enviar email al cliente",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "id": "8k3qYK9sfm1NEA1R",
+  "name": "Email Confirmación Compra - Clientes",
+  "nodes": [
+    {
+      "name": "Pedido Confirmado",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pedido-confirmado",
+        "responseData": "firstEntryJson",
+        "responseMode": "onReceived"
+      },
+      "position": [
+        240,
+        300
+      ],
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "87f50152-2c72-47db-8499-aff7a6451091"
+    },
+    {
+      "credentials": {
+        "smtp": {
+          "id": "KRrMzVD5Mr26KBVI",
+          "name": "SMTP account"
+        }
+      },
+      "name": "Enviar email al cliente",
+      "parameters": {
+        "emailType": "html",
+        "fromEmail": "mmoyainfo@gmail.com",
+        "html": "=<div style=\"font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px\"><h2 style=\"color:#1e293b\">¡Gracias por tu compra, {{ $json.body.cliente_nombre }}! 🎉</h2><p>Tu pedido ha sido confirmado y está siendo preparado.</p><div style=\"background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px;margin:20px 0\"><p><strong>N° Pedido:</strong> {{ $json.body.numero_pedido }}</p><p><strong>Fecha:</strong> {{ $json.body.fecha_pedido }}</p><p><strong>Total:</strong> ${{ $json.body.monto_total }}</p></div><h3 style=\"color:#1e293b\">Detalle de tu pedido:</h3><table style=\"width:100%;border-collapse:collapse\"><thead><tr style=\"background:#1e293b;color:white\"><th style=\"padding:8px;text-align:left\">Producto</th><th style=\"padding:8px;text-align:center\">Cant.</th><th style=\"padding:8px;text-align:right\">Subtotal</th></tr></thead><tbody>{{ $json.body.items.map(i => `<tr style=\"border-bottom:1px solid #e2e8f0\"><td style=\"padding:8px\">${i.producto}</td><td style=\"padding:8px;text-align:center\">${i.cantidad}</td><td style=\"padding:8px;text-align:right\">$${i.subtotal}</td></tr>`).join('') }}</tbody></table><div style=\"text-align:center;margin:28px 0\"><a href=\"{{ $json.body.seguimiento_url }}\" style=\"display:inline-block;padding:14px 32px;background:#1e293b;color:white;border-radius:8px;text-decoration:none;font-size:15px;font-weight:bold\">📦 Ver estado de mi pedido</a></div><p style=\"margin-top:24px;color:#64748b;font-size:14px\">Si tienes alguna consulta, contáctanos directamente.</p><p style=\"color:#64748b;font-size:14px\"><strong>{{ $json.body.tenant_nombre }}</strong></p><hr style=\"margin:24px 0;border:none;border-top:1px solid #e2e8f0\"><p style=\"color:#94a3b8;font-size:11px;text-align:center\">¿No deseas recibir más correos? <a href=\"{{ $json.body.unsub_url }}\" style=\"color:#94a3b8\">Desuscribirme</a></p></div>",
+        "options": {
+          "appendAttribution": false
+        },
+        "subject": "=✅ Tu pedido {{ $json.body.numero_pedido }} fue confirmado - {{ $json.body.tenant_nombre }}",
+        "toEmail": "={{ $json.body.cliente_email }}"
+      },
+      "position": [
+        520,
+        300
+      ],
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1
+    }
+  ],
+  "settings": {
+    "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "timezone": "America/Santiago"
+  }
+}

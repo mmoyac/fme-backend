@@ -1,3 +1,5 @@
+> **REEMPLAZADO PARCIALMENTE (2026-11-18)** por el change `add-pasarelas-pago`: `/api/payments/*` y el Payment Brick se eliminaron (Mercado Pago pasa a Checkout Pro). Sigue vigente el arreglo del 500 en `crear_pedido_frontend` (tareas 1.x y 2.1, ya hechas). Las tareas 2.3, 3.x y 4.x sobre `process_payment` y el Brick ya no aplican.
+
 ## Why
 
 Al pagar con Mercado Pago en el checkout (`masasestacion.cl/checkout`), el cliente recibe el mensaje genérico **"Error interno del servidor"** y no puede completar la compra. El flujo "pago coordinado" sí funciona. El mensaje es el fallback del middleware CORS para excepciones no controladas, por lo que la causa real queda oculta para el usuario y solo visible en el traceback del servidor. Mientras tanto, se pierden ventas por la pasarela de pago principal.

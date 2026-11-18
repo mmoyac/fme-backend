@@ -110,7 +110,6 @@ El código fuente del backend (`fme-backend`) utiliza una arquitectura modular. 
 # ❌ NO usar Python global
 python scripts/seed_api.py
 uvicorn main:app --reload
-pip install mercadopago
 pytest tests/
 
 # Estos comandos usarían el Python global y fallarían por dependencias faltantes
@@ -159,8 +158,11 @@ DB_NAME=fme_database
 # La URL de conexión utiliza 'db' como host (el nombre del servicio Docker)
 DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
 
-# Mercado Pago (Sandbox / Producción)
-MP_ACCESS_TOKEN=TEST-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+# Pagos en línea (change add-pasarelas-pago; ver docs/PASARELAS_PAGO.md)
+# Las credenciales de Mercado Pago/Flow/Khipu NO van en variables: se cargan cifradas por tenant en el backoffice.
+ENTORNO=desarrollo                 # solo local; en producción no se define (= produccion)
+PASARELAS_CLAVE_MAESTRA=           # obligatoria en producción: 32 bytes base64
+URL_PUBLICA_PAGOS=                 # opcional en local: túnel https para avisos del proveedor
 ```
 
 ### 2.2. Comandos Docker

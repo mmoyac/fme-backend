@@ -72,6 +72,32 @@ def notify_solicitud_creada(
         _push_sse(notif.user_id, notif)
 
 
+def notify_admins_tenant(
+    db: Session,
+    tenant_id: int,
+    tipo: str,
+    titulo: str,
+    cuerpo: str,
+    payload: Optional[dict] = None,
+    action_url: Optional[str] = None,
+) -> None:
+    """Notifica a todos los admins activos del tenant (pagos en línea: pedido pagado, sin confirmar, en revisión).
+
+    Solo guarda en BD (la campana lee el conteo). No empuja SSE: puede llamarse desde hilos de fondo, y la Queue de
+    asyncio no es segura entre hilos.
+    """
+    ids = [u.id for u in (
+        db.query(User.id).join(Role, User.role_id == Role.id)
+        .filter(User.tenant_id == tenant_id, User.is_active == True,
+                Role.nombre.in_(["admin", "administrador", "Admin", "Administrador"]))
+        .all()
+    )]
+    for user_id in ids:
+        db.add(Notification(tenant_id=tenant_id, user_id=user_id, type=tipo, title=titulo[:255], body=cuerpo,
+                            payload=payload, action_url=action_url))
+    db.commit()
+
+
 def _push_sse(user_id: int, notif: Notification) -> None:
     """Pone el evento en la Queue del usuario si está conectado."""
     queue = _connections.get(user_id)

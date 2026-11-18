@@ -1,3 +1,8 @@
+> ⚠️ **OBSOLETO (2026-11-18).** Este documento describe la integración anterior con el Payment Brick (`/api/payments/*`),
+> que fue eliminada por insegura (el navegador decidía el monto). La integración vigente es multipasarela
+> (Mercado Pago Checkout Pro, Flow, Khipu): ver [`docs/PASARELAS_PAGO.md`](docs/PASARELAS_PAGO.md) y el change
+> OpenSpec `add-pasarelas-pago`.
+
 # 🎉 INTEGRACIÓN MERCADO PAGO - COMPLETADA
 
 ## ✅ Estado Final del Proyecto

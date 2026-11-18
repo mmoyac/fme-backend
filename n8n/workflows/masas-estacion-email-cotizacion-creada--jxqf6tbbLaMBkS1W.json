@@ -1,0 +1,68 @@
+{
+  "active": true,
+  "connections": {
+    "Cotización Creada": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Enviar email al cliente",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "id": "jxqf6tbbLaMBkS1W",
+  "name": "Masas Estación - Email Cotización Creada",
+  "nodes": [
+    {
+      "name": "Cotización Creada",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cotizacion-creada",
+        "responseData": "firstEntryJson",
+        "responseMode": "onReceived"
+      },
+      "position": [
+        240,
+        300
+      ],
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "8f255aca-1f19-4441-9d3c-35cbc28b59f1"
+    },
+    {
+      "credentials": {
+        "smtp": {
+          "id": "KRrMzVD5Mr26KBVI",
+          "name": "SMTP account"
+        }
+      },
+      "name": "Enviar email al cliente",
+      "parameters": {
+        "emailType": "html",
+        "fromEmail": "mmoyainfo@gmail.com",
+        "html": "=<div style=\"font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px\"><h2 style=\"color:#1e293b\">Hola {{ $json.body.cliente_nombre }},</h2><p>Recibimos tu solicitud de cotización. En breve nuestro equipo la revisará y te enviaremos los precios.</p><div style=\"background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px;margin:20px 0\"><p><strong>N° Cotización:</strong> {{ $json.body.numero_cotizacion }}</p><p><strong>Fecha:</strong> {{ $json.body.fecha }}</p>{{ $json.body.fecha_vencimiento ? '<p><strong>Válida hasta:</strong> ' + $json.body.fecha_vencimiento + '</p>' : '' }}</div><h3 style=\"color:#1e293b\">Productos solicitados:</h3><table style=\"width:100%;border-collapse:collapse\"><thead><tr style=\"background:#1e293b;color:white\"><th style=\"padding:8px;text-align:left\">Producto</th><th style=\"padding:8px;text-align:center\">Cant.</th></tr></thead><tbody>{{ $json.body.items.map(i => `<tr style=\"border-bottom:1px solid #e2e8f0\"><td style=\"padding:8px\">${i.producto}</td><td style=\"padding:8px;text-align:center\">${i.cantidad}</td></tr>`).join('') }}</tbody></table><p style=\"margin-top:24px;color:#64748b;font-size:14px\">Te notificaremos cuando tu cotización esté lista.</p><p style=\"color:#64748b;font-size:14px\"><strong>{{ $json.body.tenant_nombre }}</strong></p><hr style=\"margin:24px 0;border:none;border-top:1px solid #e2e8f0\"><p style=\"color:#94a3b8;font-size:11px;text-align:center\">¿No deseas recibir más correos? <a href=\"{{ $json.body.unsub_url }}\" style=\"color:#94a3b8\">Desuscribirme</a></p></div>",
+        "options": {
+          "appendAttribution": false
+        },
+        "subject": "=📋 Recibimos tu solicitud de cotización {{ $json.body.numero_cotizacion }} - {{ $json.body.tenant_nombre }}",
+        "toEmail": "={{ $json.body.cliente_email }}"
+      },
+      "position": [
+        520,
+        300
+      ],
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1
+    }
+  ],
+  "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "timezone": "America/Santiago"
+  }
+}

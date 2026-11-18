@@ -15,6 +15,15 @@ API REST para e-commerce de Masas Estación, construida con FastAPI, SQLAlchemy 
 - 🔐 **JWT Auth** - Autenticación y autorización
 - ✅ **32 Tests** - Suite completa de tests automatizados
 
+## 📚 Documentación clave
+
+| Tema | Dónde |
+|---|---|
+| Pasarelas de pago (Mercado Pago, Flow, Khipu), checkout de la tienda, correo verificado, operación y checklist de producción | [`docs/PASARELAS_PAGO.md`](docs/PASARELAS_PAGO.md) |
+| Workflows de n8n versionados (correos, código de verificación, cron, agente de chat) y cómo exportarlos | [`n8n/README.md`](n8n/README.md) · `python scripts/n8n_exportar.py` |
+| Especificaciones (OpenSpec): specs vigentes y changes en curso (`add-pasarelas-pago`, `document-integracion-n8n`, …) | [`openspec/`](openspec/) |
+| Reglas para agentes de IA (capacitación por módulo, n8n en el repo, eficiencia) | [`CLAUDE.md`](CLAUDE.md), [`AGENTS.md`](AGENTS.md) |
+
 ## 🚀 Inicio Rápido
 
 ### Prerrequisitos

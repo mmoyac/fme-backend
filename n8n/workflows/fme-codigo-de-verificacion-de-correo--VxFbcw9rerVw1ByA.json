@@ -1,0 +1,68 @@
+{
+  "active": true,
+  "connections": {
+    "Webhook verificacion-email": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Enviar código",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "id": "VxFbcw9rerVw1ByA",
+  "name": "FME - Código de verificación de correo",
+  "nodes": [
+    {
+      "name": "Webhook verificacion-email",
+      "parameters": {
+        "httpMethod": "POST",
+        "options": {},
+        "path": "verificacion-email",
+        "responseMode": "onReceived"
+      },
+      "position": [
+        260,
+        300
+      ],
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "5b0d6c1e-7a2f-4c3e-9d81-verifemail01"
+    },
+    {
+      "credentials": {
+        "smtp": {
+          "id": "KRrMzVD5Mr26KBVI",
+          "name": "SMTP account"
+        }
+      },
+      "name": "Enviar código",
+      "parameters": {
+        "emailType": "html",
+        "fromEmail": "mmoyainfo@gmail.com",
+        "html": "=<div style=\"font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#1e293b\"><h2 style=\"margin:0 0 12px\">{{ $json.body.tienda || 'Tu tienda' }}</h2><p>Usa este código para verificar tu correo y completar tu pedido:</p><p style=\"font-size:34px;letter-spacing:8px;font-weight:bold;background:#f1f5f9;padding:16px;text-align:center;border-radius:8px\">{{ $json.body.codigo }}</p><p>El código vence en {{ $json.body.minutos }} minutos.</p><p style=\"color:#64748b;font-size:13px\">Si no fuiste tú, ignora este correo. Nunca te pediremos este código por teléfono ni por WhatsApp.</p></div>",
+        "options": {
+          "appendAttribution": false
+        },
+        "subject": "={{ $json.body.codigo }} es tu código de verificación{{ $json.body.tienda ? ' - ' + $json.body.tienda : '' }}",
+        "toEmail": "={{ $json.body.email }}"
+      },
+      "position": [
+        520,
+        300
+      ],
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1
+    }
+  ],
+  "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "timezone": "America/Santiago"
+  }
+}

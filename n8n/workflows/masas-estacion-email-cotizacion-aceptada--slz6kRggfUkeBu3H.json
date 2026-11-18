@@ -1,0 +1,68 @@
+{
+  "active": true,
+  "connections": {
+    "Cotización Aceptada": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Enviar email al cliente",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "id": "slz6kRggfUkeBu3H",
+  "name": "Masas Estación - Email Cotización Aceptada",
+  "nodes": [
+    {
+      "name": "Cotización Aceptada",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cotizacion-aceptada",
+        "responseData": "firstEntryJson",
+        "responseMode": "onReceived"
+      },
+      "position": [
+        240,
+        300
+      ],
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "0e6bc231-f166-443c-9245-8e3ef03791d6"
+    },
+    {
+      "credentials": {
+        "smtp": {
+          "id": "KRrMzVD5Mr26KBVI",
+          "name": "SMTP account"
+        }
+      },
+      "name": "Enviar email al cliente",
+      "parameters": {
+        "emailType": "html",
+        "fromEmail": "mmoyainfo@gmail.com",
+        "html": "=<div style=\"font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px\"><h2 style=\"color:#1e293b\">¡Excelente, {{ $json.body.cliente_nombre }}! 🎉</h2><p>Tu cotización fue aceptada y hemos generado tu pedido.</p><div style=\"background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px;margin:20px 0\"><p><strong>N° Cotización:</strong> {{ $json.body.numero_cotizacion }}</p><p><strong>N° Pedido:</strong> {{ $json.body.numero_pedido }}</p><p><strong>Fecha:</strong> {{ $json.body.fecha }}</p><p><strong>Subtotal productos:</strong> ${{ $json.body.monto_total.toLocaleString('es-CL') }}</p>{{ $json.body.tiene_delivery ? '<p><strong>Costo delivery:</strong> $' + ($json.body.costo_delivery ?? 0).toLocaleString('es-CL') + '</p><p><strong>Total a pagar:</strong> $' + ($json.body.monto_total + ($json.body.costo_delivery ?? 0)).toLocaleString('es-CL') + '</p>' : '' }}<p><strong>Estado:</strong> {{ $json.body.estado_pedido === 'CONFIRMADO' ? '✅ Confirmado — en preparación' : '⏳ En proceso de producción' }}</p></div><h3 style=\"color:#1e293b\">Detalle:</h3><table style=\"width:100%;border-collapse:collapse\"><thead><tr style=\"background:#1e293b;color:white\"><th style=\"padding:8px;text-align:left\">Producto</th><th style=\"padding:8px;text-align:center\">Cant.</th><th style=\"padding:8px;text-align:right\">Subtotal</th></tr></thead><tbody>{{ $json.body.items.map(i => `<tr style=\"border-bottom:1px solid #e2e8f0\"><td style=\"padding:8px\">${i.producto}</td><td style=\"padding:8px;text-align:center\">${i.cantidad}</td><td style=\"padding:8px;text-align:right\">$${i.subtotal.toLocaleString('es-CL')}</td></tr>`).join('') }}</tbody></table><p style=\"margin-top:24px;color:#64748b;font-size:14px\">{{ $json.body.estado_pedido === 'CONFIRMADO' ? 'Tu pedido está siendo preparado. Te avisaremos cuando esté en camino.' : 'Algunos productos están en producción. Te notificaremos cuando tu pedido esté listo.' }}</p><p style=\"color:#64748b;font-size:14px\"><strong>{{ $json.body.tenant_nombre }}</strong></p><hr style=\"margin:24px 0;border:none;border-top:1px solid #e2e8f0\"><p style=\"color:#94a3b8;font-size:11px;text-align:center\">¿No deseas recibir más correos? <a href=\"{{ $json.body.unsub_url }}\" style=\"color:#94a3b8\">Desuscribirme</a></p></div>",
+        "options": {
+          "appendAttribution": false
+        },
+        "subject": "=✅ Tu cotización {{ $json.body.numero_cotizacion }} fue aceptada - Pedido {{ $json.body.numero_pedido }}",
+        "toEmail": "={{ $json.body.cliente_email }}"
+      },
+      "position": [
+        520,
+        300
+      ],
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1
+    }
+  ],
+  "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "timezone": "America/Santiago"
+  }
+}

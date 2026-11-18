@@ -46,7 +46,9 @@ class PedidoCreateFrontend(BaseModel):
     cliente_apellido: Optional[str] = Field(None, max_length=100)
     cliente_email: str = Field(..., min_length=5)
     cliente_telefono: str = Field(..., min_length=9, max_length=20)
-    
+    # Token de correo verificado (código por correo; POST /api/pedidos/verificacion-email/confirmar)
+    email_token: Optional[str] = Field(None, max_length=500)
+
     # Campos tributarios del cliente
     cliente_rut: Optional[str] = Field(None, max_length=20, description="RUT del cliente (obligatorio para factura)")
     cliente_razon_social: Optional[str] = Field(None, max_length=255, description="Razón social empresarial")
@@ -261,7 +263,10 @@ class PedidoConRelaciones(BaseModel):
     usuario_id: Optional[int] = None
     usuario_nombre: Optional[str] = Field(None, description="Nombre del usuario que creó el pedido")
     usuario_email: Optional[str] = Field(None, description="Email del usuario que creó el pedido")
-    
+    # Canal de venta (para mostrar "Tienda online" en pedidos sin usuario)
+    canal_venta_codigo: Optional[str] = None
+    canal_venta_nombre: Optional[str] = None
+
     # Información del despacho (opcional)
     despacho: Optional[dict] = Field(None, description="Información del despacho asignado (si existe)")
 
@@ -295,6 +300,8 @@ class PedidoConfirmacion(BaseModel):
     puntos_ganados: Optional[int] = None
     puntos_usados: Optional[int] = None
     descuento_puntos: Optional[float] = None
+    # Credencial para iniciar el pago en línea y consultar el seguimiento (change add-pasarelas-pago)
+    token_seguimiento: Optional[str] = None
 
 
 # Importar para resolver la referencia circular

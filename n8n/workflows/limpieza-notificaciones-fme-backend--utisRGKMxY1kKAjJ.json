@@ -1,0 +1,115 @@
+{
+  "active": true,
+  "connections": {
+    "Cada noche 3am": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "DELETE cleanup notificaciones",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "DELETE cleanup notificaciones": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Log resultado",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "id": "utisRGKMxY1kKAjJ",
+  "name": "Limpieza Notificaciones - FME Backend",
+  "nodes": [
+    {
+      "name": "Cada noche 3am",
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "expression": "0 3 * * *",
+              "field": "cronExpression"
+            }
+          ]
+        }
+      },
+      "position": [
+        240,
+        300
+      ],
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2
+    },
+    {
+      "name": "DELETE cleanup notificaciones",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "__SECRETO__:X-API-Key"
+            }
+          ]
+        },
+        "method": "DELETE",
+        "options": {},
+        "sendHeaders": true,
+        "url": "https://api.masasestacion.cl/api/notifications/cleanup"
+      },
+      "position": [
+        480,
+        300
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2
+    },
+    {
+      "name": "Log resultado",
+      "parameters": {
+        "fields": {
+          "values": [
+            {
+              "name": "eliminadas_leidas",
+              "numberValue": "={{ $json.deleted_read }}",
+              "type": "number"
+            },
+            {
+              "name": "eliminadas_no_leidas",
+              "numberValue": "={{ $json.deleted_unread }}",
+              "type": "number"
+            },
+            {
+              "name": "total_eliminadas",
+              "numberValue": "={{ $json.total_deleted }}",
+              "type": "number"
+            },
+            {
+              "name": "ejecutado_en",
+              "stringValue": "={{ $now }}",
+              "type": "string"
+            }
+          ]
+        },
+        "mode": "manual"
+      },
+      "position": [
+        720,
+        300
+      ],
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4
+    }
+  ],
+  "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "timezone": "America/Santiago"
+  }
+}

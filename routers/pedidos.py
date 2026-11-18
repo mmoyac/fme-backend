@@ -557,6 +557,73 @@ def registrar_venta_en_caja(pedido: Pedido, usuario_actual_id: int, db: Session)
     # por lo que no necesitamos actualizar campos en TurnoCaja
 
 
+from pydantic import BaseModel  # noqa: E402
+
+
+class _ValidarEmail(BaseModel):
+    email: str
+
+
+@router.post("/validar-email", dependencies=[Depends(require_modulo("tienda_online"))])
+def validar_email_checkout(datos: _ValidarEmail):
+    """Valida el correo del checkout: formato, dominio que recibe correo (DNS) y sugerencia de typo.
+    Respuesta: {valido, email, error, sugerencia}. Síncrono a propósito (DNS bloqueante → threadpool)."""
+    from utils.email_check import validar_email_cliente
+    return validar_email_cliente(datos.email)
+
+
+class _EnviarCodigo(BaseModel):
+    email: str
+
+
+class _ConfirmarCodigo(BaseModel):
+    email: str
+    codigo: str
+
+
+_ventanas_ip_codigo: dict = {}
+
+
+def _limitar_ip_codigo(request: Request) -> None:
+    """Máximo 15 envíos de código por hora por IP (en memoria del proceso)."""
+    import time as _t
+    ip = request.headers.get("x-real-ip") or (request.client.host if request.client else "?")
+    ahora = _t.monotonic()
+    v = [t for t in _ventanas_ip_codigo.get(ip, []) if ahora - t < 3600]
+    if len(v) >= 15:
+        raise HTTPException(status_code=429, detail="Demasiadas solicitudes. Intenta más tarde.")
+    v.append(ahora)
+    _ventanas_ip_codigo[ip] = v
+
+
+@router.post("/verificacion-email/enviar", dependencies=[Depends(require_modulo("tienda_online"))])
+def enviar_codigo_email(datos: _EnviarCodigo, request: Request, db: Session = Depends(get_db)):
+    """Envía un código de 6 dígitos al correo del cliente (vía n8n). Exige un correo con formato y dominio válidos."""
+    from utils.email_check import validar_email_cliente
+    from services import verificacion_email as ve
+    chequeo = validar_email_cliente(datos.email)
+    if not chequeo["valido"]:
+        raise HTTPException(status_code=400, detail=chequeo["error"])
+    _limitar_ip_codigo(request)
+    tenant = get_tenant_from_request(request, db)
+    try:
+        return ve.enviar_codigo(db, tenant.id, chequeo["email"], request.headers.get("x-real-ip")
+                                or (request.client.host if request.client else None))
+    except ve.ErrorVerificacion as e:
+        raise HTTPException(status_code=429, detail=str(e))
+
+
+@router.post("/verificacion-email/confirmar", dependencies=[Depends(require_modulo("tienda_online"))])
+def confirmar_codigo_email(datos: _ConfirmarCodigo, request: Request, db: Session = Depends(get_db)):
+    """Verifica el código; devuelve un token firmado (30 días) que `POST /api/pedidos/` exige para ese correo."""
+    from services import verificacion_email as ve
+    tenant = get_tenant_from_request(request, db)
+    try:
+        return ve.confirmar_codigo(db, tenant.id, datos.email, datos.codigo)
+    except ve.ErrorVerificacion as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/", response_model=PedidoConfirmacion, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_modulo("tienda_online"))])
 def crear_pedido_frontend(
     request: Request,
@@ -587,12 +654,24 @@ def crear_pedido_frontend(
     tenant_id = tenant.id
     print(f"🎯 Pedido frontend - Tenant detectado: {tenant.nombre} (ID: {tenant_id})")
     
+    # 0.5. Validar el correo (formato y dominio que recibe correo): sin él no llegan confirmación ni seguimiento
+    from utils.email_check import validar_email_cliente
+    chequeo_email = validar_email_cliente(pedido_data.cliente_email)
+    if not chequeo_email["valido"]:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=chequeo_email["error"])
+    pedido_data.cliente_email = chequeo_email["email"]
+    # 0.6. El correo debe estar verificado con el código enviado (cliente anónimo de la tienda)
+    from services.verificacion_email import token_valido
+    if not token_valido(pedido_data.email_token, tenant_id, pedido_data.cliente_email):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Verifica tu correo con el código que te enviamos antes de confirmar el pedido")
+
     # 1. Buscar local WEB del tenant
     local_web = db.query(Local).filter(
         Local.codigo == 'WEB',
         Local.tenant_id == tenant_id
     ).first()
-    
+
     if not local_web:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -783,6 +862,7 @@ def crear_pedido_frontend(
         monto_total=monto_total,
         estado=db_pedido.estado_pedido.codigo if db_pedido.estado_pedido else 'PENDIENTE',
         mensaje="¡Pedido recibido! Te contactaremos pronto para coordinar el pago y entrega.",
+        token_seguimiento=db_pedido.token_seguimiento,
         puntos_ganados=puntos_ganados,
         puntos_usados=puntos_usar,
         descuento_puntos=descuento_puntos
@@ -1354,16 +1434,18 @@ def listar_pedidos(
     tipo_pedido_id: int = None,
     modalidad_entrega: Optional[str] = None,
     entregado: Optional[bool] = None,
+    pagado: Optional[bool] = None,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_active_user)
 ):
     """
     Lista todos los pedidos del tenant con filtros opcionales.
     - modalidad_entrega: RETIRO | DESPACHO; entregado: true/false (add-modalidad-entrega-pedido)
+    - pagado: true/false (add-pasarelas-pago: pagados en línea sin confirmar = estado PENDIENTE + pagado)
     
     **Uso:** Backoffice - Tabla de pedidos
     """
-    from sqlalchemy.orm import joinedload
+    from sqlalchemy.orm import joinedload, selectinload
     from database.models import EstadoPedido as EstadoPedidoModel, Despacho
     
     # Filtrar por tenant y por local asignado al usuario (local_defecto_id)
@@ -1375,14 +1457,16 @@ def listar_pedidos(
 
     query = db.query(Pedido).join(Cliente).filter(*filtros_base).options(
         joinedload(Pedido.cliente),
-        joinedload(Pedido.items).joinedload(ItemPedido.producto),
+        # Colecciones con selectinload: joinedload multiplicaba las filas (pedidos × ítems × cheques × NC)
+        selectinload(Pedido.items).joinedload(ItemPedido.producto),
         joinedload(Pedido.medio_pago),
         joinedload(Pedido.tipo_pedido),
         joinedload(Pedido.tipo_documento_tributario),
         joinedload(Pedido.usuario),
         joinedload(Pedido.estado_pedido),  # Cargar relación de estado
-        joinedload(Pedido.cheques),  # Para resumen de cobro
-        joinedload(Pedido.notas_credito)  # Para monto neto
+        selectinload(Pedido.cheques),  # Para resumen de cobro
+        selectinload(Pedido.notas_credito),  # Para monto neto
+        joinedload(Pedido.canal_venta),  # "Creado por" de pedidos sin usuario (tienda online)
     )
     
     if estado:
@@ -1400,6 +1484,8 @@ def listar_pedidos(
 
     if modalidad_entrega:
         query = query.filter(Pedido.modalidad_entrega == modalidad_entrega.strip().upper())
+    if pagado is not None:
+        query = query.filter(Pedido.es_pagado.is_(True) if pagado else Pedido.es_pagado.isnot(True))
     if entregado is not None:
         # Entregado = tiene fecha de entrega o está en estado ENTREGADO (pedidos antiguos sin fecha)
         from sqlalchemy import or_ as _or, and_ as _and
@@ -1426,11 +1512,19 @@ def listar_pedidos(
         ).group_by(AsignacionPicking.item_pedido_id).all()
         peso_por_item = {row.item_pedido_id: float(row.total_kg) for row in peso_rows}
 
+    # Despachos de todos los pedidos en una consulta (antes: una consulta por pedido).
+    # Se conserva el primero por pedido, como hacía .first().
+    despacho_por_pedido = {}
+    ids_pedidos = [p.id for p in pedidos]
+    if ids_pedidos:
+        for d in db.query(Despacho).filter(Despacho.pedido_id.in_(ids_pedidos)).order_by(Despacho.id).all():
+            despacho_por_pedido.setdefault(d.pedido_id, d)
+
     # Mapear a schema de respuesta
     result = []
     for pedido in pedidos:
         # Verificar si el pedido tiene despacho asignado
-        despacho = db.query(Despacho).filter(Despacho.pedido_id == pedido.id).first()
+        despacho = despacho_por_pedido.get(pedido.id)
         
         pedido_dict = {
             'id': pedido.id,
@@ -1482,6 +1576,8 @@ def listar_pedidos(
             'usuario_id': pedido.usuario_id,
             'usuario_nombre': pedido.usuario.nombre_completo if pedido.usuario else None,
             'usuario_email': pedido.usuario.email if pedido.usuario else None,
+            'canal_venta_codigo': pedido.canal_venta.codigo if pedido.canal_venta else None,
+            'canal_venta_nombre': pedido.canal_venta.nombre if pedido.canal_venta else None,
             # Resumen de cobro de cheques (estado_id=3 es COBRADO)
             'monto_cobrado_cheques': sum(float(c.monto) for c in pedido.cheques if c.estado_id == 3) if pedido.cheques else 0.0,
             # Suma de notas de crédito emitidas
@@ -1508,7 +1604,7 @@ def listar_pedidos(
                 'precio_unitario_venta': float(item.precio_unitario_venta) if item.precio_unitario_venta else 0,
                 'subtotal': float(item.cantidad * item.precio_unitario_venta) if item.cantidad and item.precio_unitario_venta else 0,
                 'peso_total_kg': peso_por_item.get(item.id),
-            } for item in pedido.items] if pedido.items else []
+            } for item in sorted(pedido.items, key=lambda it: it.id)] if pedido.items else []
         }
         result.append(pedido_dict)
     

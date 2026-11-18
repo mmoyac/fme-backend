@@ -18,7 +18,7 @@ from routers.auth import get_current_active_user
 from utils.modulos import require_modulo
 
 # Importar routers
-from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, admin_utils, payments, test_payments, maestras, recetas, produccion, compras, cheques, puntos, caja, enrolamiento, gemini_vision, precios_proveedor, stock_cajas, alertas, tipos_pedido, despachos, configuracion, debug_menu, admin_configuracion_landing, tenants, etiquetas, paleta_colores, solicitudes_transferencia, locales_cliente, preventa, hojas_ruta, vehiculos, comisiones, canales_venta, cobranza, notas_credito, devoluciones, superadmin, oauth, notifications, ordenes_trabajo, cotizaciones, conteos_inventario, capacitacion
+from routers import inventario, productos, locales, precios, pedidos, movimientos_inventario, clientes, dashboard, auth, admin_users, admin_utils, pagos_online, maestras, recetas, produccion, compras, cheques, puntos, caja, enrolamiento, gemini_vision, precios_proveedor, stock_cajas, alertas, tipos_pedido, despachos, configuracion, debug_menu, admin_configuracion_landing, tenants, etiquetas, paleta_colores, solicitudes_transferencia, locales_cliente, preventa, hojas_ruta, vehiculos, comisiones, canales_venta, cobranza, notas_credito, devoluciones, superadmin, oauth, notifications, ordenes_trabajo, cotizaciones, conteos_inventario, capacitacion
 
 
 app = FastAPI(
@@ -178,6 +178,13 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(DynamicCORSMiddleware)
 
+
+@app.on_event("startup")
+def _iniciar_conciliacion_pagos():
+    """Conciliación periódica de pagos en línea (change add-pasarelas-pago): hilo de fondo cada 2 min."""
+    from services.pagos_online import iniciar_conciliacion
+    iniciar_conciliacion()
+
 # Servir archivos estáticos (imágenes de productos)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -204,8 +211,8 @@ app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"]
 app.include_router(admin_users.router, prefix="/api/admin", tags=["Administración Usuarios"])
 app.include_router(admin_utils.router, prefix="/api/admin", tags=["Utilidades Admin"], dependencies=[Depends(get_current_active_user)])
 app.include_router(auth.router, prefix="/api/auth", tags=["Autenticación"])
-app.include_router(payments.router, prefix="/api/payments", tags=["Pagos"])
-app.include_router(test_payments.router, prefix="/api/test", tags=["⚠️ TEST ONLY - ELIMINAR EN PRODUCCIÓN"])
+app.include_router(pagos_online.router, prefix="/api/pagos", tags=["Pagos en línea (público)"])
+app.include_router(pagos_online.admin_router, prefix="/api/admin/pasarelas", tags=["Admin - Pasarelas de pago"], dependencies=[Depends(require_modulo("tienda_online"))])
 app.include_router(maestras.router, prefix="/api/maestras", tags=["Tablas Maestras"], dependencies=[Depends(get_current_active_user)])
 app.include_router(recetas.router, prefix="/api/recetas", tags=["Recetas"], dependencies=[Depends(require_modulo("produccion")), Depends(get_current_active_user)])
 app.include_router(produccion.router, prefix="/api", tags=["Producción"], dependencies=[Depends(require_modulo("produccion"))])

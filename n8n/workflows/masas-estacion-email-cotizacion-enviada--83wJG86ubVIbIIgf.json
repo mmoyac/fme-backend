@@ -1,0 +1,68 @@
+{
+  "active": true,
+  "connections": {
+    "Cotización Enviada": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Enviar email al cliente",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "id": "83wJG86ubVIbIIgf",
+  "name": "Masas Estación - Email Cotización Enviada",
+  "nodes": [
+    {
+      "name": "Cotización Enviada",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cotizacion-enviada",
+        "responseData": "firstEntryJson",
+        "responseMode": "onReceived"
+      },
+      "position": [
+        240,
+        300
+      ],
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "27a90e59-8d5f-43fb-9bc7-92fce248fb51"
+    },
+    {
+      "credentials": {
+        "smtp": {
+          "id": "KRrMzVD5Mr26KBVI",
+          "name": "SMTP account"
+        }
+      },
+      "name": "Enviar email al cliente",
+      "parameters": {
+        "emailType": "html",
+        "fromEmail": "mmoyainfo@gmail.com",
+        "html": "=<div style=\"font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px\"><h2 style=\"color:#1e293b\">Hola {{ $json.body.cliente_nombre }},</h2><p>Tu cotización está lista. A continuación te presentamos el detalle con precios.</p><div style=\"background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px;margin:20px 0\"><p><strong>N° Cotización:</strong> {{ $json.body.numero_cotizacion }}</p><p><strong>Fecha:</strong> {{ $json.body.fecha }}</p>{{ $json.body.fecha_vencimiento ? '<p><strong>Válida hasta:</strong> ' + $json.body.fecha_vencimiento + '</p>' : '' }}{{ $json.body.version_numero > 1 ? '<p><strong>Versión:</strong> ' + $json.body.version_numero + '</p>' : '' }}</div><h3 style=\"color:#1e293b\">Detalle de la cotización:</h3><table style=\"width:100%;border-collapse:collapse\"><thead><tr style=\"background:#1e293b;color:white\"><th style=\"padding:8px;text-align:left\">Producto</th><th style=\"padding:8px;text-align:center\">Cant.</th><th style=\"padding:8px;text-align:right\">Precio unit.</th><th style=\"padding:8px;text-align:right\">Subtotal</th></tr></thead><tbody>{{ $json.body.items.map(i => `<tr style=\"border-bottom:1px solid #e2e8f0\"><td style=\"padding:8px\">${i.producto}</td><td style=\"padding:8px;text-align:center\">${i.cantidad}</td><td style=\"padding:8px;text-align:right\">$${i.precio_unitario.toLocaleString('es-CL')}</td><td style=\"padding:8px;text-align:right\">$${i.subtotal.toLocaleString('es-CL')}</td></tr>`).join('') }}</tbody><tfoot><tr style=\"background:#f8fafc\"><td colspan=\"3\" style=\"padding:10px;text-align:right\"><strong>Total productos:</strong></td><td style=\"padding:10px;text-align:right\"><strong>${{ $json.body.monto_total.toLocaleString('es-CL') }}</strong></td></tr></tfoot></table><div style=\"background:#fef9c3;border:1px solid #fbbf24;border-radius:8px;padding:12px;margin:20px 0;font-size:13px;color:#92400e\">&#9432; Este precio no incluye delivery. Si solicitas envío a domicilio, el costo se calculará según tu dirección al momento de confirmar el pedido.</div><p style=\"margin-top:24px;color:#64748b;font-size:14px\">Para aceptar o consultar sobre esta cotización, comunícate con nosotros.</p><p style=\"color:#64748b;font-size:14px\"><strong>{{ $json.body.tenant_nombre }}</strong></p><hr style=\"margin:24px 0;border:none;border-top:1px solid #e2e8f0\"><p style=\"color:#94a3b8;font-size:11px;text-align:center\">¿No deseas recibir más correos? <a href=\"{{ $json.body.unsub_url }}\" style=\"color:#94a3b8\">Desuscribirme</a></p></div>",
+        "options": {
+          "appendAttribution": false
+        },
+        "subject": "=💼 Tu cotización {{ $json.body.numero_cotizacion }} está lista - {{ $json.body.tenant_nombre }}",
+        "toEmail": "={{ $json.body.cliente_email }}"
+      },
+      "position": [
+        520,
+        300
+      ],
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1
+    }
+  ],
+  "settings": {
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "timezone": "America/Santiago"
+  }
+}

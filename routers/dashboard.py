@@ -70,7 +70,9 @@ def obtener_estadisticas_dashboard(db: Session = Depends(get_db), current_user =
     ).scalar() or 0
     
     # --- Pedidos pendientes de pago (filtrado por tenant) ---
-    pedidos_sin_pagar = db.query(Pedido).join(Cliente).filter(
+    # notas_credito en bloque (antes: una consulta por pedido sin pagar)
+    from sqlalchemy.orm import selectinload
+    pedidos_sin_pagar = db.query(Pedido).join(Cliente).options(selectinload(Pedido.notas_credito)).filter(
         Pedido.es_pagado == False,
         Pedido.estado_id != estado_cancelado.id if estado_cancelado else True,
         Cliente.tenant_id == current_user.tenant_id
@@ -528,4 +530,35 @@ def obtener_metricas_caja(db: Session = Depends(get_db), current_user = Depends(
             'por_tipo': operaciones_resumen,
             'total_operaciones': sum(op['cantidad'] for op in operaciones_resumen)
         }
+    }
+
+
+@router.get("/por-entregar")
+def pedidos_por_entregar(db: Session = Depends(get_db), current_user = Depends(get_current_active_user)):
+    """Pedidos del tenant que aún no se entregan, por estado, más los pagados en línea que quedaron sin confirmar
+    (change add-pasarelas-pago: la confirmación automática falló, p. ej. por stock en el local de despacho)."""
+    from database.models import EstadoPedido
+    filas = (
+        db.query(EstadoPedido.codigo, func.count(Pedido.id), func.coalesce(func.sum(Pedido.monto_total), 0))
+        .join(Pedido, Pedido.estado_id == EstadoPedido.id)
+        .filter(Pedido.tenant_id == current_user.tenant_id,
+                EstadoPedido.codigo.in_(["CONFIRMADO", "EN_PREPARACION", "EN_RUTA"]))
+        .group_by(EstadoPedido.codigo)
+        .all()
+    )
+    por_estado = {codigo: {"cantidad": int(n), "monto": float(m)} for codigo, n, m in filas}
+    pagados_sin_confirmar = (
+        db.query(func.count(Pedido.id))
+        .join(EstadoPedido, Pedido.estado_id == EstadoPedido.id)
+        .filter(Pedido.tenant_id == current_user.tenant_id, EstadoPedido.codigo == "PENDIENTE",
+                Pedido.es_pagado.is_(True))
+        .scalar()
+    ) or 0
+    vacio = {"cantidad": 0, "monto": 0.0}
+    return {
+        "confirmados": por_estado.get("CONFIRMADO", vacio),
+        "en_preparacion": por_estado.get("EN_PREPARACION", vacio),
+        "en_ruta": por_estado.get("EN_RUTA", vacio),
+        "pagados_sin_confirmar": int(pagados_sin_confirmar),
+        "total": sum(v["cantidad"] for v in por_estado.values()),
     }
