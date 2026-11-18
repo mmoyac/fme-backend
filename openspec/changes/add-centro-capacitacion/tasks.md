@@ -18,9 +18,9 @@
 ## 4. Visor e índice (fme-backoffice)
 
 - [x] 4.1 Crear `lib/api/capacitacion.ts` (`getIndice`, `getLeccion` que devuelve texto) con el cliente autenticado existente
-- [ ] 4.2 Crear `app/admin/capacitacion/page.tsx` (índice por sección con tarjetas de lecciones) y verificar en local con un usuario de tenant 1
-- [ ] 4.3 Crear `app/admin/capacitacion/[modulo]/[slug]/page.tsx`: iframe `srcdoc` con `sandbox="allow-scripts"` (sin `allow-same-origin`), ajuste de alto solo para mensajes de su propio iframe, navegación anterior/siguiente y mensaje para 403/404. Verificar que el quiz de prueba funciona y que `localStorage` lanza un error de seguridad desde la consola del iframe
-- [ ] 4.4 Agregar el acceso "🎓 Capacitación" en la barra superior (`components/layout/TopBar.tsx`, junto a la campana), no en el menú lateral, y permitir `/admin/capacitacion` a todos los roles en `app/admin/layout.tsx`. Verificar que aparece con y sin módulos contratados y con roles no admin
+- [x] 4.2 Crear `app/admin/capacitacion/page.tsx` (índice por sección con tarjetas de lecciones) y verificar en local con un usuario de tenant 1. Verificado (ver 7.1)
+- [x] 4.3 Crear `app/admin/capacitacion/[modulo]/[slug]/page.tsx`: iframe `srcdoc` con `sandbox="allow-scripts"` (sin `allow-same-origin`), ajuste de alto solo para mensajes de su propio iframe, navegación anterior/siguiente y mensaje para 403/404. Verificar que el quiz de prueba funciona y que `localStorage` lanza un error de seguridad desde la consola del iframe. Verificado (ver 7.1)
+- [x] 4.4 Agregar el acceso "🎓 Capacitación" en la barra superior (`components/layout/TopBar.tsx`, junto a la campana), no en el menú lateral, y permitir `/admin/capacitacion` a todos los roles en `app/admin/layout.tsx`. Verificar que aparece con y sin módulos contratados y con roles no admin. Verificado (ver 7.1)
 
 ## 5. Contenido inicial: Inventario
 
@@ -44,4 +44,4 @@ Las lecciones se ajustaron a las pantallas actuales (relevamiento del backoffice
 
 ## 7. Integración
 
-- [ ] 7.1 Prueba de punta a punta en local: usuario de tenant con inventario ve y completa las lecciones; usuario de tenant sin inventario no ve la sección y recibe 403 por URL directa; sin sesión, redirige al login
+- [x] 7.1 Prueba de punta a punta en local: usuario de tenant con inventario ve y completa las lecciones; usuario de tenant sin inventario no ve la sección y recibe 403 por URL directa; sin sesión, redirige al login. Verificado con `fme-backoffice/e2e/capacitacion.spec.ts` (build de producción, 7/7): índice con General e Inventario; visor con `sandbox="allow-scripts"`, quiz que responde, `localStorage` y `parent.document` dan SecurityError, alto ajustado y navegación a la siguiente; 403 muestra "no disponible en tu plan" sin iframe (403 simulado en el navegador; el 403 real del backend está en `tests/test_capacitacion.py`); 404 con mensaje; 🎓 en la barra superior; rol produccion entra sin redirección; sin sesión → login
