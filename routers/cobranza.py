@@ -3,7 +3,7 @@ Router para gestión de cobranza: cobros pendientes unificados (cheques + transf
 """
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import and_
 from datetime import datetime, timedelta, timezone
 
@@ -17,6 +17,22 @@ from database.models import (
 )
 from routers.auth import get_current_active_user
 from services.credito_service import CreditoService
+
+# Relaciones del pedido que lee el listado de cobranza: se cargan en bloque
+# (antes: una consulta por relación y por pedido).
+def _cargas_pedido(ruta=None):
+    def r(rel):
+        return ruta.joinedload(rel) if ruta is not None else joinedload(rel)
+
+    def rs(rel):
+        return ruta.selectinload(rel) if ruta is not None else selectinload(rel)
+
+    return [
+        r(PedidoModel.cliente), r(PedidoModel.local), r(PedidoModel.medio_pago),
+        r(PedidoModel.tipo_documento_tributario), r(PedidoModel.estado_pedido), r(PedidoModel.despacho),
+        rs(PedidoModel.cheques), rs(PedidoModel.notas_credito),
+    ]
+
 
 router = APIRouter()
 
@@ -58,6 +74,7 @@ def listar_cobranza(
         # Pedidos del tenant que tienen cheques pendientes
         pedidos_con_cheques = (
             db.query(PedidoModel)
+            .options(*_cargas_pedido())
             .filter(
                 PedidoModel.tenant_id == tenant_id,
                 PedidoModel.es_pagado == False,
@@ -134,7 +151,7 @@ def listar_cobranza(
         else:
             query = query.filter(CobroPendienteModel.estado.in_(["PENDIENTE", "VENCIDO"]))
 
-        cobros = query.all()
+        cobros = query.options(*_cargas_pedido(selectinload(CobroPendienteModel.pedido))).all()
 
         for cobro in cobros:
             pedido = cobro.pedido

@@ -29,11 +29,21 @@ def listar_clientes(
     **Uso:** Backoffice - Tabla de clientes
     """
     clientes = db.query(Cliente).filter(Cliente.tenant_id == current_user.tenant_id).offset(skip).limit(limit).all()
-    
-    # Enriquecer con información de puntos
+
+    # Puntos de todos los clientes en una consulta (antes: una por cliente, y además creaba
+    # el registro dentro de este GET). Sin registro = 0 puntos, igual que antes.
+    from database.models import PuntosCliente
+    from types import SimpleNamespace
+    ids = [c.id for c in clientes]
+    puntos_por_cliente = {
+        p.cliente_id: p
+        for p in (db.query(PuntosCliente).filter(PuntosCliente.cliente_id.in_(ids)).all() if ids else [])
+    }
+    sin_puntos = SimpleNamespace(puntos_disponibles=0, puntos_totales_ganados=0, puntos_totales_usados=0)
+
     clientes_con_puntos = []
     for cliente in clientes:
-        puntos_cliente = PuntosService.obtener_puntos_cliente(db, cliente.id)
+        puntos_cliente = puntos_por_cliente.get(cliente.id, sin_puntos)
         
         cliente_data = {
             "id": cliente.id,

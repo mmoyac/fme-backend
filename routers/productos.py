@@ -226,14 +226,16 @@ def listar_productos(
     
     **Uso:** Backoffice - Tabla de productos
     """
-    from sqlalchemy.orm import joinedload
+    from sqlalchemy.orm import joinedload, selectinload
     from database.models import CategoriaProducto
     
+    # inventarios y unidad_medida se cargan en bloque (antes: 1 consulta extra por producto)
     productos = (
         db.query(Producto)
         .options(
             joinedload(Producto.categoria).joinedload(CategoriaProducto.tipo_venta),
-            joinedload(Producto.categoria)
+            joinedload(Producto.unidad_medida),
+            selectinload(Producto.inventarios),
         )
         .filter(Producto.tenant_id == current_user.tenant_id)
         .offset(skip)
