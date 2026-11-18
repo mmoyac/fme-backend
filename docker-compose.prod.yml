@@ -41,6 +41,9 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI}
+      # Pasarelas de pago: clave maestra (32 bytes base64) que cifra las credenciales. Obligatoria en producción.
+      PASARELAS_CLAVE_MAESTRA: ${PASARELAS_CLAVE_MAESTRA}
+      URL_API_PUBLICA: ${URL_API_PUBLICA:-}
     volumes:
       - backend_static:/app/static
     networks:
