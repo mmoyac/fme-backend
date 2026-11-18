@@ -16,7 +16,7 @@
 ## 3. Verificación
 
 - [x] 3.1 `tests/test_capacitacion.py` y `tests/test_alcance_local.py` siguen pasando (33/33)
-- [ ] 3.2 Tras el deploy, volver a medir producción y comparar con 1.1
+- [x] 3.2 Tras el deploy, volver a medir producción y comparar con 1.1. Hecho (2026-11-18, mismo script y usuario): Producción 6,5 → 1,1 s; Dashboard 2,4 → 1,8 s; Caja/Cobranza/Compras/Facturas 2,2–2,3 → 1,1 s; POS 2,6 → 1,3 s; Pedidos/Productos/Inventario/Clientes ~1,1–1,4 s (sin cambio, ya no tenían picos). `GET /api/productos/?limit=1000` en 0,38 s. Parte de la mejora en Caja/Cobranza/Compras/Facturas viene de que en la medición inicial el servidor tuvo picos de TTFB de 1,3 s que esta vez no aparecieron
 
 ## 4. Pendiente (fuera de este change)
 
