@@ -60,4 +60,7 @@ def datos_entrega(pedido) -> dict:
         "retirado_por_nombre": pedido.retirado_por_nombre,
         "retirado_por_rut": pedido.retirado_por_rut,
         "nota_entrega": pedido.nota_entrega,
+        # add-delivery-por-comuna
+        "comuna_entrega": getattr(pedido, "comuna_entrega", None),
+        "costo_delivery": float(pedido.costo_delivery) if pedido.costo_delivery else None,
     }

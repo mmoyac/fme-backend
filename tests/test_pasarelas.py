@@ -202,3 +202,33 @@ def test_mp_probar_y_errores(doble_mp):
     with pytest.raises(ErrorPasarela) as e:
         adaptador_de("MERCADOPAGO").probar(replace(PASARELA_MP, credenciales={}))
     assert e.value.credenciales
+
+
+# ---------------------------------------------------------------- modo demo (add-delivery-por-comuna)
+def _pasarela_bd(proveedor="KHIPU", ambiente="INTEGRACION", activo=True):
+    from types import SimpleNamespace
+    return SimpleNamespace(proveedor=proveedor, ambiente=ambiente, activo=activo)
+
+
+def test_modo_demo_en_produccion(monkeypatch):
+    from services import pagos_online
+    from services.pasarelas import config
+    monkeypatch.delenv("ENTORNO", raising=False)
+    monkeypatch.setenv("PASARELAS_CLAVE_DEMO", "clave-demo-larga")
+    assert config.es_demo("clave-demo-larga") is True
+    assert config.es_demo("otra") is False
+    assert config.es_demo(None) is False
+    integ, prod = _pasarela_bd(), _pasarela_bd(ambiente="PRODUCCION")
+    assert pagos_online.puede_cobrar(integ) is False
+    assert pagos_online.puede_cobrar(integ, demo=True) is True
+    assert pagos_online.puede_cobrar(prod) is True
+    assert pagos_online.puede_cobrar(_pasarela_bd("SIMULADA"), demo=True) is False
+    assert pagos_online.puede_cobrar(_pasarela_bd(activo=False), demo=True) is False
+
+
+def test_modo_demo_sin_clave_configurada(monkeypatch):
+    from services.pasarelas import config
+    monkeypatch.delenv("PASARELAS_CLAVE_DEMO", raising=False)
+    assert config.es_demo("cualquiera") is False
+    monkeypatch.setenv("PASARELAS_CLAVE_DEMO", "  ")
+    assert config.es_demo("") is False

@@ -130,6 +130,9 @@ class EtiquetaProductoResponse(BaseModel):
     empresa_resolucion_sanitaria: Optional[str] = None
     empresa_email: Optional[str] = None
     empresa_telefono: Optional[str] = None
+    empresa_origen: Optional[str] = None
+    empresa_comuna: Optional[str] = None
+    empresa_logo_url: Optional[str] = None
 
     class Config:
         from_attributes = True

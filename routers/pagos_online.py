@@ -99,9 +99,9 @@ def _error(e: pagos.ErrorPago) -> HTTPException:
 
 # ----------------------------------------------------------------------------- checkout (público)
 @router.get("/opciones")
-def opciones(request: Request, db: Session = Depends(get_db)):
+def opciones(request: Request, demo: str | None = None, db: Session = Depends(get_db)):
     tenant = _tenant_publico(request, db)
-    return {"pasarelas": pagos.pasarelas_disponibles(db, tenant.id)}
+    return {"pasarelas": pagos.pasarelas_disponibles(db, tenant.id, config.es_demo(demo))}
 
 
 class CrearPago(BaseModel):
@@ -109,6 +109,7 @@ class CrearPago(BaseModel):
     token_seguimiento: str = Field(min_length=10, max_length=128)
     pasarela_id: int | None = None
     email: str | None = Field(default=None, max_length=255)
+    demo: str | None = Field(default=None, max_length=200)  # clave del modo demo (add-delivery-por-comuna)
 
 
 @router.post("")
@@ -117,7 +118,7 @@ def crear_pago(datos: CrearPago, request: Request, db: Session = Depends(get_db)
     tenant = _tenant_publico(request, db)
     try:
         r = pagos.crear_intencion(db, tenant.id, datos.pedido_id, datos.token_seguimiento, datos.pasarela_id,
-                                  datos.email, _url_sitio(request, tenant))
+                                  datos.email, _url_sitio(request, tenant), demo=config.es_demo(datos.demo))
     except pagos.ErrorPago as e:
         db.rollback()
         raise _error(e)

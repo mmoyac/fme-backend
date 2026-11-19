@@ -57,20 +57,24 @@ def _ahora() -> datetime:
 
 
 # ----------------------------------------------------------------------------- pasarelas
-def puede_cobrar(p: PasarelaPago) -> bool:
-    """Activa, con adaptador, y en producción nunca la simulada ni una de ambiente de integración."""
+def puede_cobrar(p: PasarelaPago, demo: bool = False) -> bool:
+    """Activa, con adaptador, y en producción nunca la simulada; las de integración solo en modo demo."""
     if not p.activo or not adaptador_de(p.proveedor):
         return False
-    return not (config.es_produccion() and (p.proveedor == "SIMULADA" or p.ambiente != "PRODUCCION"))
+    if not config.es_produccion():
+        return True
+    if p.proveedor == "SIMULADA":
+        return False
+    return p.ambiente == "PRODUCCION" or demo
 
 
-def pasarelas_disponibles(db: Session, tenant_id: int) -> list[dict]:
+def pasarelas_disponibles(db: Session, tenant_id: int, demo: bool = False) -> list[dict]:
     """Pasarelas con las que el cliente puede pagar, en el orden configurado."""
     salida = []
     q = (db.query(PasarelaPago).filter(PasarelaPago.tenant_id == tenant_id, PasarelaPago.activo.is_(True))
          .order_by(PasarelaPago.orden, PasarelaPago.id))
     for p in q:
-        if puede_cobrar(p):
+        if puede_cobrar(p, demo):
             a = adaptador_de(p.proveedor)
             salida.append({"id": p.id, "nombre_visible": p.nombre_visible, "proveedor": p.proveedor,
                            "requiere_email": a.requiere_email, "monto_minimo": a.monto_minimo})
@@ -110,7 +114,7 @@ def _expirar_vencidas(db: Session, tenant_id: int | None = None) -> None:
 
 # ----------------------------------------------------------------------------- crear
 def crear_intencion(db: Session, tenant_id: int, pedido_id: int, token_seguimiento: str, pasarela_id: int | None,
-                    email: str | None, url_sitio: str | None) -> dict:
+                    email: str | None, url_sitio: str | None, demo: bool = False) -> dict:
     """Guarda la intención (bloquea el pedido por 15 minutos) y hace commit. Todavía no habla con el proveedor.
 
     Si ya hay una intención vigente del pedido con la misma pasarela y su URL de pago, se reutiliza.
@@ -124,11 +128,12 @@ def crear_intencion(db: Session, tenant_id: int, pedido_id: int, token_seguimien
     estado = pedido.estado_pedido.codigo if pedido.estado_pedido else None
     if estado == "CANCELADO":
         raise ErrorPago("El pedido está cancelado")
-    monto = Decimal(str(round(pedido.monto_total or 0)))
+    # Productos + delivery (add-delivery-por-comuna): monto_total no incluye el costo de delivery
+    monto = Decimal(str(round(float(pedido.monto_total or 0) + float(pedido.costo_delivery or 0))))
     if monto <= 0:
         raise ErrorPago("El pedido no tiene monto a pagar")
 
-    disponibles = pasarelas_disponibles(db, tenant_id)
+    disponibles = pasarelas_disponibles(db, tenant_id, demo)
     if not disponibles:
         raise ErrorPago("El pago en línea no está habilitado para esta tienda")
     if pasarela_id is None:

@@ -28,7 +28,7 @@ Proveedores: **Mercado Pago** (Checkout Pro: tarjetas y saldo MP), **Flow** (Web
    - **Validación** (`POST /api/pedidos/validar-email`): formato real, dominio que existe y recibe correo (DNS/MX) y sugerencia de typo (`gmial.com` → `gmail.com`).
    - **Verificación** (`POST /api/pedidos/verificacion-email/enviar` y `.../confirmar`): código de 6 dígitos por correo vía n8n. Si es correcto, se entrega un token firmado de 30 días, que la landing guarda en el navegador.
 2. **Crear el pedido** (`POST /api/pedidos/`): **exige `email_token`** y devuelve `token_seguimiento`.
-3. **Iniciar el pago** (`POST /api/pagos`) con `pedido_id`, `token_seguimiento` y `pasarela_id`. El **monto lo fija el backend** desde el pedido. Se crea una intención en `pagos_online` (vence en 15 min) y el cliente es redirigido al proveedor.
+3. **Iniciar el pago** (`POST /api/pagos`) con `pedido_id`, `token_seguimiento` y `pasarela_id`. El **monto lo fija el backend** desde el pedido: **productos (`monto_total`) + `costo_delivery`** (ver §2.1). Se crea una intención en `pagos_online` (vence en 15 min) y el cliente es redirigido al proveedor.
 4. **Retorno y aviso:** el proveedor devuelve al cliente a `/api/pagos/retorno/{proveedor}?tenant=N` y avisa a `/api/pagos/webhook/{proveedor}?tenant=N`. **Ambos solo identifican el pago: el resultado siempre se consulta al proveedor.**
 5. **Pago aprobado y monto correcto:**
    - el pedido queda `es_pagado`, con medio MERCADOPAGO, FLOW, KHIPU o PAGO_ONLINE;
@@ -41,6 +41,15 @@ Proveedores: **Mercado Pago** (Checkout Pro: tarjetas y saldo MP), **Flow** (Web
 8. **Conciliación:** hilo de fondo cada 2 min (`pg_try_advisory_lock`) para las intenciones INICIADO de más de 5 min y EXPIRADO de las últimas 24 h. Recupera pagos cuyo aviso no llegó.
 9. **Pantalla de resultado** (`/checkout/resultado?pago=<id>`): consulta cada 3 s y pide al backend consultar al proveedor cada 15 s, durante 5 min.
 
+## 2.1. Retiro o delivery por comuna (change `add-delivery-por-comuna`)
+
+- En el checkout el cliente elige **Retiro en casa central** (se muestra la dirección de *Configuración de la landing → footer → dirección*; costo $0) o **Delivery** (dirección + comuna elegida de una lista).
+- Las comunas y sus precios se cargan en el backoffice: **Mantenedores → Tarifas de delivery** (`/api/admin/tarifas-delivery`). Solo aparecen las activas. **Sin tarifas cargadas, la tienda ofrece solo Retiro.**
+- **Dirección con Mapbox:** el checkout autocompleta la dirección (Mapbox, como la calculadora de despacho) y toma la comuna de la sugerencia. El backend la vuelve a verificar (`services/geocodificacion.py`): si cae en otra comuna, rechaza el pedido; si Mapbox no la encuentra (p. ej. parcelas), el cliente marca una casilla confirmando la comuna y el pedido queda con la nota interna **"Dirección NO verificada: revisar antes de despachar"**. Variables: `MAPBOX_ACCESS_TOKEN` (backend) y `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN` (build de la landing, secret de GitHub). Sin token, todo cae en confirmación manual.
+- Envío gratis: si la configuración de la landing tiene `monto_minimo_delivery_gratis` y los productos (con descuento de puntos) lo alcanzan, el delivery cuesta $0.
+- El **backend recalcula** el costo desde la tabla al crear el pedido (`services/tarifas_delivery.py`); nunca usa un monto del navegador. Guarda `modalidad_entrega`, `comuna_entrega` y `costo_delivery`. `monto_total` sigue siendo solo productos; el total a pagar es `monto_total + costo_delivery` (igual que en Cobranza).
+- Público: `GET /api/tienda/entrega` → `{retiro: {direccion}, tarifas: [{comuna, costo}], monto_minimo_gratis}`.
+
 ## 3. Configurar una pasarela (por tenant)
 
 Backoffice → **Mantenedores → Pasarelas de pago** (requiere el módulo `tienda_online` y rol admin).
@@ -52,7 +61,15 @@ El **superadmin** configura la de cada tenant entrando a él: Superadmin → **O
 4. **Activar.** En Producción solo se puede si la última prueba fue exitosa y es posterior al último cambio de credenciales.
 5. **Pasar a producción:** crear otra pasarela del mismo proveedor en ambiente Producción, cargar las credenciales reales, probar, activar y desactivar la de Integración. No requiere despliegue.
 
-Con el backend en producción (`ENTORNO` distinto de `desarrollo`), las pasarelas de Integración y la Simulada **no se ofrecen** aunque estén activas.
+Con el backend en producción (`ENTORNO` distinto de `desarrollo`), las pasarelas de Integración y la Simulada **no se ofrecen** aunque estén activas (salvo el modo demo, abajo).
+
+### Modo demo (mostrar el pago a un cliente sin cuenta real)
+
+1. En el VPS, agregar al `.env` una clave larga: `echo "PASARELAS_CLAVE_DEMO=$(python3 -c 'import secrets;print(secrets.token_urlsafe(24))')" >> .env` y `docker compose up -d --force-recreate backend`.
+2. Tener activa una pasarela de **Integración** (por ejemplo Khipu con la API key de la cuenta de desarrollador).
+3. Abrir `https://www.masasestacion.cl/?demo=<clave>`: la clave queda en la pestaña (`sessionStorage`) y el checkout muestra también las pasarelas de Integración. Sin la clave, los visitantes ven lo de siempre. La Simulada nunca aparece en producción.
+4. **El pedido de la demo es real:** queda pagado, se auto-confirma y descuenta stock. Después de la demo, **cancelarlo** en el backoffice.
+5. Al terminar, quitar `PASARELAS_CLAVE_DEMO` del `.env` y recrear el backend.
 
 ### Mercado Pago
 - Credenciales: [mercadopago.cl/developers](https://www.mercadopago.cl/developers) → Tus integraciones → Credenciales → **Access token**.
@@ -82,6 +99,8 @@ Con el backend en producción (`ENTORNO` distinto de `desarrollo`), las pasarela
 | `ENTORNO` | sin definir o `produccion` (valor seguro por defecto) | `desarrollo` (en `docker-compose.yml`): habilita la Simulada y las pasarelas de Integración |
 | `PASARELAS_CLAVE_MAESTRA` | **obligatoria**: 32 bytes en base64 (`python -c "import os,base64;print(base64.b64encode(os.urandom(32)).decode())"`). Si falta, la API arranca igual, pero las pasarelas responden 503 | opcional (se deriva de `SECRET_KEY`) |
 | `URL_API_PUBLICA` | `https://api.masasestacion.cl` si el proxy no envía `X-Forwarded-Proto` | — |
+| `MAPBOX_ACCESS_TOKEN` | token público de Mapbox (el mismo de la calculadora del backoffice); sin él, las direcciones de delivery quedan "no verificadas" | igual (en `.env`) |
+| `PASARELAS_CLAVE_DEMO` | opcional; vacía = sin modo demo. Solo durante una demo | opcional |
 | `URL_PUBLICA_PAGOS` | vacía | URL https de un túnel (`cloudflared tunnel --url http://localhost:8000`) para recibir los avisos del proveedor en local; sin túnel, la conciliación registra el pago igual |
 | `N8N_WEBHOOK_VERIFICACION_EMAIL` | opcional (por defecto `https://n8n.effi4tech.cl/webhook/verificacion-email`) | igual |
 

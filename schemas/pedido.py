@@ -55,9 +55,13 @@ class PedidoCreateFrontend(BaseModel):
     cliente_giro: Optional[str] = Field(None, max_length=255, description="Actividad comercial")
     cliente_es_empresa: bool = Field(default=False, description="Indica si requiere factura")
     
-    # Dirección de entrega
-    direccion_entrega: str = Field(..., min_length=5, max_length=200)
+    # Entrega (add-delivery-por-comuna): RETIRO en casa central o DESPACHO a una comuna con tarifa.
+    # El costo de delivery lo calcula el backend; la dirección es obligatoria solo con DESPACHO.
+    modalidad_entrega: Literal["RETIRO", "DESPACHO"]
+    direccion_entrega: Optional[str] = Field(None, max_length=200)
     comuna: Optional[str] = Field(None, max_length=100)
+    # Con DESPACHO el cliente confirma que su dirección está en la comuna elegida (queda en notas_admin)
+    confirma_comuna: bool = False
     
     # Tipo de documento tributario
     tipo_documento_codigo: Optional[str] = Field(default="BOL", description="Código del tipo de documento (BOL, FAC)")
@@ -302,6 +306,10 @@ class PedidoConfirmacion(BaseModel):
     descuento_puntos: Optional[float] = None
     # Credencial para iniciar el pago en línea y consultar el seguimiento (change add-pasarelas-pago)
     token_seguimiento: Optional[str] = None
+    # Entrega (add-delivery-por-comuna): monto_total = productos; total a pagar = monto_total + costo_delivery
+    modalidad_entrega: Optional[str] = None
+    comuna_entrega: Optional[str] = None
+    costo_delivery: Optional[float] = None
 
 
 # Importar para resolver la referencia circular

@@ -697,11 +697,35 @@ def crear_pedido_frontend(
         Cliente.tenant_id == tenant_id
     ).first()
     
+    # Entrega (add-delivery-por-comuna): con DESPACHO la dirección es obligatoria y la comuna debe tener tarifa
+    es_despacho = pedido_data.modalidad_entrega == "DESPACHO"
+    direccion_entrega = (pedido_data.direccion_entrega or "").strip()
+    if es_despacho and len(direccion_entrega) < 5:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ingresa la dirección de entrega")
+    verificacion, direccion_verificada = None, False
+    if es_despacho:
+        from services.tarifas_delivery import tarifa_de
+        if not tarifa_de(db, tenant_id, pedido_data.comuna):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No hay delivery a esa comuna")
+        # Verificación con Mapbox: rechaza solo si la dirección cae con certeza en otra comuna; si Mapbox no la
+        # encuentra (p. ej. parcelas rurales), el cliente debe confirmar la comuna y el pedido queda "no verificado".
+        from services.geocodificacion import comuna_de_direccion
+        from services.tarifas_delivery import normalizar_comuna
+        verificacion = comuna_de_direccion(f"{direccion_entrega}, {pedido_data.comuna}")
+        if verificacion.comuna and normalizar_comuna(verificacion.comuna) != normalizar_comuna(pedido_data.comuna):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=f"La dirección ingresada está en {verificacion.comuna}, no en {pedido_data.comuna}. "
+                                       f"Elige la comuna correcta.")
+        direccion_verificada = verificacion.comuna is not None
+        if not direccion_verificada and not pedido_data.confirma_comuna:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="No pudimos verificar tu dirección: confirma que está en la comuna elegida")
+
     # El modelo Cliente no tiene columna 'comuna'; se preserva la comuna de despacho
-    # dentro de la dirección para no perder el dato.
-    direccion_completa = pedido_data.direccion_entrega
-    if pedido_data.comuna:
-        direccion_completa = f"{pedido_data.direccion_entrega}, {pedido_data.comuna}"
+    # dentro de la dirección para no perder el dato. Con RETIRO no se toca la dirección del cliente.
+    direccion_completa = direccion_entrega or None
+    if es_despacho and pedido_data.comuna:
+        direccion_completa = f"{direccion_entrega}, {pedido_data.comuna}"
 
     if not cliente:
         # Crear nuevo cliente en el tenant detectado
@@ -720,7 +744,8 @@ def crear_pedido_frontend(
         cliente.nombre = pedido_data.cliente_nombre
         cliente.apellido = pedido_data.cliente_apellido
         cliente.telefono = pedido_data.cliente_telefono
-        cliente.direccion = direccion_completa
+        if es_despacho:
+            cliente.direccion = direccion_completa
     
     # 3. Validar productos y calcular total (en el tenant correspondiente)
     items_a_crear = []
@@ -790,6 +815,14 @@ def crear_pedido_frontend(
         if monto_total < 0:
             monto_total = 0
     
+    # 3.5. Costo de delivery: lo calcula el backend desde las tarifas (envío gratis contra el total con descuento)
+    from services.tarifas_delivery import costo_delivery as calcular_costo_delivery, ErrorEntrega
+    try:
+        costo_delivery, comuna_entrega = calcular_costo_delivery(
+            db, tenant_id, pedido_data.modalidad_entrega, pedido_data.comuna, monto_total)
+    except ErrorEntrega as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
     # 4. Generar numero_pedido único para el tenant
     numero_pedido = obtener_siguiente_numero_pedido(db, tenant_id)
     
@@ -820,7 +853,14 @@ def crear_pedido_frontend(
         puntos_usados=puntos_usar,
         descuento_puntos=descuento_puntos,
         canal_venta_id=2,  # LANDING — pedidos desde la tienda online
-        modalidad_entrega="DESPACHO",  # la tienda online solo despacha (add-modalidad-entrega-pedido)
+        modalidad_entrega=pedido_data.modalidad_entrega,  # elegida en el checkout (add-delivery-por-comuna)
+        comuna_entrega=comuna_entrega,
+        costo_delivery=costo_delivery,
+        notas_admin=(None if not comuna_entrega
+                     else f"Dirección verificada con Mapbox en {comuna_entrega}: {verificacion.direccion}"
+                     if direccion_verificada
+                     else f"⚠️ Dirección NO verificada (Mapbox no la encontró): revisar antes de despachar. "
+                          f"El cliente confirmó que {direccion_entrega} está en {comuna_entrega}."),
         tipo_documento_tributario_id=tipo_doc_boleta.id if tipo_doc_boleta else None,
     )
     db.add(db_pedido)
@@ -865,7 +905,10 @@ def crear_pedido_frontend(
         token_seguimiento=db_pedido.token_seguimiento,
         puntos_ganados=puntos_ganados,
         puntos_usados=puntos_usar,
-        descuento_puntos=descuento_puntos
+        descuento_puntos=descuento_puntos,
+        modalidad_entrega=db_pedido.modalidad_entrega,
+        comuna_entrega=comuna_entrega,
+        costo_delivery=float(costo_delivery),
     )
 
 

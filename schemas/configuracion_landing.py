@@ -75,6 +75,10 @@ class ConfiguracionLandingBase(BaseModel):
     texto_copyright: Optional[str] = Field(None, max_length=200)
     razon_social: Optional[str] = Field(None, max_length=200)
     resolucion_sanitaria: Optional[str] = Field(None, max_length=200)
+    # Datos para etiquetas (change add-formato-etiqueta-75x62)
+    etiqueta_origen: Optional[str] = Field(None, max_length=100)
+    etiqueta_comuna: Optional[str] = Field(None, max_length=100)
+    etiqueta_logo_url: Optional[str] = Field(None, max_length=255)
 
     # SEO Metadata
     meta_title: Optional[str] = Field(None, max_length=100)
@@ -131,6 +135,10 @@ class ConfiguracionLandingUpdate(BaseModel):
     texto_copyright: Optional[str] = Field(None, max_length=200)
     razon_social: Optional[str] = Field(None, max_length=200)
     resolucion_sanitaria: Optional[str] = Field(None, max_length=200)
+    # Datos para etiquetas (change add-formato-etiqueta-75x62)
+    etiqueta_origen: Optional[str] = Field(None, max_length=100)
+    etiqueta_comuna: Optional[str] = Field(None, max_length=100)
+    etiqueta_logo_url: Optional[str] = Field(None, max_length=255)
 
     # SEO Metadata
     meta_title: Optional[str] = Field(None, max_length=100)

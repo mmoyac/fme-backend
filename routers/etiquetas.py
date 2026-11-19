@@ -258,4 +258,7 @@ def obtener_etiqueta_completa(
         "empresa_resolucion_sanitaria": config_landing.resolucion_sanitaria if config_landing else None,
         "empresa_email": config_landing.email if config_landing else None,
         "empresa_telefono": config_landing.telefono if config_landing else None,
+        "empresa_origen": config_landing.etiqueta_origen if config_landing else None,
+        "empresa_comuna": config_landing.etiqueta_comuna if config_landing else None,
+        "empresa_logo_url": (config_landing.etiqueta_logo_url or config_landing.logo_url) if config_landing else None,
     }

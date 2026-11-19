@@ -137,6 +137,10 @@ class ConfiguracionLanding(Base):
     texto_copyright = Column(String(200), nullable=True)
     razon_social = Column(String(200), nullable=True)
     resolucion_sanitaria = Column(String(200), nullable=True)
+    # Datos para etiquetas (change add-formato-etiqueta-75x62)
+    etiqueta_origen = Column(String(100), nullable=True)
+    etiqueta_comuna = Column(String(100), nullable=True)
+    etiqueta_logo_url = Column(String(255), nullable=True)
 
     # SEO Metadata
     meta_title = Column(String(100), nullable=True)
@@ -978,6 +982,7 @@ class Pedido(Base):
     entregado_por_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     retirado_por_nombre = Column(String(120), nullable=True)
     retirado_por_rut = Column(String(12), nullable=True)
+    comuna_entrega = Column(String(100), nullable=True)  # Snapshot de la comuna del delivery (add-delivery-por-comuna)
     nota_entrega = Column(Text, nullable=True)
     cotizacion_id = Column(Integer, ForeignKey("cotizaciones.id", ondelete="SET NULL"), nullable=True)  # Cotización que originó este pedido
     notas = Column(Text, nullable=True)
@@ -1291,12 +1296,16 @@ class OrdenProduccion(Base):
     notas = Column(Text)
     solicitado_por_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     producido_por_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # Control manual de impresión de etiquetas (change add-control-etiquetas-op)
+    etiquetas_impresas_at = Column(DateTime(timezone=True), nullable=True)
+    etiquetas_impresas_por_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # Relaciones
     local = relationship("Local")
     detalles = relationship("DetalleOrdenProduccion", back_populates="orden", cascade="all, delete-orphan")
     solicitado_por = relationship("User", foreign_keys=[solicitado_por_id])
     producido_por = relationship("User", foreign_keys=[producido_por_id])
+    etiquetas_impresas_por = relationship("User", foreign_keys=[etiquetas_impresas_por_id])
 
 
 class DetalleOrdenProduccion(Base):
@@ -2195,6 +2204,26 @@ class OtLog(Base):
     ot = relationship("OrdenTrabajo", back_populates="log")
     etapa = relationship("OtEtapaTipo", foreign_keys=[etapa_id])
     usuario = relationship("User", foreign_keys=[usuario_id])
+
+
+# ---------------------------------------------------------------------------
+# Tarifas de delivery por comuna (change add-delivery-por-comuna)
+# ---------------------------------------------------------------------------
+class TarifaDelivery(Base):
+    """Costo de delivery de la tienda online para una comuna del tenant."""
+    __tablename__ = "tarifas_delivery"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "comuna_normalizada", name="uq_tarifas_delivery_tenant_comuna"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    comuna = Column(String(100), nullable=False)
+    comuna_normalizada = Column(String(100), nullable=False)  # minúsculas, sin tildes ni espacios extremos
+    costo = Column(Numeric(10, 0), nullable=False, default=0)
+    activo = Column(Boolean, nullable=False, default=True, server_default="true")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 # ---------------------------------------------------------------------------

@@ -97,6 +97,40 @@ def eliminar_orden(orden_id: int, db: Session = Depends(get_db), current_user = 
     db.commit()
     return {"message": "Orden eliminada"}
 
+def _orden_del_tenant(db: Session, orden_id: int, current_user) -> models.OrdenProduccion:
+    orden = db.query(models.OrdenProduccion).join(models.Local).filter(
+        models.OrdenProduccion.id == orden_id,
+        models.Local.tenant_id == current_user.tenant_id
+    ).first()
+    if not orden:
+        raise HTTPException(status_code=404, detail="Orden no encontrada")
+    return orden
+
+
+@router.post("/ordenes/{orden_id}/etiquetas-impresas", response_model=schemas_prod.OrdenProduccionRead)
+def marcar_etiquetas_impresas(orden_id: int, db: Session = Depends(get_db), current_user = Depends(require_roles(ROLES_PRODUCCION))):
+    """Confirmación manual de que las etiquetas de la OP fueron impresas."""
+    orden = _orden_del_tenant(db, orden_id, current_user)
+    if orden.estado != "FINALIZADA":
+        raise HTTPException(status_code=400, detail="Solo se pueden marcar etiquetas de una orden finalizada")
+    orden.etiquetas_impresas_at = func.now()
+    orden.etiquetas_impresas_por_id = current_user.id
+    db.commit()
+    db.refresh(orden)
+    return orden
+
+
+@router.delete("/ordenes/{orden_id}/etiquetas-impresas", response_model=schemas_prod.OrdenProduccionRead)
+def desmarcar_etiquetas_impresas(orden_id: int, db: Session = Depends(get_db), current_user = Depends(require_roles(ROLES_ADMIN))):
+    """Deshace la marca de etiquetas impresas (corrección de errores)."""
+    orden = _orden_del_tenant(db, orden_id, current_user)
+    orden.etiquetas_impresas_at = None
+    orden.etiquetas_impresas_por_id = None
+    db.commit()
+    db.refresh(orden)
+    return orden
+
+
 @router.put("/ordenes/{orden_id}/cantidades", response_model=schemas_prod.OrdenProduccionRead)
 def editar_cantidades_orden(
     orden_id: int,

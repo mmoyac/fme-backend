@@ -57,6 +57,8 @@ class OrdenProduccionRead(BaseModel):
     detalles: List[DetalleOrdenRead]
     solicitado_por: Optional[UsuarioRef] = None
     producido_por: Optional[UsuarioRef] = None
+    etiquetas_impresas_at: Optional[datetime] = None
+    etiquetas_impresas_por: Optional[UsuarioRef] = None
 
     class Config:
         from_attributes = True

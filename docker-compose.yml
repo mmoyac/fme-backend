@@ -36,6 +36,10 @@ services:
       ENTORNO: desarrollo
       PASARELAS_CLAVE_MAESTRA: ${PASARELAS_CLAVE_MAESTRA:-}
       URL_PUBLICA_PAGOS: ${URL_PUBLICA_PAGOS:-}
+      # Modo demo: con ?demo=<clave> la landing ve pasarelas de Integración en producción (add-delivery-por-comuna)
+      PASARELAS_CLAVE_DEMO: ${PASARELAS_CLAVE_DEMO:-}
+      # Verificación de la comuna de la dirección de delivery (add-delivery-por-comuna); vacía = sin verificar
+      MAPBOX_ACCESS_TOKEN: ${MAPBOX_ACCESS_TOKEN:-}
     networks:
       - fme-network
 
