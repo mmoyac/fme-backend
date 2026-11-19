@@ -150,6 +150,8 @@ class ConfiguracionLanding(Base):
     mostrar_precios = Column(Boolean, nullable=False, server_default='true')
     mostrar_stock = Column(Boolean, nullable=False, server_default='true')
     habilitar_carrito = Column(Boolean, nullable=False, server_default='true')
+    # Checkout: permitir "Solicitar pedido sin pagar ahora" (change add-interruptor-pedido-sin-pago)
+    permitir_pedido_sin_pago = Column(Boolean, nullable=False, server_default='true')
 
     # Configuración de Delivery
     costo_fijo_delivery = Column(Numeric(10, 2), nullable=True, default=None)

@@ -14,13 +14,19 @@ Migraciones que se aplican solas en el deploy: `d5a1c7e3f9b2` (tarifas de delive
 
 ## 1. Configuración en producción (después del deploy)
 
-- [ ] **Tenant 1 (Masas Estación) → Configuración → Landing**:
+- [x] **Tenant 1 (Masas Estación) → Configuración → Landing** (cargado vía API el 2026-11-19, con razón social, resolución, teléfono +56 9 3933 8558 y dirección Barros Luco 1980 local 5 tomados de etiqueta.jpeg):
   - Origen (etiqueta): `Producto Chileno`
   - Comuna (pie de etiqueta): `Santiago, Lampa`
   - Logo para etiquetas: subir `fme-backend/docs/etiquetado/logo-etiqueta-masas-estacion.png` (versión B/N sacada del archivo de P-touch). Sin esto la etiqueta sale sin logo: el `logo_url` actual (`/logo.png`) es una ruta del sitio landing que el backoffice no puede abrir.
 - [ ] **Tarifas de delivery**: cargar las comunas y costos en Mantenedores → Tarifas de delivery. Sin tarifas, el checkout no ofrece delivery a esa comuna.
 - [ ] **Mapbox** (opcional): secreto de GitHub `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN` en el repo fme-landing (build) y `MAPBOX_ACCESS_TOKEN` en el `.env` del VPS (backend). Sin ellos no hay autocompletar y las direcciones quedan "no verificadas".
 - [ ] **Modo demo de pasarelas** (opcional): `PASARELAS_CLAVE_DEMO` en el `.env` del VPS. Vacía = desactivado.
+
+## 1b. Pasarelas y modo demo (actualizado 2026-11-19)
+
+- [ ] **Pasarela de producción**: el tenant 1 solo tiene Khipu en ambiente INTEGRACIÓN, que en prod no se ofrece (por eso el checkout no muestra pasarela). Cargar credenciales de producción de Khipu (u otra) en Configuración → Pasarelas de pago con ambiente PRODUCCIÓN.
+- [ ] **Demo en prod**: en el VPS (`/root/docker/masas-estacion`) agregar `PASARELAS_CLAVE_DEMO` al `.env`, recrear el backend y abrir `https://www.masasestacion.cl/?demo=<clave>`. Pagar con DemoBank (clave 1234) y cancelar el pedido después. Quitar la clave al terminar.
+- [ ] **Interruptor "Permitir pedidos sin pago en línea"** (change `add-interruptor-pedido-sin-pago`, sin subir aún): apagarlo para el tenant 1 en prod solo cuando haya pasarela de producción; si no, la tienda no recibe pedidos web.
 
 ## 2. Pruebas pendientes
 

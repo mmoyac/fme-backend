@@ -88,6 +88,7 @@ class ConfiguracionLandingBase(BaseModel):
     mostrar_precios: bool = Field(default=True, description="Si se muestran los precios en la landing")
     mostrar_stock: bool = Field(default=True, description="Si se muestra el stock disponible")
     habilitar_carrito: bool = Field(default=True, description="Si se habilita el carrito de compras")
+    permitir_pedido_sin_pago: bool = Field(default=True, description="Si el checkout ofrece pedir sin pagar en línea")
 
     # Configuración de Delivery
     costo_fijo_delivery: Optional[float] = Field(None, ge=0, description="Costo fijo de delivery en pesos CLP")
@@ -148,6 +149,7 @@ class ConfiguracionLandingUpdate(BaseModel):
     mostrar_precios: Optional[bool] = None
     mostrar_stock: Optional[bool] = None
     habilitar_carrito: Optional[bool] = None
+    permitir_pedido_sin_pago: Optional[bool] = None
 
     # Configuración de Delivery
     costo_fijo_delivery: Optional[float] = Field(None, ge=0)

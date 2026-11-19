@@ -33,6 +33,8 @@ def opciones_entrega(request: Request, db: Session = Depends(get_db)):
         "retiro": {"direccion": conf.direccion if conf else None},
         "tarifas": [{"comuna": t.comuna, "costo": int(t.costo)} for t in tarifas],
         "monto_minimo_gratis": int(minimo) if minimo is not None else None,
+        # Si es False, el checkout no ofrece "Solicitar pedido sin pagar ahora" (add-interruptor-pedido-sin-pago)
+        "permite_pedido_sin_pago": conf.permitir_pedido_sin_pago if conf else True,
     }
 
 
