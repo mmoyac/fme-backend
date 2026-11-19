@@ -252,13 +252,15 @@ def _hoja_options():
 # Endpoints
 # ──────────────────────────────────────────
 
-@router.get("/pedidos-disponibles")
-def listar_pedidos_disponibles(
-    todos_locales: bool = False,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_active_user),
-):
-    """Pedidos CONFIRMADOS sin hoja de ruta asignada (para armar nueva ruta)."""
+def _filtro_despachable():
+    """Pedido que sale en camión: modalidad DESPACHO o con costo de delivery > 0.
+    Los retiros (RETIRO, costo 0 en la tienda web) y las ventas de mostrador (costo NULL) no se despachan.
+    Change improve-despacho-bandeja."""
+    return or_(Pedido.modalidad_entrega == "DESPACHO", Pedido.costo_delivery > 0)
+
+
+def _pendientes_despacho(db: Session, current_user, todos_locales: bool = False) -> list:
+    """Pedidos CONFIRMADOS despachables y solicitudes con delivery, sin hoja de ruta asignada."""
     # IDs ya asignados a alguna hoja de ruta
     asignados = db.query(HojaRutaItem.pedido_id).all()
     asignados_ids = {r[0] for r in asignados}
@@ -274,7 +276,7 @@ def listar_pedidos_disponibles(
             Cliente.tenant_id == current_user.tenant_id,
             Pedido.estado_id == estado_confirmado.id,
             ~Pedido.id.in_(asignados_ids) if asignados_ids else True,
-            Pedido.costo_delivery.isnot(None),
+            _filtro_despachable(),
         )
     )
 
@@ -321,6 +323,7 @@ def listar_pedidos_disponibles(
             "fecha_pedido": p.fecha_pedido.isoformat() if p.fecha_pedido else None,
             "local_nombre": local_nombre,
             "local_direccion": local_direccion,
+            "comuna": p.comuna_entrega,
         })
 
     # Solicitudes FINALIZADO con requiere_delivery=True no asignadas a ninguna hoja
@@ -343,6 +346,77 @@ def listar_pedidos_disponibles(
             result.append(_build_solicitud_summary(s))
 
     return result
+
+
+
+
+@router.get("/pedidos-disponibles")
+def listar_pedidos_disponibles(
+    todos_locales: bool = False,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user),
+):
+    """Pedidos CONFIRMADOS sin hoja de ruta asignada (para armar nueva ruta)."""
+    return _pendientes_despacho(db, current_user, todos_locales)
+
+
+@router.get("/bandeja")
+def bandeja_despacho(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_active_user),
+):
+    """Portada de Despacho: contadores, pendientes por despachar y pedidos pagados en línea sin confirmar."""
+    from zoneinfo import ZoneInfo
+    from database.models import PagoOnline
+
+    pendientes = _pendientes_despacho(db, current_user)
+
+    # Pagados en línea que quedaron PENDIENTE (no se pudieron confirmar solos)
+    estado_pendiente = db.query(EstadoPedido).filter(EstadoPedido.codigo == "PENDIENTE").first()
+    pagados = []
+    if estado_pendiente:
+        con_pago_online = (db.query(PagoOnline.pedido_id)
+                           .filter(PagoOnline.tenant_id == current_user.tenant_id, PagoOnline.estado == "CONFIRMADO"))
+        pagados_q = (db.query(Pedido).join(Cliente)
+                     .options(joinedload(Pedido.cliente))
+                     .filter(Cliente.tenant_id == current_user.tenant_id,
+                             Pedido.estado_id == estado_pendiente.id,
+                             Pedido.es_pagado.is_(True),
+                             Pedido.id.in_(con_pago_online))
+                     .order_by(Pedido.fecha_pedido.desc()).all())
+        pagados = [{
+            "id": p.id,
+            "numero_pedido": p.numero_pedido,
+            "cliente_nombre": p.cliente.nombre if p.cliente else None,
+            "monto_total": float(p.monto_total) if p.monto_total else 0,
+            "fecha_pedido": p.fecha_pedido.isoformat() if p.fecha_pedido else None,
+            "comuna": p.comuna_entrega,
+        } for p in pagados_q]
+
+    en_ruta = db.query(func.count(HojaRuta.id)).filter(
+        HojaRuta.tenant_id == current_user.tenant_id, HojaRuta.estado == EstadoHojaRuta.EN_RUTA).scalar() or 0
+
+    # "Hoy" en hora de Chile
+    tz = ZoneInfo("America/Santiago")
+    ahora = datetime.now(tz)
+    inicio_dia = ahora.replace(hour=0, minute=0, second=0, microsecond=0)
+    entregados_hoy = (db.query(func.count(HojaRutaItem.id))
+                      .join(HojaRuta, HojaRuta.id == HojaRutaItem.hoja_ruta_id)
+                      .filter(HojaRuta.tenant_id == current_user.tenant_id,
+                              HojaRutaItem.entregado.is_(True),
+                              HojaRutaItem.fecha_entrega >= inicio_dia)
+                      .scalar() or 0)
+
+    return {
+        "contadores": {
+            "por_despachar": len(pendientes),
+            "pagados_sin_confirmar": len(pagados),
+            "en_ruta": en_ruta,
+            "entregados_hoy": entregados_hoy,
+        },
+        "pendientes": pendientes,
+        "pagados_sin_confirmar": pagados,
+    }
 
 
 @router.post("/")
